@@ -1,0 +1,16 @@
+ARG OCR_RUNTIME_IMAGE=opencodereview-server:latest
+FROM rust:1.88-bookworm AS build
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+COPY Cargo.toml Cargo.lock ./
+COPY backend ./backend
+COPY assets ./assets
+ARG CARGO_TARGET_CACHE=ocr-cargo-target
+RUN --mount=type=cache,id=ocr-cargo-registry,target=/usr/local/cargo/registry,sharing=locked --mount=type=cache,id=${CARGO_TARGET_CACHE},target=/app/target,sharing=locked CARGO_BUILD_JOBS=2 cargo build --locked --release --bin ocr-sandbox && cp /app/target/release/ocr-sandbox /usr/local/bin/ocr-sandbox
+
+FROM ${OCR_RUNTIME_IMAGE}
+RUN chmod -R a+rX /opt/claude /opt/codex /opt/node /opt/gemini /opt/opencode
+COPY --from=build /usr/local/bin/ocr-sandbox /usr/local/bin/ocr-sandbox
+WORKDIR /runner
+ENTRYPOINT ["ocr-sandbox"]
+CMD ["runner"]

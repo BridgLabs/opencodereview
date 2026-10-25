@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+keep="${OCR_DOCKER_CACHE_KEEP:-168h}"
+
+docker builder prune -f --filter "until=${keep}"
+docker image prune -f --filter "until=${keep}"
+docker container prune -f --filter "until=${keep}"

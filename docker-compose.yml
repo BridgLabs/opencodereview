@@ -1,0 +1,134 @@
+name: opencodereview
+
+x-review-image: &review-image
+  image: opencodereview-runner:local
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.runner
+    additional_contexts:
+      ocr_runtime: service:server
+    args:
+      OCR_RUNTIME_IMAGE: ocr_runtime
+
+x-review-runner: &review-runner
+  <<: *review-image
+  restart: unless-stopped
+  command: [runner]
+  init: true
+  read_only: true
+  pids_limit: 128
+  cpus: 1
+  mem_limit: 2g
+  memswap_limit: 2g
+  cap_drop: [ALL]
+  cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, KILL]
+  security_opt: [no-new-privileges:true]
+  environment:
+    OCR_RUNNER_AUTH_ROOT: /claude-auth/app-managed
+    OCR_RUNNER_PROXY: http://review-egress:8790
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+    - /work:size=16m,mode=0755
+    - /evidence:size=512m,mode=0755
+    - /output:size=48m,mode=0777
+    - /scratch:size=128m,mode=0755
+    - /data:size=1m,mode=0700
+  depends_on: [review-egress]
+  healthcheck:
+    test: [CMD-SHELL, "test -S /ipc/$$(hostname).sock"]
+    interval: 5s
+    timeout: 2s
+    retries: 6
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "2"
+
+services:
+  server:
+    restart: unless-stopped
+    init: true
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "127.0.0.1:8787:8787"
+      # Codex browser sign-in redirects to 127.0.0.1:1455; forwarded only while a sign-in runs.
+      - "127.0.0.1:1455:1456"
+    environment:
+      OCR_GH_HOST: ${OCR_GH_HOST:-}
+      OCR_BIND: 0.0.0.0:8787
+      OCR_DATA_DIR: /data
+      OCR_DB_PATH: /data/opencodereview.sqlite
+      OCR_REPOS_DIR: /data/repos
+      OCR_AUTO_REINDEX: "true"
+      OCR_POLL_INTERVAL_SECONDS: "300"
+      OCR_WEB_APP_URL: ${OCR_WEB_APP_URL:-http://localhost:1421}
+      OCR_REVIEW_DEBUG_DIR: ${OCR_REVIEW_DEBUG_DIR:-}
+      OCR_REVIEW_CLAUDE_AUTH_DIR: /review-claude-auth/app-managed
+      # Every runner replica listens on its own socket here; the server finds them on its own.
+      OCR_REVIEW_RUNNER_DIR: /review-ipc
+      OCR_ONBOARDING_HTML_PATH: /app/assets/onboarding.html
+      XDG_CONFIG_HOME: /data/xdg-config
+      XDG_DATA_HOME: /data/xdg-data
+      OCR_CLAUDE_TOKEN_PATH: /data/claude/oauth-token
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ocr-data:/data
+      - review-claude-auth:/review-claude-auth
+      - review-ipc:/review-ipc
+    networks: [default]
+
+  # One isolated container per review stage at a time. Idle runners use almost no memory; set
+  # OCR_REVIEW_RUNNERS to match how many reviews you want running at once.
+  review-runner:
+    <<: *review-runner
+    deploy:
+      replicas: ${OCR_REVIEW_RUNNERS:-20}
+    networks: [review-runner-egress]
+    volumes:
+      - review-ipc:/ipc
+      - review-claude-auth:/claude-auth:ro
+
+  review-egress:
+    <<: *review-image
+    restart: unless-stopped
+    command: [egress]
+    init: true
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    cpus: 0.25
+    mem_limit: 128m
+    memswap_limit: 128m
+    tmpfs:
+      - /tmp:size=16m
+      - /data:size=1m,mode=0700
+    networks: [review-provider-egress, review-runner-egress]
+
+  web:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    depends_on:
+      - server
+    ports:
+      - "1421:1421"
+    volumes:
+      - ocr-data:/data:ro
+
+networks:
+  default:
+  review-provider-egress:
+  review-runner-egress:
+    internal: true
+
+volumes:
+  review-claude-auth:
+  review-ipc:
+  ocr-data:

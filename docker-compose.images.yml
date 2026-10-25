@@ -1,0 +1,19 @@
+# Runs the images that the Release workflow publishes, instead of building them:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.images.yml up -d
+#
+# OCR_VERSION picks a release (for example 0.2.0); the default is the newest one. `pull_policy:
+# always` fetches the image on every `up`, so a new release arrives with the next restart.
+x-runner-image: &runner-image
+  image: ghcr.io/bpinheiroms/opencodereview-runner:${OCR_VERSION:-latest}
+  pull_policy: always
+
+services:
+  server:
+    image: ghcr.io/bpinheiroms/opencodereview-server:${OCR_VERSION:-latest}
+    pull_policy: always
+  review-runner: *runner-image
+  review-egress: *runner-image
+  web:
+    image: ghcr.io/bpinheiroms/opencodereview-web:${OCR_VERSION:-latest}
+    pull_policy: always
