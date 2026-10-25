@@ -121,7 +121,7 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before openin
 
 Copyright 2026 Bruno Silva.
 
-Licensed under the [PolyForm Small Business License 1.0.0](LICENSE). Individuals and companies with fewer than 100 people (employees and contractors) and less than USD 1,000,000 in revenue in the prior tax year (2019 dollars, adjusted for inflation) may use, modify and distribute it for free. Larger companies, counted together with the organizations they control or are controlled by, need a separate commercial license from the copyright owner. For a commercial license, or help rolling it out across a company, contact [bpinheiroms@gmail.com](mailto:bpinheiroms@gmail.com).
+Licensed under the [PolyForm Small Business License 1.0.0](LICENSE). Individuals and companies with fewer than 100 people (employees and contractors) and less than USD 1,000,000 in revenue in the prior tax year (2019 dollars, adjusted for inflation) may use, modify and distribute it for free. Larger companies, counted together with the organizations they control or are controlled by, need a separate commercial license from the copyright owner. For a commercial license, or help rolling it out across a company, contact [contato@bridglabs.com](mailto:contato@bridglabs.com).
 
 See [NOTICE](NOTICE) for attribution and third-party notices.
 

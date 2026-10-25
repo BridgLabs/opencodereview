@@ -93,7 +93,7 @@ if (contact) {
       "",
       data.get("message") || "",
     ].join("\n");
-    location.href = `mailto:bpinheiroms@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    document.getElementById("contact-note").textContent = "Your email app should open now. If it doesn't, write to bpinheiroms@gmail.com.";
+    location.href = `mailto:contato@bridglabs.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    document.getElementById("contact-note").textContent = "Your email app should open now. If it doesn't, write to contato@bridglabs.com.";
   });
 }
