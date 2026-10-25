@@ -1,0 +1,312 @@
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc, Condvar, Mutex,
+};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime};
+
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
+use crate::db::{Database, Repo, ReviewResult, ReviewResultInput};
+use crate::state::{IndexProgressEvent, ReviewJob};
+use crate::{github, indexer, local, review};
+
+mod comment_activation;
+mod http;
+mod routes;
+mod runtime;
+mod stream;
+use comment_activation::*;
+
+mod accounts;
+mod claude_auth;
+mod codex_auth;
+mod gemini_auth;
+mod indexing;
+mod opencode_auth;
+mod polling;
+mod publication;
+mod queue_acknowledgements;
+mod response;
+mod review_http;
+mod review_jobs;
+mod status_comments;
+mod summary;
+mod workspace;
+
+pub(crate) use accounts::*;
+pub(crate) use claude_auth::*;
+pub(crate) use codex_auth::*;
+pub(crate) use gemini_auth::*;
+pub(crate) use http::*;
+pub(crate) use indexing::*;
+pub(crate) use opencode_auth::*;
+pub(crate) use polling::*;
+pub(crate) use publication::*;
+pub(crate) use queue_acknowledgements::*;
+pub(crate) use response::*;
+pub(crate) use review_http::*;
+pub(crate) use review_jobs::*;
+pub(crate) use routes::*;
+pub(crate) use runtime::*;
+pub(crate) use status_comments::*;
+pub(crate) use stream::*;
+pub(crate) use summary::*;
+pub(crate) use workspace::*;
+#[cfg(test)]
+mod progress_tests;
+
+const OCR_REPOSITORY_URL: &str = "https://github.com/bpinheiroms/opencodereview";
+
+/// Closing line of every visible OpenCodeReview comment. Reviews post from the
+/// user's own GitHub account, so each one says where it came from.
+fn ocr_footer() -> String {
+    format!("<sub>Reviewed by [OpenCodeReview]({OCR_REPOSITORY_URL}), source-available AI code review with the AI account you already have.</sub>")
+}
+
+#[derive(Clone)]
+pub struct ServerConfig {
+    pub bind: String,
+    pub db_path: PathBuf,
+    pub repos_dir: PathBuf,
+    pub auto_reindex: bool,
+    pub poll_interval_seconds: u64,
+    pub api_token: Option<String>,
+}
+
+impl ServerConfig {
+    pub fn from_env() -> Self {
+        let data_dir = std::env::var("OCR_DATA_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("data"));
+        Self {
+            bind: std::env::var("OCR_BIND").unwrap_or_else(|_| "127.0.0.1:8787".to_string()),
+            db_path: std::env::var("OCR_DB_PATH")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| data_dir.join("opencodereview.sqlite")),
+            repos_dir: std::env::var("OCR_REPOS_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| data_dir.join("repos")),
+            auto_reindex: std::env::var("OCR_AUTO_REINDEX")
+                .map(|value| value != "false" && value != "0")
+                .unwrap_or(true),
+            poll_interval_seconds: std::env::var("OCR_POLL_INTERVAL_SECONDS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(300),
+            api_token: std::env::var("OCR_API_TOKEN")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .or_else(|| resolve_persisted_token(&data_dir)),
+        }
+    }
+}
+
+pub(crate) struct ServerState {
+    pub(crate) config: ServerConfig,
+    index_jobs: Arc<Mutex<HashMap<i64, Arc<AtomicBool>>>>,
+    index_progress: Arc<Mutex<HashMap<i64, IndexProgressEvent>>>,
+    review_jobs: Arc<Mutex<HashMap<i64, ReviewJob>>>,
+    github_auth_cancel: Arc<Mutex<Option<Arc<AtomicBool>>>>,
+    github_auth_events: Arc<Mutex<Vec<serde_json::Value>>>,
+    github_auth_flow_secret: Arc<Mutex<Option<String>>>,
+    poll_running: Arc<AtomicBool>,
+    review_sse_connections: AtomicUsize,
+    pub(crate) archive_leases: crate::review_archive::retention::ArchiveLeaseTracker,
+    pub(crate) archive_storage_status: Arc<Mutex<crate::review_archive::retention::ArchiveStorageStatus>>,
+    pub(crate) retention_worker_notify: Arc<(Mutex<bool>, Condvar)>,
+}
+
+pub(crate) type SharedState = Arc<ServerState>;
+
+impl ServerState {
+    pub(crate) fn new(config: ServerConfig) -> Self {
+        Self {
+            config,
+            index_jobs: Arc::new(Mutex::new(HashMap::new())),
+            index_progress: Arc::new(Mutex::new(HashMap::new())),
+            review_jobs: Arc::new(Mutex::new(HashMap::new())),
+            github_auth_cancel: Arc::new(Mutex::new(None)),
+            github_auth_events: Arc::new(Mutex::new(Vec::new())),
+            github_auth_flow_secret: Arc::new(Mutex::new(None)),
+            poll_running: Arc::new(AtomicBool::new(false)),
+            review_sse_connections: AtomicUsize::new(0),
+            archive_leases: crate::review_archive::retention::ArchiveLeaseTracker::new(),
+            archive_storage_status: Arc::new(Mutex::new(
+                crate::review_archive::retention::ArchiveStorageStatus::default(),
+            )),
+            retention_worker_notify: Arc::new((Mutex::new(false), Condvar::new())),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HealthResponse {
+    ok: bool,
+    message: String,
+    db_path: String,
+    repos_dir: String,
+    github: ToolStatus,
+    git: ToolStatus,
+    claude: ToolStatus,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ToolStatus {
+    ok: bool,
+    detail: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SelectWorkspacesRequest {
+    logins: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AuthStartRequest {
+    action: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SaveSettingRequest {
+    key: String,
+    value: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SubscribeRepoRequest {
+    enabled: bool,
+    skip_draft_prs: Option<bool>,
+    skip_self_prs: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StartReviewRequest {
+    force_full: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DecideReviewRequest {
+    decision: String,
+    run_id: Option<i64>,
+    selection_revision: Option<i64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FindingSelectionRequest {
+    revision: i64,
+    selected_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CreateSkillVersionRequest {
+    content: String,
+    note: Option<String>,
+}
+
+fn resolve_persisted_token(data_dir: &Path) -> Option<String> {
+    let token_path = data_dir.join("api-token");
+    if let Ok(existing) = std::fs::read_to_string(&token_path) {
+        let existing = existing.trim().to_string();
+        if !existing.is_empty() {
+            return Some(existing);
+        }
+    }
+    let mut file = std::fs::File::open("/dev/urandom").ok()?;
+    let mut bytes = [0u8; 32];
+    Read::read_exact(&mut file, &mut bytes).ok()?;
+    let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let _ = std::fs::create_dir_all(data_dir);
+    if let Err(err) = std::fs::write(&token_path, &token) {
+        eprintln!("ERROR: could not persist API token to {}: {err}", token_path.display());
+        return None;
+    }
+    Some(token)
+}
+
+pub fn run_from_env() -> Result<(), String> {
+    run(ServerConfig::from_env())
+}
+
+pub fn run(config: ServerConfig) -> Result<(), String> {
+    std::fs::create_dir_all(&config.repos_dir).map_err(|error| error.to_string())?;
+    let db = Database::open_at(config.db_path.clone())?;
+    db.reconcile_interrupted_jobs()?;
+    crate::accounts::adopt_legacy_token(&db)?;
+    drop(db);
+    cleanup_runtime_artifacts();
+
+    let state = Arc::new(ServerState::new(config.clone()));
+    if config.auto_reindex {
+        start_reindex_worker(state.clone());
+    }
+    start_review_result_reconciliation(config.db_path.clone(), config.repos_dir.clone());
+    start_review_request_restoration(config.db_path.clone());
+    start_poll_scheduler(state.clone());
+    start_runtime_cleanup_worker();
+    crate::review_archive::retention::start_archive_retention_worker(state.clone());
+
+    if config.api_token.is_none() {
+        eprintln!("WARNING: OCR_API_TOKEN is not set — all authenticated endpoints will reject requests");
+    }
+
+    let listener =
+        TcpListener::bind(&config.bind).map_err(|error| format!("could not bind {}: {error}", config.bind))?;
+    if config.api_token.is_some() {
+        println!("API authentication enabled");
+    } else {
+        return Err(
+            "API token required: set OCR_API_TOKEN or ensure the data directory is writable for auto-generation"
+                .to_string(),
+        );
+    }
+    println!("OpenCodeReview server listening on http://{}", config.bind);
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                let state = state.clone();
+                thread::spawn(move || {
+                    if let Err(error) = handle_stream(stream, state) {
+                        eprintln!("request failed: {error}");
+                    }
+                });
+            }
+            Err(error) => eprintln!("connection failed: {error}"),
+        }
+    }
+    Ok(())
+}
+
+pub(crate) struct Request {
+    method: String,
+    path: String,
+    origin: Option<String>,
+    authorization: Option<String>,
+    content_type: Option<String>,
+    flow_secret: Option<String>,
+    body: Vec<u8>,
+}
+
+pub(crate) struct Response {
+    status: u16,
+    content_type: &'static str,
+    body: Vec<u8>,
+}
+
+#[cfg(test)]
+mod tests;
