@@ -1,0 +1,60 @@
+#!/bin/sh
+# Fast checks on the staged files only; CI runs the full suites. `pnpm install` enables this hook
+# (core.hooksPath=.githooks). Skip it once with `git commit --no-verify`.
+set -eu
+
+repository_root=$(git rev-parse --show-toplevel)
+cd "$repository_root"
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+# The formatters fix the working-tree copy, and staging that copy again would also stage edits the
+# author left unstaged. Only fully staged files are staged again; a partly staged file that a
+# formatter changes stops the commit so the author can choose which fixes to stage.
+git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR >"$work/staged"
+git -c core.quotePath=false diff --name-only >"$work/unstaged"
+grep -Fx -f "$work/unstaged" "$work/staged" >"$work/partly-staged" || true
+grep -Fxv -f "$work/partly-staged" "$work/staged" >"$work/fully-staged" || true
+
+hash_partly_staged() {
+  while IFS= read -r path; do
+    printf '%s %s\n' "$(git hash-object -- "$path" 2>/dev/null || echo missing)" "$path"
+  done <"$work/partly-staged"
+}
+
+hash_partly_staged >"$work/before"
+
+echo "Biome on staged files..."
+pnpm --silent check:staged
+
+grep -E '^backend/.*\.rs$' "$work/staged" >"$work/rust" || true
+if [ -s "$work/rust" ]; then
+  echo "rustfmt on staged Rust files..."
+  tr '\n' '\0' <"$work/rust" | xargs -0 rustfmt --edition 2021
+fi
+
+hash_partly_staged >"$work/after"
+
+if [ -s "$work/fully-staged" ]; then
+  tr '\n' '\0' <"$work/fully-staged" | xargs -0 git add --
+fi
+
+if ! cmp -s "$work/before" "$work/after"; then
+  echo "The formatters changed files that also have unstaged edits:" >&2
+  diff "$work/before" "$work/after" | sed -n 's/^> [^ ]* /  /p' >&2
+  echo "Stage the fixes you want to commit, then commit again." >&2
+  exit 1
+fi
+
+grep -E '^changelog\.d/.+\.md$' "$work/staged" | grep -vFx changelog.d/README.md >"$work/notes" || true
+if [ -s "$work/notes" ]; then
+  echo "Checking release notes..."
+  tr '\n' '\0' <"$work/notes" | xargs -0 node scripts/changelog.mjs check
+fi
+
+# Text-only commits, such as docs, cannot change a type.
+if grep -Eq '\.(ts|tsx|mts|cts)$|(^|/)(tsconfig[^/]*|package)\.json$|^pnpm-lock\.yaml$' "$work/staged"; then
+  echo "Type check..."
+  pnpm --silent typecheck
+fi

@@ -1,0 +1,95 @@
+name: Provider CLI canary
+
+# The image pins each AI CLI (docker/Dockerfile). This run builds it with the newest Claude Code,
+# Codex, Gemini and OpenCode releases instead, so a release that breaks reviews shows up before
+# anyone bumps a pin: the install and version checks in the Dockerfile, every flag the providers
+# pass, the runner sandbox smoke, and one real prompt on OpenCode's free model. It needs no
+# account and makes no paid call (docker/provider-cli-canary.py).
+#
+# The `alert` job opens one issue on the second failed run in a row, because a free model can be
+# busy for one run, and closes it after a run that passes.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: provider-cli-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    name: Newest provider CLIs
+    if: github.repository == 'bpinheiroms/opencodereview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the newest releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B docker/provider-cli-canary.py resolve > "$RUNNER_TEMP/cli-versions.env"
+
+      - name: Build the images with the newest CLIs
+        run: |
+          build_args=()
+          while IFS= read -r line; do build_args+=(--build-arg "$line"); done < "$RUNNER_TEMP/cli-versions.env"
+          docker build -f docker/Dockerfile "${build_args[@]}" -t opencodereview-server:canary .
+          docker build -f docker/Dockerfile.runner --build-arg OCR_RUNTIME_IMAGE=opencodereview-server:canary \
+            -t opencodereview-runner:local .
+
+      - name: Check the flags each provider passes
+        run: python3 -B docker/provider-cli-canary.py flags opencodereview-server:canary
+
+      - name: Runner sandbox smoke
+        run: python3 -u docker/runner-smoke.py
+
+      - name: One prompt on OpenCode's free model
+        run: python3 -B docker/provider-cli-canary.py opencode opencodereview-server:canary
+
+  alert:
+    name: Report a failed canary
+    needs: canary
+    if: always() && github.repository == 'bpinheiroms/opencodereview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: Open or close the alert issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ needs.canary.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Provider CLI canary fails"
+          open=$(gh issue list --state open --author 'app/github-actions' --search "\"$title\" in:title" \
+            --json number,title --jq "[.[] | select(.title == \"$title\")][0].number // empty")
+          if [ "$RESULT" = success ]; then
+            if [ -n "$open" ]; then
+              gh issue close "$open" --comment "The canary passes again: $RUN_URL"
+            fi
+            exit 0
+          fi
+          [ "$RESULT" = failure ] || exit 0
+          [ -z "$open" ] || exit 0
+          previous=$(gh run list --workflow provider-cli-canary.yml --status completed --limit 5 \
+            --json databaseId,conclusion --jq "[.[] | select(.databaseId != $GITHUB_RUN_ID)][0].conclusion // empty")
+          if [ "$previous" != failure ]; then
+            echo "First failure in a row; the issue opens if the next run fails too."
+            exit 0
+          fi
+          gh issue create --title "$title" --body "The newest provider CLIs failed the canary twice in a row. Latest run: $RUN_URL
+
+          Find the step that failed. When a new release breaks reviews, keep its current pin in docker/Dockerfile until the provider code handles it."

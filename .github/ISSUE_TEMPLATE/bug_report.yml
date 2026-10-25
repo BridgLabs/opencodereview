@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in OpenCodeReview does not work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search existing issues first.
+        Do not report security vulnerabilities here; see the security policy instead.
+        Remove tokens, private repository names and source code from logs before pasting them.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `docker compose up --build`
+        2. Open http://localhost:1421/platform/reviews
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Onboarding and sign-in
+        - Reviews
+        - Publishing on GitHub
+        - Indexing
+        - Skills
+        - Settings and accounts
+        - Docker and installation
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: AI provider
+      options:
+        - Claude
+        - ChatGPT (Codex)
+        - Both
+        - Not related
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git rev-parse --short HEAD` in your clone.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Docker version (`docker version`), Compose version (`docker compose version`), github.com or GitHub Enterprise.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant output from `docker compose logs server` or the browser console. Redact anything sensitive.
+      render: shell

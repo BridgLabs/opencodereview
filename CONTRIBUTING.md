@@ -1,0 +1,102 @@
+# Contributing to OpenCodeReview
+
+Thanks for your interest in improving OpenCodeReview. This guide explains how to propose a change and get it merged.
+
+By participating you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [SECURITY.md](SECURITY.md), not in public issues.
+
+## Before you start
+
+- **Bugs:** search the [existing issues](https://github.com/bpinheiroms/opencodereview/issues) first, then open a bug report with steps to reproduce.
+- **Features and larger changes:** open a feature request or discussion before writing code, so we can agree on the approach. Changes that add product areas, model providers or settings need a product decision first.
+- **Small fixes** (typos, docs, obvious bugs) can go straight to a pull request.
+
+## Workflow
+
+`main` is protected. Nobody pushes to it directly, maintainers included. Every change lands through a pull request that:
+
+- passes the required `check` status in CI,
+- has one approving review from a code owner,
+- has all review conversations resolved,
+- is squash-merged, so the pull request title becomes the commit on `main`.
+
+Steps:
+
+1. Fork the repository and clone your fork.
+2. Create a branch from `main` with a descriptive name, for example `fix/indexing-go-imports` or `feat/review-summary-links`.
+3. Make your change with tests, and update the docs when behavior changes.
+4. Run the checks below.
+5. Commit using [Conventional Commits](https://www.conventionalcommits.org/).
+6. Push your branch and open a pull request against `main`, filling in the template.
+7. Address review feedback with new commits on the same branch. Do not force-push after review has started unless asked.
+
+## Development setup
+
+You need Docker with Compose v2, Node 22, pnpm 10, a stable Rust toolchain and Python 3.
+
+```bash
+git clone https://github.com/<you>/opencodereview && cd opencodereview
+pnpm install
+docker compose up --build          # full stack on http://localhost:1421
+pnpm debug:web                     # optional: hot-reload frontend against the Docker backend
+```
+
+Use pnpm only. Do not commit `package-lock.json`, `yarn.lock` or `bun.lock`. More detail is in [docs/development.md](docs/development.md).
+
+`pnpm install` turns on the pre-commit hook in `.githooks/`. On each commit it formats the staged files with Biome and rustfmt, validates staged release notes, and type-checks when TypeScript is staged. CI runs everything else.
+
+## Checks
+
+Run the checks that match what you changed:
+
+```bash
+# Frontend
+pnpm lint:fix
+pnpm knip
+pnpm typecheck
+pnpm test
+pnpm build
+
+# Backend
+cargo fmt --all
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+
+# Dependencies (when you change Cargo.lock or pnpm-lock.yaml)
+cargo deny check
+pnpm audit --audit-level high
+
+# Repository
+pnpm check:file-size
+pnpm changelog:check
+docker compose config --quiet
+python3 -B docker/test_diagnostics.py
+python3 -B docker/test-web-proxy.py
+```
+
+If you changed the runner, egress or Dockerfiles, build the images and run `python3 -u docker/runner-smoke.py` (fake inference, no credentials needed).
+
+Do not include real AI calls in tests. Never commit credentials, tokens, `.env` files or SQLite databases, and keep test fixtures free of real customer or repository data.
+
+## Commit messages
+
+```text
+<type>(<scope>): <summary>
+```
+
+Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`, `revert`. Write the summary in the imperative mood without a trailing period, for example `fix(indexing): resolve tsconfig path aliases`. Mark breaking changes with `!` and a `BREAKING CHANGE:` footer. Because pull requests are squash-merged, the pull request title must follow the same format.
+
+Do not add AI tool attribution (such as `Generated with` footers or AI `Co-Authored-By` trailers) to commits or pull requests.
+
+## Code guidelines
+
+- Match the existing architecture and naming; read [AGENTS.md](AGENTS.md) for the project rules.
+- Frontend source files stay under 800 lines and Rust files under 2,500 lines.
+- Keep changes focused. Unrelated refactors belong in separate pull requests.
+- Add or update tests for behavior changes.
+- Write release notes for user-visible changes in `changelog.d/<branch>.md` (see [changelog.d/README.md](changelog.d/README.md)), not in `CHANGELOG.md`. A pull request with no user-visible change gets the `no-changelog` label.
+
+## License
+
+OpenCodeReview is licensed under the [PolyForm Small Business License 1.0.0](LICENSE). The maintainer also offers it under a commercial license to companies above its size limits.
+
+To offer both, the maintainer must own the copyright in all of the code. Every contributor signs the [Contributor Assignment Agreement](CLA.md) once, which assigns the copyright in their contributions to the maintainer. On your first pull request a bot asks you to sign it by replying with a comment, and pull requests can only be merged after that.

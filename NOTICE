@@ -1,0 +1,10 @@
+OpenCodeReview
+Copyright 2026 Bruno Silva
+
+This product includes software developed by Bruno Silva.
+
+For a commercial license, contact bpinheiroms@gmail.com.
+
+OpenCodeReview runs the Claude Code, Codex, Gemini and OpenCode CLIs inside its Docker containers.
+These CLIs are installed from their vendors when the image is built and are covered by their own
+licenses.
