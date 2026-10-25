@@ -1,0 +1,938 @@
+/* Flow node states */
+.review-flow-node {
+  --review-flow-node-border: var(--border);
+  --review-flow-node-hover-border: color-mix(in srgb, var(--accent-hover) 70%, var(--border));
+}
+
+.review-flow-node:hover,
+.review-flow-node:focus-visible,
+.review-flow-node-selected {
+  border-color: var(--review-flow-node-hover-border);
+}
+
+/* Review flow canvas (React Flow) */
+button,
+input,
+select,
+textarea {
+  font-size: 0.8125rem;
+}
+
+input,
+select,
+textarea {
+  border-color: var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface-2) 82%, transparent);
+}
+
+.react-flow__node,
+.react-flow__edge-path {
+  transition: none;
+}
+
+.review-flow {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.review-flow-canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface-1));
+}
+
+.review-flow .react-flow {
+  color: var(--text-1);
+}
+
+.review-flow .react-flow__background pattern path {
+  stroke: color-mix(in srgb, var(--border-strong) 62%, transparent);
+}
+
+.review-flow .react-flow__controls {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow);
+}
+
+.review-flow .react-flow__controls-button {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-2);
+  fill: var(--text-2);
+}
+
+.review-flow .react-flow__controls-button:last-child {
+  border-bottom: 0;
+}
+
+.review-flow .react-flow__controls-button:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+  fill: var(--text-1);
+}
+
+.review-flow .react-flow__attribution {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface-1) 82%, transparent);
+  color: var(--text-3);
+}
+
+.review-flow .react-flow__edge-path {
+  stroke: var(--border-strong);
+  stroke-width: 1.6;
+}
+
+@keyframes review-flow-dashes {
+  to {
+    stroke-dashoffset: -9;
+  }
+}
+
+.review-flow-node {
+  --review-flow-node-border: var(--border);
+  --review-flow-node-hover-border: color-mix(in srgb, var(--accent-hover) 70%, var(--border));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 216px;
+  min-height: 92px;
+  padding: 11px;
+  border: 1px solid var(--review-flow-node-border);
+  border-radius: 13px;
+  background: var(--surface-1);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--bg) 20%, transparent);
+  color: var(--text-1);
+  cursor: pointer;
+  outline: none;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+
+.review-flow-node:hover,
+.review-flow-node:focus-visible,
+.review-flow-node-selected {
+  border-color: var(--review-flow-node-hover-border);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 10px 24px color-mix(in srgb, var(--bg) 25%, transparent);
+  transform: translateY(-1px);
+}
+
+.review-flow-control {
+  width: 48px;
+  height: 48px;
+}
+.review-flow-control button {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-1);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--bg) 25%, transparent);
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+.review-flow-control button:hover:not(:disabled),
+.review-flow-control button:focus-visible:not(:disabled) {
+  background: var(--accent-hover);
+  color: var(--accent-text);
+  border-color: var(--accent-hover);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent),
+    0 6px 18px color-mix(in srgb, var(--bg) 35%, transparent);
+  transform: translateY(-1px);
+}
+.review-flow-control button:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.review-flow-control button:focus-visible {
+  outline: 2px solid var(--accent-hover);
+  outline-offset: 4px;
+}
+.review-flow-control button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.review-flow-result {
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-1));
+}
+.review-flow-result-detail {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 0.66rem;
+  line-height: 1.4;
+}
+
+.review-flow-node-icon {
+  position: relative;
+  display: grid;
+  width: 29px;
+  height: 29px;
+  flex: none;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.review-flow-node-label {
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-flow-node-status {
+  margin-top: 3px;
+  color: var(--text-3);
+  font-size: 0.68rem;
+  font-weight: 650;
+}
+.review-flow-result .review-flow-node-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.review-flow-result .review-flow-node-label svg {
+  flex: none;
+  color: var(--text-2);
+}
+.review-flow-result .review-flow-node-status {
+  color: var(--text-2);
+}
+
+@keyframes review-flow-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.review-flow-handle {
+  width: 8px;
+  height: 8px;
+  border: 0;
+  background: var(--accent-hover);
+  opacity: 0;
+}
+
+.review-flow-hint {
+  position: absolute;
+  top: 18px;
+  left: 20px;
+  color: var(--text-3);
+  font-size: 0.72rem;
+  pointer-events: none;
+}
+
+.review-flow-node-content {
+  flex: 1;
+}
+.review-flow-chunk-group {
+  width: 100%;
+  height: 100%;
+  align-items: flex-start;
+  padding: 14px 12px;
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface-1));
+}
+.review-flow-chunk-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.review-flow-chunk-heading:focus-visible {
+  outline: 2px solid var(--accent-hover);
+  outline-offset: 4px;
+}
+.review-flow-chunk-heading > .review-flow-node-icon {
+  margin-top: 3px;
+}
+.review-flow-chunk-counts {
+  margin-top: 10px;
+  color: var(--text-2);
+  font-size: 0.66rem;
+  line-height: 1.5;
+}
+.review-flow-chunk-node {
+  width: 100%;
+  height: 100%;
+  min-height: 92px;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  box-shadow: none;
+}
+.review-flow-chunk-node .review-flow-node-icon {
+  width: 24px;
+  height: 24px;
+}
+.review-flow-chunk-number {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  display: grid;
+  min-width: 14px;
+  height: 14px;
+  place-items: center;
+  padding: 0 3px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: inherit;
+  font-size: 0.54rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.review-flow-chunk-node .review-flow-chunk-number {
+  right: -5px;
+  bottom: -5px;
+  min-width: 13px;
+  height: 13px;
+}
+.review-flow-chunk-node .review-flow-node-label {
+  font-size: 0.75rem;
+}
+
+.review-flow-node-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--text-2);
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+}
+.review-flow-node-metrics span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.review-run-result-summary h2,
+.review-run-stacked-summary h2 {
+  font-size: 0.78rem;
+}
+.review-run-result-summary p,
+.review-run-stacked-summary p {
+  margin-top: 5px;
+  font-size: 0.68rem;
+}
+.review-run-usage > div:first-child {
+  align-items: center;
+}
+.review-run-usage .text-2xl {
+  font-size: 1.25rem;
+}
+.review-run-risk {
+  border-color: color-mix(in srgb, var(--warning) 55%, var(--border));
+}
+
+.review-run-risk summary p {
+  margin-top: 5px;
+  font-size: 0.72rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-flow-control button:hover:not(:disabled),
+  .review-flow-control button:focus-visible:not(:disabled),
+  .review-flow-control button:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .review-flow-canvas {
+    min-height: 240px;
+  }
+}
+
+@keyframes onboarding-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Rendered markdown and context audit */
+/* Markdown content from PR comments can be arbitrary — keep it inside the pane:
+   constrain images, wrap long words/paths, and scroll wide code/tables internally. */
+
+.md-image-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-2);
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+
+.md-image-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.context-audit {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.context-audit > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.context-audit > summary::-webkit-details-marker {
+  display: none;
+}
+
+.context-audit > summary::after {
+  content: "▸";
+  margin-left: auto;
+  color: var(--text-3);
+}
+
+.context-audit[open] > summary::after {
+  content: "▾";
+}
+
+/* Inline SHAs flow within the sentence (override global `code{display:block}`). */
+.context-audit code {
+  display: inline;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text-3) 14%, transparent);
+}
+
+.context-audit .context-range {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-3);
+  word-break: break-all;
+  background: transparent;
+  padding: 0;
+}
+
+/* Rendered markdown (review summary + inline comments) */
+.markdown {
+  color: var(--text-1);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 14px 0 6px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.markdown h1 {
+  font-size: 1.1rem;
+}
+.markdown h2 {
+  font-size: 1rem;
+}
+.markdown h3 {
+  font-size: 0.9rem;
+}
+.markdown h4 {
+  font-size: 0.85rem;
+  color: var(--text-2);
+}
+
+/* biome-ignore lint/style/noDescendingSpecificity: unrelated to `.review-run-risk summary p`, which never wraps Markdown */
+.markdown p {
+  margin: 6px 0;
+}
+
+.markdown a {
+  color: var(--accent);
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.markdown li {
+  margin: 2px 0;
+}
+
+.markdown code {
+  /* Override the global `code { display:block }` reset so inline code flows
+     within the sentence instead of taking its own full-width line. */
+  display: inline;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.markdown pre code {
+  display: block;
+}
+
+.markdown pre {
+  margin: 8px 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  /* Shrink-to-fit so a one-token code block isn't a full-width box; wide code
+     still caps at the container and scrolls horizontally inside. */
+  width: fit-content;
+  max-width: 100%;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: transparent;
+  line-height: 1.55;
+}
+
+.markdown table {
+  width: 100%;
+  margin: 8px 0;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.markdown th,
+.markdown td {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.markdown blockquote {
+  margin: 8px 0;
+  padding: 2px 12px;
+  border-left: 3px solid var(--border);
+  color: var(--text-2);
+}
+
+.markdown details {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.markdown details[open] {
+  padding-bottom: 4px;
+}
+
+.markdown summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-weight: 600;
+  list-style: revert;
+}
+
+.markdown summary:hover {
+  color: var(--text-1);
+}
+
+.markdown details > :not(summary) {
+  margin-top: 8px;
+}
+
+/* override the global ".pending-row span { display:block }" for the meta line */
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced motion must override every component and utility animation */
+    animation: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced motion must override every component and utility animation */
+    transition: none !important;
+  }
+}
+
+@keyframes mission-pulse {
+  0% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.45;
+  }
+}
+
+@media (max-width: 1100px) {
+  body {
+    overflow: auto;
+  }
+
+  .page {
+    padding: 0;
+  }
+}
+
+/* Skill editor document (TipTap) */
+.skill-editor-document.markdown {
+  min-height: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 36px 48px 80px;
+  outline: none;
+  font-size: 0.875rem;
+  line-height: 1.8;
+}
+.skill-editor-document.markdown:focus-visible {
+  box-shadow: inset 2px 0 color-mix(in srgb, var(--accent-hover) 40%, transparent);
+}
+.skill-editor-document.markdown h1 {
+  margin: 0 0 20px;
+  font-size: 1.65rem;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+}
+.skill-editor-document.markdown h2 {
+  margin: 32px 0 12px;
+  font-size: 1.2rem;
+  letter-spacing: -0.025em;
+}
+.skill-editor-document.markdown h3 {
+  margin: 24px 0 10px;
+  font-size: 1rem;
+}
+.skill-editor-document.markdown h4,
+.skill-editor-document.markdown h5,
+.skill-editor-document.markdown h6 {
+  margin: 20px 0 8px;
+  color: var(--text-1);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.skill-editor-document.markdown p {
+  margin: 10px 0;
+}
+.skill-editor-document.markdown ul {
+  list-style: disc;
+}
+.skill-editor-document.markdown ol {
+  list-style: decimal;
+}
+.skill-editor-document.markdown ul,
+.skill-editor-document.markdown ol {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+.skill-editor-document.markdown li {
+  margin: 5px 0;
+}
+.skill-editor-document.markdown li p {
+  margin: 4px 0;
+}
+.skill-editor-document.markdown pre {
+  width: 100%;
+  margin: 18px 0;
+  white-space: pre-wrap;
+}
+.skill-editor-document.markdown pre code {
+  white-space: pre-wrap;
+}
+.skill-editor-document.markdown hr {
+  margin: 28px 0;
+  border-color: var(--border);
+}
+.skill-editor-document.markdown .selectedCell {
+  background: var(--surface-3);
+}
+.skill-editor-document.markdown .skill-raw-markdown {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  color: var(--text-2);
+}
+.skill-editor-document.markdown ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+.skill-editor-document.markdown li[data-type="taskItem"] {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.skill-editor-document.markdown li[data-type="taskItem"] > div {
+  min-width: 0;
+  flex: 1;
+}
+.skill-editor-document.markdown li[data-type="taskItem"] > label {
+  flex: none;
+}
+.skill-editor-document.markdown input[type="checkbox"] {
+  accent-color: var(--accent-hover);
+}
+
+@media (max-width: 1100px) {
+  .skill-editor-document.markdown {
+    padding: 28px 28px 60px;
+  }
+}
+
+@media (max-width: 800px) {
+  .skill-editor-document.markdown {
+    padding: 24px 20px 48px;
+  }
+}
+
+/* Flow node, edge and status states */
+.review-flow-status-pill {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+.review-flow .review-flow-edge-completed .react-flow__edge-path {
+  stroke: var(--success);
+}
+.review-flow .review-flow-edge-running .react-flow__edge-path {
+  stroke: var(--accent-hover);
+  stroke-width: 2.4;
+  stroke-dasharray: 2 7;
+  stroke-linecap: round;
+  animation: review-flow-dashes 650ms linear infinite;
+}
+.review-flow .review-flow-edge-awaiting_action .react-flow__edge-path {
+  stroke: var(--warning);
+  stroke-width: 2.2;
+}
+.review-flow .review-flow-edge-failed .react-flow__edge-path {
+  stroke: var(--danger);
+  stroke-width: 2.2;
+}
+.review-flow .review-flow-edge-cancelled .react-flow__edge-path,
+.review-flow .review-flow-edge-superseded .react-flow__edge-path {
+  stroke: var(--warning);
+}
+.review-flow-control-stop button {
+  background: var(--surface-1);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.review-flow-control-stop button:hover:not(:disabled),
+.review-flow-control-stop button:focus-visible:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface-1));
+  color: var(--danger);
+  border-color: var(--danger);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--danger) 22%, transparent),
+    0 6px 18px color-mix(in srgb, var(--bg) 35%, transparent);
+  outline-color: var(--danger);
+}
+.review-flow-node-running {
+  --review-flow-node-border: var(--accent-hover);
+  --review-flow-node-hover-border: var(--accent-hover);
+  border: 2px dotted var(--review-flow-node-border);
+}
+.review-flow-node-running .review-flow-node-icon {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface-2));
+  color: var(--accent-hover);
+}
+.review-flow-node-awaiting_action {
+  --review-flow-node-border: color-mix(in srgb, var(--warning) 55%, var(--border));
+  --review-flow-node-hover-border: color-mix(in srgb, var(--warning) 75%, var(--border));
+  border-color: var(--review-flow-node-border);
+}
+.review-flow-node-awaiting_action .review-flow-node-icon {
+  background: color-mix(in srgb, var(--warning) 18%, var(--surface-2));
+  color: var(--warning);
+}
+.review-flow-node-completed {
+  --review-flow-node-border: color-mix(in srgb, var(--success) 45%, var(--border));
+  --review-flow-node-hover-border: color-mix(in srgb, var(--success) 65%, var(--border));
+  border-color: var(--review-flow-node-border);
+}
+.review-flow-node-completed .review-flow-node-icon {
+  background: color-mix(in srgb, var(--success) 16%, var(--surface-2));
+  color: var(--success);
+}
+.review-flow-result.review-flow-node-completed {
+  background: color-mix(in srgb, var(--success) 5%, var(--surface-1));
+}
+.review-flow-node-completed:hover,
+.review-flow-node-completed:focus-visible,
+.review-flow-node-completed.review-flow-node-selected {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--success) 16%, transparent),
+    0 10px 24px color-mix(in srgb, var(--bg) 25%, transparent);
+}
+.review-flow-node-queued {
+  --review-flow-node-border: color-mix(in srgb, var(--warning) 55%, var(--border));
+  --review-flow-node-hover-border: color-mix(in srgb, var(--warning) 75%, var(--border));
+  border-color: var(--review-flow-node-border);
+}
+.review-flow-node-queued .review-flow-node-icon {
+  background: color-mix(in srgb, var(--warning) 16%, var(--surface-2));
+  color: var(--warning);
+}
+.review-flow-node-failed,
+.review-flow-node-cancelled,
+.review-flow-node-superseded {
+  --review-flow-node-border: color-mix(in srgb, var(--danger) 48%, var(--border));
+  --review-flow-node-hover-border: color-mix(in srgb, var(--danger) 68%, var(--border));
+  border-color: var(--review-flow-node-border);
+}
+.review-flow-node-failed .review-flow-node-icon,
+.review-flow-node-cancelled .review-flow-node-icon,
+.review-flow-node-superseded .review-flow-node-icon {
+  background: color-mix(in srgb, var(--danger) 15%, var(--surface-2));
+  color: var(--danger);
+}
+.review-flow-status-running {
+  background: color-mix(in srgb, var(--accent) 17%, var(--surface-2));
+  color: var(--accent-hover);
+}
+.review-flow-status-awaiting_action {
+  background: color-mix(in srgb, var(--warning) 17%, var(--surface-2));
+  color: var(--warning);
+}
+.review-flow-status-completed {
+  background: color-mix(in srgb, var(--success) 17%, var(--surface-2));
+  color: var(--success);
+}
+.review-flow-status-failed,
+.review-flow-status-cancelled,
+.review-flow-status-superseded {
+  background: color-mix(in srgb, var(--danger) 15%, var(--surface-2));
+  color: var(--danger);
+}
+.review-flow-node-unknown,
+.review-flow-node-skipped {
+  border-style: dashed;
+}
+.review-flow-node-partial,
+.review-flow-node-unavailable {
+  --review-flow-node-border: var(--warning);
+  --review-flow-node-hover-border: var(--warning);
+}
+.review-flow-status-partial,
+.review-flow-status-unavailable {
+  color: var(--warning);
+}
+.review-flow-status-skipped {
+  color: var(--text-2);
+}
+.review-run-risk.review-risk-low {
+  border-color: color-mix(in srgb, var(--success) 55%, var(--border));
+}
+.review-run-risk.review-risk-high {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+.index-status-indexing,
+.index-status-queued {
+  color: var(--accent-hover);
+}
+.index-status-ready {
+  color: var(--success);
+}
+.index-status-failed {
+  color: var(--danger);
+}
+.index-status-stale,
+.index-status-cancelled {
+  color: var(--warning);
+}
+.index-status-not_indexed,
+.index-status-empty {
+  color: var(--text-2);
+}

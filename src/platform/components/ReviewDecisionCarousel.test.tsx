@@ -1,0 +1,28 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+import { ReviewDecisionCarousel, type ReviewDecisionCarouselOption } from "./ReviewDecisionCarousel";
+
+const options: ReviewDecisionCarouselOption[] = [
+  { value: "approve_post", label: "Approve", description: "Approve this pull request on GitHub.", tone: "primary" },
+  {
+    value: "mark_reviewed",
+    label: "Mark reviewed",
+    description: "Close locally without posting to GitHub.",
+    tone: "secondary",
+  },
+  { value: "skip", label: "Skip", description: "Leave this review unpublished.", tone: "secondary" },
+];
+
+describe("review decision carousel", () => {
+  it("renders decisions as accessible buttons instead of a select", () => {
+    const html = renderToStaticMarkup(
+      <ReviewDecisionCarousel options={options} value="approve_post" onChange={() => undefined} />,
+    );
+    expect(html).toContain('role="radiogroup"');
+    expect(html).toContain('aria-label="Review decisions"');
+    expect(html).toContain('role="radio"');
+    expect(html).toContain('aria-checked="true"');
+    expect(html).toContain("Approve");
+    expect(html).not.toContain("<select");
+  });
+});

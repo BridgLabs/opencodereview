@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OpenCodeReview setup</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: #080a0f; color: #f4f6fb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 36px 0; background: radial-gradient(circle at 50% -10%, rgba(86,103,255,.22), transparent 38%), linear-gradient(180deg, #101629 0%, #080a0f 64%); }
+    main { width: min(1120px, calc(100vw - 56px)); }
+    .card { min-height: 640px; height: min(920px, calc(100vh - 72px)); border: 1px solid rgba(255,255,255,.11); background: linear-gradient(180deg, rgba(15,18,30,.96), rgba(11,13,22,.96)); border-radius: 30px; box-shadow: 0 34px 100px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.04); padding: 38px; }
+    .brand { display: flex; justify-content: space-between; gap: 24px; align-items: center; margin-bottom: 42px; }
+    .logo { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 900; letter-spacing: -.035em; }
+    .logo img { display: block; flex: none; width: 64px; height: 48px; object-fit: contain; }
+    .steps { display: flex; align-items: center; color: #7f879a; font-size: 12px; font-weight: 850; }
+    .steps span { position: relative; display: flex; align-items: center; gap: 8px; color: #7f879a; }
+    .steps span:not(:last-child) { margin-right: 34px; }
+    .steps span:not(:last-child)::after { content: ''; position: absolute; left: calc(100% + 10px); width: 14px; height: 2px; border-radius: 999px; background: rgba(255,255,255,.16); }
+    .steps span::before { content: attr(data-index); width: 24px; height: 24px; display: grid; place-items: center; border-radius: 999px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06); color: #8790a7; font-size: 11px; }
+    .steps span.active { color: #fff; }
+    .steps span.active::before { border-color: rgba(145,154,255,.55); background: linear-gradient(135deg, rgba(105,120,255,.42), rgba(125,103,255,.32)); color: #fff; box-shadow: 0 0 0 5px rgba(111,124,255,.1); }
+    .steps span.done { color: #bfc6ff; }
+    .steps span.done::before { content: '✓'; border-color: transparent; background: linear-gradient(135deg, #6978ff, #9a7cff); color: #fff; }
+    .steps span.done:not(:last-child)::after { background: linear-gradient(90deg, #6978ff, rgba(154,124,255,.52)); }
+    .eyebrow { color: #8f98ff; font-size: 13px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 12px; }
+    h1 { margin: 0; font-size: 42px; line-height: 1.02; letter-spacing: -.065em; }
+    p { color: #aeb6c9; line-height: 1.62; margin: 14px 0 0; font-size: 16px; }
+    button { border: 1px solid rgba(255,255,255,.08); border-radius: 14px; padding: 12px 16px; color: #f4f6fb; background: #2a3146; cursor: pointer; font-weight: 850; box-shadow: 0 1px 0 rgba(255,255,255,.05) inset; transition: transform 120ms ease, border-color 120ms ease, background 120ms ease, box-shadow 120ms ease, opacity 120ms ease; }
+    button.primary { border-color: transparent; background: linear-gradient(135deg, #6978ff, #7d67ff); color: white; box-shadow: 0 14px 30px rgba(105,120,255,.22); }
+    button:hover:not(:disabled) { transform: translateY(-1px); }
+    button:disabled { opacity: .46; cursor: not-allowed; }
+    .actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 32px; }
+    .right { margin-left: auto; display: flex; gap: 12px; }
+    .stage-body { min-height: 260px; display: flex; flex-direction: column; }
+    #step-orgs .stage-body { min-height: clamp(332px, calc(100vh - 430px), 560px); }
+    #step-repos .stage-body { min-height: clamp(386px, calc(100vh - 390px), 680px); }
+    .panel { margin-top: 24px; }
+    .status { border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.045); border-radius: 20px; padding: 18px; }
+    .status b { font-size: 15px; }
+    .ok { color: #78e6a3; }
+    .bad { color: #ff9090; }
+    .pending { color: #ffd98a; }
+    .auth-box { border: 1px solid rgba(145,154,255,.2); background: rgba(111,124,255,.08); border-radius: 20px; padding: 16px; display: grid; gap: 12px; }
+    .auth-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+    .auth-label { color: #8c95aa; font-size: 13px; font-weight: 800; }
+    .copyable { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 10px 12px; border-radius: 13px; background: rgba(255,255,255,.07); color: #f4f6fb; }
+    code.copyable { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 22px; letter-spacing: .12em; }
+    .copy-btn { padding: 9px 12px; font-size: 12px; }
+    .success-box { margin-top: 24px; display: grid; place-items: center; text-align: center; border: 1px solid rgba(120,230,163,.22); background: radial-gradient(circle at 50% 0%, rgba(120,230,163,.16), rgba(255,255,255,.04) 48%); border-radius: 24px; padding: 28px; }
+    .check { width: 58px; height: 58px; display: grid; place-items: center; border-radius: 999px; background: linear-gradient(135deg, #58d98a, #78e6a3); color: #07100b; font-size: 30px; font-weight: 950; box-shadow: 0 18px 42px rgba(120,230,163,.22); margin-bottom: 14px; }
+    .success-box h2 { margin: 0; font-size: 22px; letter-spacing: -.04em; }
+    .list { max-height: 390px; overflow: auto; margin-top: 24px; border-top: 1px solid rgba(255,255,255,.08); }
+    .org-grid { min-height: clamp(312px, calc(100vh - 450px), 540px); max-height: clamp(312px, calc(100vh - 450px), 540px); display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-content: start; gap: 12px; padding: 2px 6px 8px 2px; border-top: 0; scrollbar-gutter: stable; }
+    .org-card { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: center; width: 100%; min-height: 92px; padding: 16px; text-align: left; border-radius: 20px; border-color: rgba(255,255,255,.1); background: rgba(255,255,255,.045); box-shadow: inset 0 1px 0 rgba(255,255,255,.045); }
+    .org-card.selected { border-color: rgba(154,124,255,.84); background: linear-gradient(180deg, rgba(111,124,255,.18), rgba(255,255,255,.055)); box-shadow: 0 0 0 1px rgba(154,124,255,.28), 0 18px 46px rgba(111,124,255,.18), inset 0 1px 0 rgba(255,255,255,.08); }
+    .org-avatar { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 16px; background: linear-gradient(135deg, rgba(111,124,255,.28), rgba(154,124,255,.2)); color: #fff; font-weight: 950; letter-spacing: -.04em; }
+    .org-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 900; color: #f4f6fb; }
+    .org-type { margin-top: 4px; color: #8c95aa; font-size: 13px; font-weight: 750; }
+    .org-check { position: absolute; top: 12px; right: 12px; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); color: transparent; background: rgba(255,255,255,.05); font-size: 14px; font-weight: 950; }
+    .org-card.selected .org-check { border-color: transparent; background: linear-gradient(135deg, #6978ff, #9a7cff); color: white; box-shadow: 0 8px 22px rgba(111,124,255,.28); }
+    .skeleton-card { pointer-events: none; }
+    .skeleton-avatar, .skeleton-line { background: linear-gradient(90deg, rgba(255,255,255,.06), rgba(255,255,255,.12), rgba(255,255,255,.06)); background-size: 200% 100%; animation: shimmer 1.15s ease-in-out infinite; }
+    .skeleton-avatar { width: 46px; height: 46px; border-radius: 16px; }
+    .skeleton-lines { display: grid; gap: 9px; }
+    .skeleton-line { height: 12px; border-radius: 999px; }
+    .skeleton-line.short { width: 46%; }
+    .skeleton-line.long { width: 72%; }
+    .repo-org-tabs { display: flex; gap: 8px; margin-top: 22px; padding-bottom: 2px; overflow-x: auto; scrollbar-width: none; }
+    .repo-org-tabs::-webkit-scrollbar { display: none; }
+    .repo-org-tab { flex: none; padding: 9px 12px; border-radius: 999px; color: #aeb6c9; background: rgba(255,255,255,.055); font-size: 12px; font-weight: 850; }
+    .repo-org-tab.active { border-color: rgba(145,154,255,.42); background: rgba(111,124,255,.18); color: #fff; box-shadow: 0 0 0 3px rgba(111,124,255,.08); }
+    .search-input { width: 100%; margin-top: 12px; padding: 13px 16px; border: 1px solid rgba(255,255,255,.1); border-radius: 16px; background: rgba(255,255,255,.055); color: #f4f6fb; font: inherit; font-weight: 750; outline: none; }
+    .search-input::placeholder { color: #7f879a; }
+    .search-input:focus { border-color: rgba(145,154,255,.55); box-shadow: 0 0 0 3px rgba(111,124,255,.12); }
+    .repo-grid { min-height: clamp(282px, calc(100vh - 540px), 540px); max-height: clamp(282px, calc(100vh - 540px), 540px); display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-content: start; gap: 12px; margin-top: 14px; padding: 2px 6px 8px 2px; border-top: 0; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; }
+    .repo-card { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; min-width: 0; min-height: 82px; padding: 16px; text-align: left; border-radius: 20px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.045); box-shadow: inset 0 1px 0 rgba(255,255,255,.045); }
+    .repo-card.selected { border-color: rgba(154,124,255,.84); background: linear-gradient(180deg, rgba(111,124,255,.18), rgba(255,255,255,.055)); box-shadow: 0 0 0 1px rgba(154,124,255,.28), 0 18px 46px rgba(111,124,255,.18), inset 0 1px 0 rgba(255,255,255,.08); }
+    .repo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 900; color: #f4f6fb; }
+    .repo-meta { margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8c95aa; font-size: 13px; font-weight: 750; }
+    .repo-check { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); color: transparent; background: rgba(255,255,255,.05); font-size: 14px; font-weight: 950; }
+    .repo-card.selected .repo-check { border-color: transparent; background: linear-gradient(135deg, #6978ff, #9a7cff); color: white; box-shadow: 0 8px 22px rgba(111,124,255,.28); }
+    .repo-empty { margin: 20px 2px; color: #8c95aa; font-weight: 750; }
+    .complete-panel { flex: 1; min-height: 0; display: flex; padding-top: 28px; text-align: center; }
+    .complete-card { flex: 1; display: grid; place-items: center; align-content: center; gap: 14px; border: 1px solid rgba(145,154,255,.18); background: radial-gradient(circle at 50% 35%, rgba(111,124,255,.12), rgba(255,255,255,.035) 50%); border-radius: 26px; padding: 34px; }
+    .complete-icon { width: 58px; height: 58px; display: grid; place-items: center; border-radius: 999px; background: linear-gradient(135deg, #6978ff, #9a7cff); color: #fff; font-size: 28px; font-weight: 950; box-shadow: 0 18px 42px rgba(111,124,255,.24); }
+    .complete-card h1 { margin-top: 2px; font-size: 38px; }
+    .complete-card p { max-width: 720px; margin-top: 0; text-wrap: balance; }
+    .next-steps { display: grid; gap: 10px; width: min(560px, 100%); margin-top: 10px; text-align: left; }
+    .next-step { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; background: rgba(255,255,255,.045); color: #aeb6c9; font-weight: 700; }
+    .next-step span { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 999px; background: rgba(111,124,255,.18); color: #fff; font-size: 12px; font-weight: 950; }
+    .next-step b { display: block; color: #f4f6fb; margin-bottom: 2px; }
+    .toast { position: fixed; right: 24px; bottom: 24px; z-index: 10; max-width: 360px; padding: 14px 16px; border: 1px solid rgba(120,230,163,.22); border-radius: 16px; background: rgba(16,20,32,.96); color: #f4f6fb; box-shadow: 0 18px 46px rgba(0,0,0,.38); font-weight: 850; }
+    .toast span { display: block; margin-top: 3px; color: #aeb6c9; font-size: 13px; font-weight: 650; }
+    .card { display: flex; flex-direction: column; }
+    .brand { flex: none; }
+    .card > section:not(.hidden) { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .stage-body, #step-orgs .stage-body, #step-repos .stage-body { flex: 1; min-height: 0; }
+    #step-github .stage-body { justify-content: stretch; padding-top: 28px; }
+    #step-github .panel { margin-top: 0; }
+    #authPrompt { flex: 1; min-height: 0; display: flex; }
+    #authPrompt:empty { display: none; }
+    #authPrompt .success-box, #authPrompt .auth-box { flex: 1; margin-top: 0; align-content: center; }
+    #authStatus { flex: 1; display: grid; align-content: center; }
+    .actions { flex: none; margin-top: auto; padding-top: 24px; }
+    .org-grid, .repo-grid { flex: 1; min-height: 0; max-height: none; }
+    .muted { color: #8c95aa; }
+    .hidden { display: none; }
+    a { color: #aeb5ff; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    @keyframes shimmer { to { background-position: -200% 0; } }
+    @media (max-width: 640px) { .card { padding: 26px; } .brand, .actions { align-items: stretch; flex-direction: column; } .right { margin-left: 0; } .steps { align-items: flex-start; flex-direction: column; gap: 12px; } .steps span:not(:last-child) { margin-right: 0; } .steps span:not(:last-child)::after { display: none; } h1 { font-size: 34px; } .auth-row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main class="card">
+  <div class="brand"><div class="logo"><img src="/assets/mascot.svg" width="64" height="48" alt="" aria-hidden="true" />OpenCodeReview</div><div class="steps"><span id="s1" data-index="1">GitHub</span><span id="s2" data-index="2">Organizations</span><span id="s3" data-index="3">Repositories</span></div></div>
+  <section id="step-github">
+    <div class="eyebrow">Step 1 of 3</div>
+    <h1>Connect GitHub</h1>
+    <p>Authorize this OpenCodeReview instance to discover your organizations and repositories.</p>
+    <div class="stage-body">
+      <div class="panel status" id="authStatus">Checking GitHub...</div>
+      <div id="authPrompt" class="panel"></div>
+    </div>
+    <div class="actions"><button onclick="refreshAll()">Refresh</button><div class="right"><button id="connectBtn" class="primary" onclick="connectGitHub()">Connect GitHub</button><button id="githubNext" onclick="go(2)" disabled>Continue</button></div></div>
+  </section>
+  <section id="step-orgs" class="hidden">
+    <div class="eyebrow">Step 2 of 3</div>
+    <h1>Select organizations</h1>
+    <p>Choose where OpenCodeReview should look for repositories. You can change this later.</p>
+    <div class="stage-body"><div id="orgs" class="list org-grid"></div></div>
+    <div class="actions"><button onclick="go(1)">Back</button><div class="right"><button onclick="loadOrgs(true)">Refresh</button><button id="orgsNext" onclick="saveOrgs()" disabled>Continue</button></div></div>
+  </section>
+  <section id="step-repos" class="hidden">
+    <div class="eyebrow">Step 3 of 3</div>
+    <h1>Choose repositories</h1>
+    <p>Select the repositories OpenCodeReview should monitor. You can change this later.</p>
+    <div class="stage-body"><div id="repoOrgTabs" class="repo-org-tabs"></div><input id="repoSearch" class="search-input" placeholder="Search repositories" oninput="setRepoSearch(this.value)" /><div id="repos" class="repo-grid"></div></div>
+    <div class="actions"><button onclick="go(2)">Back</button><div class="right"><button onclick="loadReposForSelected(true)">Refresh</button><button id="reposNext" onclick="saveRepos()" disabled>Continue</button></div></div>
+  </section>
+  <section id="step-complete" class="hidden">
+    <div class="complete-panel"><div class="complete-card"><div class="complete-icon">✓</div><h1>Setup complete</h1><p id="completeMessage">Your repositories are connected and ready for review monitoring.</p><div class="next-steps"><div class="next-step"><span>1</span><div><b>Selected repositories are saved</b>OpenCodeReview will use this selection for monitoring and reviews.</div></div><div class="next-step"><span>2</span><div><b>Return to OpenCodeReview</b>Use Reviews to inspect incoming pull requests and start review runs.</div></div><div class="next-step"><span>3</span><div><b>Change this later</b>Repository access can be updated from Settings when needed.</div></div></div></div></div>
+  </section>
+  <div id="toast" class="toast hidden"></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let step = 1, orgs = [], repos = [], authPoll = null, connected = false, orgsLoaded = false, reposLoaded = false, reposLoading = false, repoSearch = '', repoOrgFilter = 'all', selectedRepoIds = new Set();
+async function api(path, options = {}) {
+  const res = await fetch(path, { headers: { 'content-type': 'application/json' }, ...options });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+function go(next) {
+  step = next;
+  $('step-github').classList.toggle('hidden', step !== 1);
+  $('step-orgs').classList.toggle('hidden', step !== 2);
+  $('step-repos').classList.toggle('hidden', step !== 3);
+  $('step-complete').classList.add('hidden');
+  for (const index of [1, 2, 3]) {
+    $(`s${index}`).classList.toggle('active', step === index);
+    $(`s${index}`).classList.toggle('done', step > index);
+  }
+  if (step === 2 && !orgsLoaded) loadOrgs();
+  if (step === 3) loadReposForSelected();
+}
+async function loadAuth() {
+  const a = await api('/auth/github/status');
+  connected = !!a.loggedIn;
+  $('authStatus').style.display = connected ? 'none' : '';
+  $('authStatus').innerHTML = '<b class="bad">GitHub not connected</b><p>Start the secure GitHub device flow to continue.</p>';
+  $('authPrompt').innerHTML = connected ? `<div class="success-box"><div class="check">✓</div><h2>GitHub connected</h2><p>${a.login || 'GitHub user'} is ready. Continue to choose organizations.</p></div>` : '';
+  $('connectBtn').style.display = connected ? 'none' : '';
+  $('githubNext').classList.toggle('primary', connected);
+  $('githubNext').disabled = !connected;
+  return a;
+}
+async function connectGitHub() {
+  await api('/auth/github/start', { method: 'POST' });
+  $('authPrompt').innerHTML = '<p>Waiting for GitHub device code...</p>';
+  if (authPoll) clearInterval(authPoll);
+  authPoll = setInterval(loadAuthEvents, 1000);
+  await loadAuthEvents();
+}
+async function loadAuthEvents() {
+  const data = await api('/auth/github/events');
+  const prompt = data.events.filter(e => e.kind === 'prompt').reduce((acc, e) => ({...acc, ...e}), {});
+  const done = data.events.find(e => e.kind === 'done');
+  let html = '';
+  if (prompt.url || prompt.code) html += '<div class="auth-box">';
+  if (prompt.url) html += `<div class="auth-row"><div class="auth-label">GitHub URL</div><a class="copyable" href="${prompt.url}" target="_blank">${prompt.url}</a><button class="copy-btn" onclick="copyText('${prompt.url}', this)">Copy</button></div>`;
+  if (prompt.code) html += `<div class="auth-row"><div class="auth-label">Device code</div><code class="copyable">${prompt.code}</code><button class="copy-btn" onclick="copyText('${prompt.code}', this)">Copy</button></div>`;
+  if (html) html += '</div>';
+  if (done) html += `<p class="${done.success ? 'ok' : 'bad'}">${done.message}</p>`;
+  $('authPrompt').innerHTML = html || '<div class="auth-box"><p class="pending">Waiting for GitHub...</p></div>';
+  if (!data.running) { clearInterval(authPoll); authPoll = null; await loadAuth(); }
+}
+async function loadOrgs(force = false) {
+  if (orgsLoaded && !force) return;
+  renderOrgSkeleton();
+  orgsLoaded = false;
+  orgs = await api('/github/workspaces');
+  orgsLoaded = true;
+  renderOrgs();
+}
+async function loadSavedSetup() {
+  const savedOrgs = await api('/workspaces').catch(() => []);
+  const selectedOrgs = savedOrgs.filter((org) => org.selected);
+  const savedRepos = [];
+  await Promise.all(selectedOrgs.map(async (org) => {
+    const list = await api(`/workspaces/${org.login}/repos`).catch(() => []);
+    savedRepos.push(...list);
+  }));
+  return { savedOrgs, selectedOrgs, selectedRepos: savedRepos.filter((repo) => repo.subscriptionEnabled) };
+}
+function renderOrgSkeleton() {
+  $('orgs').innerHTML = Array.from({ length: 4 }, () => '<div class="org-card skeleton-card"><div class="skeleton-avatar"></div><div class="skeleton-lines"><div class="skeleton-line long"></div><div class="skeleton-line short"></div></div></div>').join('');
+  updateOrgContinue();
+}
+function renderOrgs() {
+  $('orgs').innerHTML = orgs.map(o => `<button type="button" class="org-card ${o.selected ? 'selected' : ''}" onclick='toggleOrg(${JSON.stringify(o.login)})' aria-pressed="${o.selected ? 'true' : 'false'}"><div class="org-avatar">${orgInitials(o.login)}</div><div><div class="org-name">${escapeHtml(o.login)}</div><div class="org-type">${o.kind === 'user' ? 'Personal account' : 'Organization'}</div></div><div class="org-check">✓</div></button>`).join('');
+  updateOrgContinue();
+}
+function toggleOrg(login) {
+  orgs = orgs.map(o => o.login === login ? {...o, selected: !o.selected} : o);
+  renderOrgs();
+}
+function selectedLogins() {
+  return orgs.filter(o => o.selected).map(o => o.login);
+}
+function updateOrgContinue() {
+  const selected = selectedLogins().length > 0;
+  $('orgsNext').disabled = !selected;
+  $('orgsNext').classList.toggle('primary', selected);
+}
+function orgInitials(login) {
+  return login.split(/[-_\s]+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase() || login.slice(0, 2).toUpperCase();
+}
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[char]));
+}
+async function saveOrgs() {
+  const selected = selectedLogins();
+  if (!selected.length) return;
+  await api('/workspaces/select', { method: 'POST', body: JSON.stringify({ logins: selected }) });
+  orgs = orgs.map(o => ({...o, selected: selected.includes(o.login)}));
+  reposLoaded = false;
+  repoSearch = '';
+  repoOrgFilter = 'all';
+  selectedRepoIds = new Set();
+  if ($('repoSearch')) $('repoSearch').value = '';
+  go(3);
+}
+async function loadReposForSelected(force = false) {
+  if (reposLoaded && !force) { renderRepos(); return; }
+  repos = [];
+  selectedRepoIds = new Set();
+  reposLoaded = false;
+  reposLoading = true;
+  const selected = orgs.filter(o => o.selected);
+  if (!selected.length) { reposLoading = false; renderRepos(); return; }
+  renderRepoSkeleton();
+  await Promise.all(selected.map(async (org) => {
+    const list = await api(`/workspaces/${org.login}/repos/refresh`, { method: 'POST' }).catch(() => []);
+    for (const repo of list) if (!repos.some((item) => item.id === repo.id)) repos.push(repo);
+    for (const repo of list) if (repo.subscriptionEnabled) selectedRepoIds.add(repo.id);
+    renderRepos();
+  }));
+  reposLoading = false;
+  reposLoaded = true;
+  renderRepos();
+}
+function renderRepoSkeleton() {
+  renderRepoOrgTabs();
+  $('repos').innerHTML = Array.from({ length: 6 }, () => '<div class="repo-card skeleton-card"><div class="skeleton-lines"><div class="skeleton-line long"></div><div class="skeleton-line short"></div></div><div class="repo-check"></div></div>').join('');
+  updateRepoContinue();
+}
+function repoOwner(repo) {
+  return (repo.fullName || '').split('/')[0] || '';
+}
+function selectedOrgLogins() {
+  return orgs.filter(o => o.selected).map(o => o.login);
+}
+function renderRepoOrgTabs() {
+  const orgTabs = selectedOrgLogins();
+  if (repoOrgFilter !== 'all' && !orgTabs.includes(repoOrgFilter)) repoOrgFilter = 'all';
+  $('repoOrgTabs').innerHTML = [`<button type="button" class="repo-org-tab ${repoOrgFilter === 'all' ? 'active' : ''}" onclick="setRepoOrgFilter('all')">All · ${repos.length}</button>`, ...orgTabs.map((login) => `<button type="button" class="repo-org-tab ${repoOrgFilter === login ? 'active' : ''}" onclick='setRepoOrgFilter(${JSON.stringify(login)})'>${escapeHtml(login)} · ${repos.filter((repo) => repoOwner(repo) === login).length}</button>`)].join('');
+}
+function setRepoOrgFilter(login) {
+  repoOrgFilter = login;
+  renderRepos();
+}
+function setRepoSearch(value) {
+  repoSearch = value.trim().toLowerCase();
+  renderRepos();
+}
+function repoMeta(repo) {
+  const branch = repo.defaultBranch || 'default branch unknown';
+  return `${selectedRepoIds.has(repo.id) ? 'Selected' : repoOwner(repo)} · ${branch}`;
+}
+function renderRepos() {
+  renderRepoOrgTabs();
+  const query = repoSearch;
+  const scoped = repoOrgFilter === 'all' ? repos : repos.filter((repo) => repoOwner(repo) === repoOrgFilter);
+  const visible = query ? scoped.filter((repo) => repo.fullName.toLowerCase().includes(query)) : scoped;
+  if (!visible.length) {
+    $('repos').innerHTML = reposLoading ? Array.from({ length: 6 }, () => '<div class="repo-card skeleton-card"><div class="skeleton-lines"><div class="skeleton-line long"></div><div class="skeleton-line short"></div></div><div class="repo-check"></div></div>').join('') : `<div class="repo-empty">${repos.length ? 'No repositories match your search.' : 'No repositories found.'}</div>`;
+    updateRepoContinue();
+    return;
+  }
+  $('repos').innerHTML = visible.map(r => `<button type="button" class="repo-card ${selectedRepoIds.has(r.id) ? 'selected' : ''}" onclick="toggleRepo(${r.id})" aria-pressed="${selectedRepoIds.has(r.id) ? 'true' : 'false'}"><div><div class="repo-name">${escapeHtml(r.fullName)}</div><div class="repo-meta">${escapeHtml(repoMeta(r))}</div></div><div class="repo-check">✓</div></button>`).join('');
+  updateRepoContinue();
+}
+function toggleRepo(id) {
+  selectedRepoIds.has(id) ? selectedRepoIds.delete(id) : selectedRepoIds.add(id);
+  renderRepos();
+}
+function updateRepoContinue() {
+  const selected = selectedRepoIds.size > 0;
+  $('reposNext').disabled = !selected;
+  $('reposNext').textContent = 'Continue';
+  $('reposNext').classList.toggle('primary', selected);
+}
+async function saveRepos() {
+  const ids = [...selectedRepoIds];
+  if (!ids.length) return;
+  $('reposNext').disabled = true;
+  $('reposNext').textContent = 'Saving';
+  await Promise.all(ids.map((id) => api(`/repos/${id}/subscribe`, { method: 'POST', body: JSON.stringify({ enabled: true, reviewMode: 'manual' }) }).catch(() => null)));
+  showToast('Repositories saved', `${ids.length} repositor${ids.length === 1 ? 'y' : 'ies'} selected for monitoring.`);
+  showComplete(ids.length);
+}
+function showToast(title, detail) {
+  $('toast').innerHTML = `${title}<span>${detail}</span>`;
+  $('toast').classList.remove('hidden');
+  setTimeout(() => $('toast').classList.add('hidden'), 4200);
+}
+function showComplete(count) {
+  $('step-github').classList.add('hidden');
+  $('step-orgs').classList.add('hidden');
+  $('step-repos').classList.add('hidden');
+  $('step-complete').classList.remove('hidden');
+  for (const index of [1, 2, 3]) {
+    $(`s${index}`).classList.remove('active');
+    $(`s${index}`).classList.add('done');
+  }
+  $('completeMessage').textContent = `${count} repositor${count === 1 ? 'y is' : 'ies are'} connected and ready for review monitoring.`;
+}
+async function copyText(value, button) {
+  await navigator.clipboard.writeText(value);
+  const label = button.textContent;
+  button.textContent = 'Copied';
+  setTimeout(() => button.textContent = label, 1200);
+}
+async function refreshAll() { await loadAuth(); }
+async function bootstrap() {
+  go(1);
+  const auth = await loadAuth();
+  if (!auth.loggedIn) return;
+  const setup = await loadSavedSetup();
+  if (setup.selectedRepos.length > 0) {
+    showComplete(setup.selectedRepos.length);
+    return;
+  }
+  if (setup.selectedOrgs.length > 0) {
+    orgs = setup.savedOrgs;
+    orgsLoaded = true;
+    go(3);
+    return;
+  }
+  go(2);
+}
+bootstrap().catch(e => { go(1); $('authStatus').innerHTML = `<b class="bad">${e.message}</b>`; });
+</script>
+</body>
+</html>

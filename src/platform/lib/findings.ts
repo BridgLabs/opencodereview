@@ -1,0 +1,151 @@
+import type { FindingAuditView, FindingCandidate } from "../../types";
+import { required } from "./utils";
+
+export interface FindingSelectionDraft {
+  prId: number;
+  runId: number;
+  revision: number;
+  selectedIds: string[];
+}
+
+export function selectedFindingIds(view: FindingAuditView) {
+  return (
+    view.audit?.candidates
+      .filter((candidate) => candidate.selected && !candidate.blockedReason)
+      .map((candidate) => candidate.id) ?? []
+  );
+}
+
+export function findingSelectionDirty(view: FindingAuditView, draft: FindingSelectionDraft | null) {
+  if (!draft || draft.runId !== view.runId || draft.prId !== view.prId) return false;
+  const saved = selectedFindingIds(view);
+  return (
+    draft.revision !== view.revision ||
+    saved.length !== draft.selectedIds.length ||
+    saved.some((id) => !draft.selectedIds.includes(id))
+  );
+}
+
+export function canDecideFindings(view: FindingAuditView | undefined, draft: FindingSelectionDraft | null) {
+  if (!view) return false;
+  if (!view.requiresConfirmation) return true;
+  if (!view.audit?.complete) return false;
+  if (view.audit.candidates.length === 0) return view.editable;
+  return Boolean(view.editable && view.selectionSaved && !findingSelectionDirty(view, draft));
+}
+
+export async function prepareEmptyFindingDecision(
+  prId: number,
+  runId: number,
+  headSha: string,
+  load: () => Promise<FindingAuditView>,
+  save: (revision: number) => Promise<FindingAuditView>,
+) {
+  const validate = (view: FindingAuditView) => {
+    if (
+      view.prId !== prId ||
+      view.runId !== runId ||
+      !view.requiresConfirmation ||
+      !view.editable ||
+      !view.audit?.complete ||
+      view.audit.headSha !== headSha ||
+      view.audit.candidates.length !== 0
+    ) {
+      throw new Error("Review changed or its audit is no longer complete and empty. Reload before deciding.");
+    }
+  };
+  const current = await load();
+  validate(current);
+  if (current.selectionSaved) return current;
+  const saved = await save(current.revision);
+  validate(saved);
+  if (!saved.selectionSaved) throw new Error("Empty finding selection was not saved. Reload before deciding.");
+  return saved;
+}
+
+export function reviewPointKind(body: string): "finding" | "question" | "mixed" | "unknown" {
+  let fence = false;
+  let finding = false;
+  let question = false;
+  for (const line of body.split("\n")) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      fence = !fence;
+      continue;
+    }
+    if (fence) continue;
+    const match = line.replace(/^[\s*_>#-]+/, "").match(/^\[(Finding|Question)\]/);
+    finding ||= match?.[1] === "Finding";
+    question ||= match?.[1] === "Question";
+  }
+  return finding && question ? "mixed" : finding ? "finding" : question ? "question" : "unknown";
+}
+
+export const candidateKind = (candidate: FindingCandidate) => candidate.kind ?? reviewPointKind(candidate.body);
+
+export function groupFindingCandidates(candidates: FindingCandidate[]) {
+  const groups = [
+    { id: "eligible", title: "Eligible findings", open: true, candidates: [] as FindingCandidate[] },
+    { id: "questions", title: "Questions — optional publication", open: true, candidates: [] as FindingCandidate[] },
+    { id: "discarded", title: "Discarded by AI", open: false, candidates: [] as FindingCandidate[] },
+    { id: "blocked", title: "Blocked by validation", open: false, candidates: [] as FindingCandidate[] },
+    { id: "unmapped", title: "Decision unavailable", open: false, candidates: [] as FindingCandidate[] },
+    { id: "pending", title: "Awaiting final review", open: false, candidates: [] as FindingCandidate[] },
+  ];
+  for (const candidate of candidates) {
+    const id = candidate.blockedReason
+      ? "blocked"
+      : candidate.aiDecision === "kept"
+        ? candidateKind(candidate) === "question"
+          ? "questions"
+          : "eligible"
+        : candidate.aiDecision;
+    required(
+      groups.find((group) => group.id === id),
+      `finding group ${id}`,
+    ).candidates.push(candidate);
+  }
+  return groups.filter((group) => group.candidates.length > 0);
+}
+
+export function findingAuditSummary(view: FindingAuditView | undefined) {
+  if (!view) return "Loading candidate audit…";
+  if (!view.audit) return "Discard history unavailable for this run.";
+  const { candidates, complete } = view.audit;
+  const discarded = candidates.filter((candidate) => candidate.aiDecision === "discarded").length;
+  const unmapped = candidates.filter((candidate) => candidate.aiDecision === "unmapped").length;
+  const pending = candidates.filter((candidate) => candidate.aiDecision === "pending").length;
+  const blocked = candidates.filter((candidate) => candidate.blockedReason).length;
+  return [
+    `${candidates.length} candidate${candidates.length === 1 ? "" : "s"}`,
+    `${discarded} discarded by AI`,
+    blocked && `${blocked} blocked`,
+    unmapped && `${unmapped} decision${unmapped === 1 ? "" : "s"} unavailable`,
+    pending && `${pending} pending`,
+    !complete && "incomplete audit",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+export function findingTitle(candidate: FindingCandidate) {
+  const line = candidate.body.split("\n").find((line) => /\[(Finding|Question)\]/i.test(line));
+  return (
+    line
+      ?.replace(/^.*?\[(Finding|Question)\]\s*/i, "")
+      .replace(/[*_]+$/g, "")
+      .trim()
+      .slice(0, 180) || (candidate.origin === "body" ? "General review findings" : candidate.id)
+  );
+}
+
+export function reviewBodyHasPostableFinding(body: string | null) {
+  return Boolean(
+    body?.split("\n").some((line) => {
+      const normalized = line
+        .trimStart()
+        .replace(/^[*_>#-]+\s*/, "")
+        .replace(/^[*_>#-]+\s*/, "");
+      return normalized.startsWith("[Finding]") || normalized.startsWith("[Question]");
+    }),
+  );
+}

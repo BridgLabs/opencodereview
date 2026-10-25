@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none" role="img" aria-labelledby="ocr-favicon-title">
+  <title id="ocr-favicon-title">OpenCodeReview mascot</title>
+  <path data-part="bubble" d="M42 12h44c18 0 30 12 30 30v22c0 18-12 30-30 30H62l-22 18c-4 3-8 1-7-4l3-14c-15-2-24-13-24-30V42c0-18 12-30 30-30Z" fill="#8fb3ff" />
+  <path data-part="shine" d="M30 34c2-7 7-11 14-12" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.45" />
+  <rect x="40" y="38" width="16" height="30" rx="8" fill="#0f1115" />
+  <rect x="44" y="42" width="5" height="9" rx="2.5" fill="#ffffff" />
+  <rect x="72" y="38" width="16" height="30" rx="8" fill="#0f1115" />
+  <rect x="76" y="42" width="5" height="9" rx="2.5" fill="#ffffff" />
+</svg>

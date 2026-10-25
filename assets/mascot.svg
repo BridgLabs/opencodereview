@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" id="ocr-mascot" class="ocr-mascot" width="128" height="128" viewBox="0 0 128 128" fill="none" role="img" aria-labelledby="ocr-mascot-title" data-motion="none">
+  <title id="ocr-mascot-title">OpenCodeReview mascot</title>
+  <style>
+    .ocr-mascot [data-part="eyes"], .ocr-mascot [data-part^="eye-"] { transform-box: fill-box; transform-origin: center; }
+    @media (prefers-reduced-motion: no-preference) {
+      .ocr-mascot[data-motion="loading"] [data-part="eyes"] { animation: ocr-mascot-scan 2.4s ease-in-out infinite; }
+      .ocr-mascot:is([data-motion="loading"], [data-motion="idle"]) [data-part^="eye-"] { animation: ocr-mascot-blink 4.8s ease-in-out infinite; }
+    }
+    @keyframes ocr-mascot-scan {
+      0%, 100% { transform: translateX(-7px); }
+      45%, 55% { transform: translateX(7px); }
+    }
+    @keyframes ocr-mascot-blink {
+      0%, 46%, 50%, 100% { transform: scaleY(1); }
+      48% { transform: scaleY(0.12); }
+    }
+  </style>
+  <path data-part="bubble" d="M42 12h44c18 0 30 12 30 30v22c0 18-12 30-30 30H62l-22 18c-4 3-8 1-7-4l3-14c-15-2-24-13-24-30V42c0-18 12-30 30-30Z" fill="#8fb3ff" />
+  <path data-part="shine" d="M30 34c2-7 7-11 14-12" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.45" />
+  <g data-part="eyes">
+    <g data-part="eye-left">
+      <rect x="40" y="38" width="16" height="30" rx="8" fill="#0f1115" />
+      <rect x="44" y="42" width="5" height="9" rx="2.5" fill="#ffffff" />
+    </g>
+    <g data-part="eye-right">
+      <rect x="72" y="38" width="16" height="30" rx="8" fill="#0f1115" />
+      <rect x="76" y="42" width="5" height="9" rx="2.5" fill="#ffffff" />
+    </g>
+  </g>
+</svg>

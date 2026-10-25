@@ -1,0 +1,155 @@
+:root {
+  color-scheme: dark;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+
+  --bg: var(--color-canvas);
+  --surface-1: var(--color-surface);
+  --surface-2: var(--color-surface-muted);
+  --surface-3: var(--color-surface);
+  --border: var(--color-line);
+  --border-strong: var(--color-line-strong);
+  --text-1: var(--color-fg);
+  --text-2: var(--color-fg-muted);
+  --text-3: var(--color-fg-subtle);
+  --accent: var(--color-brand);
+  --accent-hover: var(--color-brand-hover);
+  --accent-text: var(--color-brand-fg);
+  --success: var(--color-success);
+  --warning: var(--color-warning);
+  --danger: var(--color-danger);
+  --info: var(--color-info);
+  --shadow: var(--shadow-pop);
+  --backdrop: rgb(0 0 0 / 0.55);
+
+  background: var(--bg);
+  color: var(--text-1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  letter-spacing: -0.006em;
+}
+
+button {
+  font: inherit;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* Narrow: collapse the sidebar into a hamburger top bar + slide-in left drawer. */
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--accent);
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.brand-mark.sm {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  padding: 0;
+  background: transparent;
+}
+
+.brand-mark.md {
+  width: 64px;
+  height: 64px;
+}
+
+.brand-mark.lg {
+  width: 112px;
+  height: 112px;
+}
+
+.brand-loading {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  grid-column: 1 / -1;
+  gap: 16px;
+  min-width: 0;
+  min-height: 240px;
+  padding: 24px;
+  text-align: center;
+}
+.brand-loading-art {
+  width: 88px;
+  max-width: 100%;
+  pointer-events: none;
+}
+.brand-loading-art > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.brand-loading-picture {
+  display: inline-flex;
+  flex: none;
+  vertical-align: middle;
+}
+.brand-loading-icon {
+  display: block;
+  flex: none;
+  max-width: none;
+  object-fit: contain;
+}
+.brand-loading > p {
+  max-width: 36ch;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  line-height: 1.65;
+}
+.brand-loading[data-size="compact"] {
+  flex: none;
+  min-height: 0;
+  gap: 10px;
+  padding: 16px;
+}
+.brand-loading[data-size="compact"] .brand-loading-art {
+  width: 48px;
+}
+
+/* Inside a page the banner aligns with the page content (cards/header),
+   not the app-shell's 32px gutter — otherwise it looks indented/broken. */
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
