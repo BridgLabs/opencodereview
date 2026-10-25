@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/bpinheiroms/opencodereview/security/policy
+    url: https://github.com/BridgLabs/opencodereview/security/policy
     about: Please report security issues privately, not as public issues.

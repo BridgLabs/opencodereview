@@ -4,13 +4,13 @@
   "description": "Self-hosted AI code review for GitHub pull requests.",
   "license": "PolyForm-Small-Business-1.0.0",
   "author": "Bruno Silva (https://github.com/bpinheiroms)",
-  "homepage": "https://github.com/bpinheiroms/opencodereview#readme",
+  "homepage": "https://github.com/BridgLabs/opencodereview#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bpinheiroms/opencodereview.git"
+    "url": "git+https://github.com/BridgLabs/opencodereview.git"
   },
   "bugs": {
-    "url": "https://github.com/bpinheiroms/opencodereview/issues"
+    "url": "https://github.com/BridgLabs/opencodereview/issues"
   },
   "private": true,
   "type": "module",

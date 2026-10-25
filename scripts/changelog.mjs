@@ -10,7 +10,7 @@ import { basename, join } from "node:path";
 
 const DIRECTORY = "changelog.d";
 const CHANGELOG = "CHANGELOG.md";
-const REPOSITORY = "https://github.com/bpinheiroms/opencodereview";
+const REPOSITORY = "https://github.com/BridgLabs/opencodereview";
 const GROUPS = ["Added", "Changed", "Deprecated", "Removed", "Fixed", "Security"];
 
 function fragments() {

@@ -110,4 +110,4 @@ The [Provider CLI canary](../.github/workflows/provider-cli-canary.yml) builds t
 
 ## Releases
 
-`pnpm changelog:release <version>` moves the notes in `changelog.d/` into a new `CHANGELOG.md` section. Commit that, then push the tag `v<version>`: the [Release workflow](../.github/workflows/release.yml) publishes the `server`, `runner` and `web` images for `amd64` and `arm64` to `ghcr.io/bpinheiroms/opencodereview-*`.
+`pnpm changelog:release <version>` moves the notes in `changelog.d/` into a new `CHANGELOG.md` section. Commit that, then push the tag `v<version>`: the [Release workflow](../.github/workflows/release.yml) publishes the `server`, `runner` and `web` images for `amd64` and `arm64` to `ghcr.io/bridglabs/opencodereview-*`.

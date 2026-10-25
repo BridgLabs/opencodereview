@@ -16,12 +16,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  REGISTRY: ghcr.io/bpinheiroms
+  REGISTRY: ghcr.io/bridglabs
 
 jobs:
   images:
     name: Images (${{ matrix.arch }})
-    if: github.repository == 'bpinheiroms/opencodereview'
+    if: github.repository == 'BridgLabs/opencodereview'
     strategy:
       matrix:
         include:

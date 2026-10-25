@@ -22,7 +22,7 @@ concurrency:
 jobs:
   canary:
     name: Newest provider CLIs
-    if: github.repository == 'bpinheiroms/opencodereview'
+    if: github.repository == 'BridgLabs/opencodereview'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     permissions:
@@ -58,7 +58,7 @@ jobs:
   alert:
     name: Report a failed canary
     needs: canary
-    if: always() && github.repository == 'bpinheiroms/opencodereview'
+    if: always() && github.repository == 'BridgLabs/opencodereview'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

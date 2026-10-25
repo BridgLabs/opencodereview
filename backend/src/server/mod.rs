@@ -61,7 +61,7 @@ pub(crate) use workspace::*;
 #[cfg(test)]
 mod progress_tests;
 
-const OCR_REPOSITORY_URL: &str = "https://github.com/bpinheiroms/opencodereview";
+const OCR_REPOSITORY_URL: &str = "https://github.com/BridgLabs/opencodereview";
 
 /// Closing line of every visible OpenCodeReview comment. Reviews post from the
 /// user's own GitHub account, so each one says where it came from.

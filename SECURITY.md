@@ -13,7 +13,7 @@ OpenCodeReview is released from `main`. Security fixes are made on `main` and in
 
 Please do not open a public issue, discussion or pull request for a security problem.
 
-Report it privately through GitHub's private vulnerability reporting: open the repository's **Security** tab and choose **Report a vulnerability**, or go to <https://github.com/bpinheiroms/opencodereview/security/advisories/new>.
+Report it privately through GitHub's private vulnerability reporting: open the repository's **Security** tab and choose **Report a vulnerability**, or go to <https://github.com/BridgLabs/opencodereview/security/advisories/new>.
 
 Include:
 

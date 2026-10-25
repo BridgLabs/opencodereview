@@ -898,7 +898,7 @@ fn final_comment_validation_drops_duplicates_and_invalid_anchors() {
         { "path": "src/lib.rs", "line": 2, "side": "RIGHT", "body": structured_finding() },
         { "path": "src/lib.rs", "line": 2, "side": "RIGHT", "body": structured_finding() },
         { "path": "src/lib.rs", "line": 1, "side": "RIGHT", "body": structured_question() },
-        { "path": "src/lib.rs", "line": 2, "side": "RIGHT", "body": "Fixed in https://github.com/bpinheiroms/opencodereview/commit/abc." }
+        { "path": "src/lib.rs", "line": 2, "side": "RIGHT", "body": "Fixed in https://github.com/BridgLabs/opencodereview/commit/abc." }
     ]})
     .to_string();
     let validated = super::validate_final_comments(&raw, "abc", diff).expect("valid comments");
@@ -964,7 +964,7 @@ fn sanitize_review_comments_rejects_unstructured_findings() {
 #[test]
 fn sanitize_review_comments_drops_unstructured_replies() {
     let raw = serde_json::json!({ "comments": [
-        { "body": "Fixed in https://github.com/bpinheiroms/opencodereview/commit/abc." },
+        { "body": "Fixed in https://github.com/BridgLabs/opencodereview/commit/abc." },
         { "body": structured_finding() }
     ]})
     .to_string();

@@ -6,7 +6,7 @@ By participating you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). 
 
 ## Before you start
 
-- **Bugs:** search the [existing issues](https://github.com/bpinheiroms/opencodereview/issues) first, then open a bug report with steps to reproduce.
+- **Bugs:** search the [existing issues](https://github.com/BridgLabs/opencodereview/issues) first, then open a bug report with steps to reproduce.
 - **Features and larger changes:** open a feature request or discussion before writing code, so we can agree on the approach. Changes that add product areas, model providers or settings need a product decision first.
 - **Small fixes** (typos, docs, obvious bugs) can go straight to a pull request.
 

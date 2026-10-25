@@ -16,4 +16,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Guided onboarding at `http://localhost:1421`.
 - Source-available project files: PolyForm Small Business 1.0.0 license, NOTICE, contributing guide, code of conduct, security policy, issue and pull request templates.
 
-[Unreleased]: https://github.com/bpinheiroms/opencodereview/commits/main
+[Unreleased]: https://github.com/BridgLabs/opencodereview/commits/main

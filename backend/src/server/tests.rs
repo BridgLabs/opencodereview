@@ -624,7 +624,7 @@ fn result_comment_links_to_ocr_repository() {
         "### ✅ OpenCodeReview found no issues\n\nReviewed [`abcdef12`](https://github.com/owner/repo/commit/abcdef123456). Nothing here needs action."
     ));
     assert!(clean.ends_with(
-        "<sub>Reviewed by [OpenCodeReview](https://github.com/bpinheiroms/opencodereview), source-available AI code review with the AI account you already have.</sub>"
+        "<sub>Reviewed by [OpenCodeReview](https://github.com/BridgLabs/opencodereview), source-available AI code review with the AI account you already have.</sub>"
     ));
     assert!(clean.contains("ocr-result-key:v1 repo=owner/repo pr=7"));
     assert!(clean.contains("<!-- ocr-status-publication:v1 run=42 -->"));
@@ -656,7 +656,7 @@ fn findings_review_payload_uses_result_summary_and_keeps_recovery_marker() {
     assert!(body.starts_with(
         "### ⚠️ OpenCodeReview posted findings\n\nReviewed [`abcdef`](https://github.com/owner/repo/commit/abcdef)."
     ));
-    assert!(body.contains("Reviewed by [OpenCodeReview](https://github.com/bpinheiroms/opencodereview)"));
+    assert!(body.contains("Reviewed by [OpenCodeReview](https://github.com/BridgLabs/opencodereview)"));
     assert!(body.ends_with("\n\n<!-- ocr-review-post:v1 run=7 -->"));
 }
 
@@ -690,7 +690,7 @@ Reviewed [`5c540aa1`](https://github.com/owner/repo/commit/5c540aa1234567). Each
 | ❓ | Should the old schema stay readable during deploy? | `src/billing/invoices.ts:57` |\n\
 | ⚠️ | Totals use `a \\| b` instead of `a \\|\\| b` | `src/billing/total.ts` |\n\
 | ⚠️ | Missing rollout note | General |\n\n\
-<sub>Reviewed by [OpenCodeReview](https://github.com/bpinheiroms/opencodereview), source-available AI code review with the AI account you already have.</sub>\n\n\
+<sub>Reviewed by [OpenCodeReview](https://github.com/BridgLabs/opencodereview), source-available AI code review with the AI account you already have.</sub>\n\n\
 <!-- ocr-review-post:v1 run=7 -->");
 }
 

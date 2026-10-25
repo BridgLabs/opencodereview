@@ -11,7 +11,7 @@ OpenCodeReview is free under the PolyForm Small Business License 1.0.0 and sold 
 ## 1. Definitions
 
 - **You** are the person who signs this agreement.
-- **Project** is OpenCodeReview and all other software, documentation and material that the Maintainer owns or manages, including the repository `github.com/bpinheiroms/opencodereview`.
+- **Project** is OpenCodeReview and all other software, documentation and material that the Maintainer owns or manages, including the repository `github.com/BridgLabs/opencodereview`.
 - **Contribution** is each work that you send to the Project in any form, including source code, object code, documentation, translations, images, designs, tests and text in pull requests, commits, patches, issues and comments. A Contribution includes work that you sent before the date that you sign this agreement. A Contribution does not include material that you mark in writing as "Not a Contribution" when you send it.
 - **Copyright** is all economic rights in a work under the copyright law of each country, including rights in computer programs and databases and all related rights.
 

@@ -61,7 +61,7 @@ representative at an online or offline event.
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement by opening a
 private security advisory at
-<https://github.com/bpinheiroms/opencodereview/security/advisories/new> or by
+<https://github.com/BridgLabs/opencodereview/security/advisories/new> or by
 email at bpinheiroms@gmail.com.
 All complaints will be reviewed and investigated promptly and fairly.
 

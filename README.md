@@ -22,7 +22,7 @@ OpenCodeReview watches the repositories you pick, reviews each pull request with
 ## Quick start
 
 ```bash
-git clone https://github.com/bpinheiroms/opencodereview && cd opencodereview && docker compose up --build
+git clone https://github.com/BridgLabs/opencodereview && cd opencodereview && docker compose up --build
 ```
 
 Open [http://localhost:1421](http://localhost:1421) and follow onboarding:
