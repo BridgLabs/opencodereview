@@ -1,0 +1,72 @@
+{
+  "name": "opencodereview",
+  "version": "0.1.0",
+  "description": "Self-hosted AI code review for GitHub pull requests.",
+  "license": "PolyForm-Small-Business-1.0.0",
+  "author": "Bruno Silva (https://github.com/bpinheiroms)",
+  "homepage": "https://github.com/bpinheiroms/opencodereview#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bpinheiroms/opencodereview.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bpinheiroms/opencodereview/issues"
+  },
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
+    "dev": "vite",
+    "dev:web": "VITE_DEV_PORT=1421 vite --host 0.0.0.0",
+    "debug:web": "node scripts/dev-web-docker.mjs",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check:file-size": "node scripts/check-file-sizes.mjs",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "check:staged": "biome check --write --staged --files-ignore-unknown=true --no-errors-on-unmatched",
+    "knip": "knip",
+    "changelog:check": "node scripts/changelog.mjs check",
+    "changelog:release": "node scripts/changelog.mjs release"
+  },
+  "dependencies": {
+    "@fontsource-variable/dm-sans": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
+    "@tanstack/react-query": "^5.101.0",
+    "@tanstack/react-router": "^1.170.46",
+    "@tiptap/core": "3.30.5",
+    "@tiptap/extension-code-block": "3.30.5",
+    "@tiptap/extension-list": "3.30.5",
+    "@tiptap/extension-table": "3.30.5",
+    "@tiptap/markdown": "3.30.5",
+    "@tiptap/pm": "3.30.5",
+    "@tiptap/react": "3.30.5",
+    "@tiptap/starter-kit": "3.30.5",
+    "@xyflow/react": "12.11.5",
+    "lucide-react": "^1.17.0",
+    "nuqs": "^2.9.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-force-graph-2d": "^1.29.1",
+    "react-markdown": "^10.1.0",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "22.18.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "jsdom": "26.1.0",
+    "knip": "^5.88.1",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.7",
+    "vitest": "^4.1.12"
+  }
+}
