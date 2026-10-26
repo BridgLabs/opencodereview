@@ -16,7 +16,7 @@ than one group, and an item can continue on lines indented by two spaces:
 ```
 
 `pnpm changelog:check` validates the files; the pre-commit hook and the Changelog workflow run it
-too. At release time, `pnpm changelog:release <version>` moves every item into a new version
-section of `CHANGELOG.md`, in the order the pull requests merged, and deletes the files.
+too. The Release workflow moves every item into a new version section of `CHANGELOG.md` after the
+merge, in the order the pull requests merged, and deletes the files.
 
 A pull request with no change that a user can see gets the `no-changelog` label instead.
