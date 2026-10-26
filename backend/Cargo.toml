@@ -23,13 +23,19 @@ name = "opencodereview_server"
 [dependencies]
 base64 = "=0.22.1"
 libc = "=0.2.186"
+postgres = "0.19.14"
 pulldown-cmark = { version = "=0.13.4", default-features = false }
+r2d2 = "0.8.10"
+r2d2_postgres = "0.18.2"
 reqwest = { version = "0.13.4", features = ["blocking", "form", "json"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
+rustls-native-certs = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10.8"
 thiserror = "2"
+tokio-postgres-rustls = "0.14.0"
 
 # Handlers pass request state as plain arguments, and SQLite rows come back as tuples, so these two
 # structural lints would flag the codebase's normal shape rather than mistakes.
