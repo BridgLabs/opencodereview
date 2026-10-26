@@ -122,15 +122,13 @@ impl RetentionCoordinator {
         backfill: impl FnOnce(&ArchiveStore, &Database) -> Result<(), String>,
     ) -> Result<MaintenanceResult, String> {
         let result = self.maintenance_pass(backfill);
-        if let Err(error) = &result {
-            eprintln!("Archive retention maintenance error: {error}");
-            if let Ok(mut status) = self.status.lock() {
-                status.last_error = Some(
-                    "Archive maintenance failed. Check server logs; previous successful metrics are retained.".into(),
-                );
+        match &result {
+            Ok(_) => self.publish_status(),
+            Err(error) => {
+                eprintln!("Archive retention maintenance error: {error}");
+                self.publish_failure();
             }
         }
-        self.publish_status();
         result
     }
 
@@ -141,6 +139,34 @@ impl RetentionCoordinator {
             return;
         };
         if let (Ok(json), Ok(db)) = (serde_json::to_string(&status), self.db.open()) {
+            let _ = db.save_setting_value(STORAGE_STATUS_SETTING, &json);
+        }
+    }
+
+    /// Marks the recorded status failed and keeps its metrics: another instance's last successful
+    /// pass may have recorded them, and this instance's own may be older or empty.
+    fn publish_failure(&self) {
+        const FAILED: &str = "Archive maintenance failed. Check server logs; previous successful metrics are retained.";
+        let Ok(db) = self.db.open() else {
+            return;
+        };
+        let recorded = db
+            .setting(STORAGE_STATUS_SETTING)
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str::<ArchiveStorageStatus>(&json).ok());
+        let mut status = match recorded {
+            Some(status) => status,
+            None => match self.status.lock() {
+                Ok(status) => status.clone(),
+                Err(_) => return,
+            },
+        };
+        status.last_error = Some(FAILED.into());
+        if let Ok(mut local) = self.status.lock() {
+            *local = status.clone();
+        }
+        if let Ok(json) = serde_json::to_string(&status) {
             let _ = db.save_setting_value(STORAGE_STATUS_SETTING, &json);
         }
     }

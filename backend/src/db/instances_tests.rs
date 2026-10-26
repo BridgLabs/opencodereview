@@ -282,3 +282,35 @@ fn reviews_an_instance_owns_but_does_not_run_are_cancelled() {
     // Its PR can be reviewed again.
     assert!(this.open().unwrap().start_review_skeleton_with(2, None).is_ok());
 }
+
+#[test]
+fn an_index_left_by_this_instance_can_be_restarted_and_others_see_progress() {
+    let shared = Db::for_test();
+    shared
+        .open()
+        .unwrap()
+        .ensure_temp_repo_for_index(1, "acme/api")
+        .unwrap();
+    let a = shared.clone().with_instance("a");
+    let b = shared.clone().with_instance("b");
+    a.open().unwrap().register_instance("a", "host-a").unwrap();
+    b.open().unwrap().register_instance("b", "host-b").unwrap();
+    assert!(a.open().unwrap().claim_repo_index(1, Some("main")).unwrap().is_some());
+    a.open()
+        .unwrap()
+        .record_repo_index_progress(1, r#"{"stage":"parsing"}"#)
+        .unwrap();
+    let other = b.open().unwrap();
+    assert_eq!(
+        other.repo_index_progress(1).unwrap().as_deref(),
+        Some(r#"{"stage":"parsing"}"#)
+    );
+    assert_eq!(other.active_index_count().unwrap(), 1);
+    // Its job ended without recording an outcome: a has no job for the row, so it starts afresh.
+    assert!(a.open().unwrap().claim_repo_index(1, Some("main")).unwrap().is_some());
+    assert_eq!(
+        other.repo_index_progress(1).unwrap(),
+        None,
+        "a new run starts without progress"
+    );
+}

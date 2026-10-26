@@ -582,6 +582,30 @@ fn maintenance_failure_preserves_last_successful_metrics_and_reports_error() {
 }
 
 #[test]
+fn another_instance_failing_keeps_the_recorded_metrics() {
+    let dir = Directory::new();
+    let (db, _store, coordinator) = setup_env(&dir);
+    coordinator.perform_maintenance_with_backfill(|_, _| Ok(())).unwrap();
+    let recorded = coordinator.status.lock().unwrap().clone();
+    // A freshly started instance, with no metrics of its own, whose pass fails.
+    let other_root = dir.0.join("other-instance");
+    std::fs::write(&other_root, "file").unwrap();
+    let other = RetentionCoordinator::new(
+        db.handle(),
+        other_root,
+        ArchiveLeaseTracker::new(),
+        Arc::new(Mutex::new(ArchiveStorageStatus::default())),
+        Arc::new((Mutex::new(false), Condvar::new())),
+    );
+    assert!(other.perform_maintenance_with_backfill(|_, _| Ok(())).is_err());
+    let stored: ArchiveStorageStatus =
+        serde_json::from_str(&db.setting(STORAGE_STATUS_SETTING).unwrap().unwrap()).unwrap();
+    assert_eq!(stored.last_cleanup_at, recorded.last_cleanup_at);
+    assert_eq!(stored.used_bytes, recorded.used_bytes);
+    assert!(stored.last_error.as_deref().unwrap().contains("maintenance failed"));
+}
+
+#[test]
 fn successful_local_cleanup_preserves_safe_backfill_warning_until_recovery() {
     let dir = Directory::new();
     let (_db, _store, coordinator) = setup_env(&dir);
