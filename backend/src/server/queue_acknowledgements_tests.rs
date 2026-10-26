@@ -257,14 +257,14 @@ static COALESCED: CoalescedTask = CoalescedTask::new();
 
 #[test]
 fn coalesced_task_reruns_once_and_never_overlaps_same_key() {
-    let key = PathBuf::from(format!(
+    let key = format!(
         "ocr-coalesced-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
-    ));
+    );
     let (block_tx, block_rx) = std::sync::mpsc::channel::<()>();
     let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
     let passes = Arc::new(AtomicUsize::new(0));
@@ -287,7 +287,7 @@ fn coalesced_task_reruns_once_and_never_overlaps_same_key() {
     }
     // A different key runs concurrently.
     let (other_tx, other_rx) = std::sync::mpsc::channel::<()>();
-    COALESCED.spawn(PathBuf::from(format!("{key:?}-other")), move || {
+    COALESCED.spawn(format!("{key}-other"), move || {
         other_tx.send(()).ok();
     });
     other_rx.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -319,14 +319,14 @@ fn coalesced_task_reruns_once_and_never_overlaps_same_key() {
 
 #[test]
 fn coalesced_task_frees_the_key_after_a_panic() {
-    let key = PathBuf::from(format!(
+    let key = format!(
         "ocr-coalesced-panic-{}-{}",
         std::process::id(),
         SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
-    ));
+    );
     COALESCED.spawn(key.clone(), || panic!("boom"));
     let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
     let done_tx = Arc::new(Mutex::new(done_tx));

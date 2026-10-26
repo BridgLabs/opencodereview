@@ -412,7 +412,8 @@ fn records_each_attempt_and_retains_cost_when_recovery_fails_or_is_cancelled() {
         db.ensure_temp_repo_for_index(1, "owner/repo").unwrap();
         rusqlite::Connection::open(&db_path).unwrap().execute("INSERT INTO pull_requests (id, repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at) VALUES (1, 1, 1, 'PR', 'a', 'head', 1, 1, 1)", []).unwrap();
         fixture.inputs.run_id = db.start_review_skeleton_with(1, None).unwrap();
-        fixture.inputs.db_path = db_path.to_string_lossy().into();
+        fixture.inputs.db_handle = Some(crate::db::Db::sqlite(db_path.clone()));
+        fixture.inputs.archive_dir = fixture.root.join("review-archives");
         let transcript = fixture.root.join("transcript.json");
         fs::write(&transcript, json!({"type":"result","subtype":"success","modelUsage":{"fixture-model":{"inputTokens":10,"outputTokens":5}}}).to_string()).unwrap();
         let usage = parse_transcript_usage(&transcript);

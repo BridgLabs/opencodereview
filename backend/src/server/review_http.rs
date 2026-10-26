@@ -169,13 +169,13 @@ pub(crate) fn decide_review_http(
                 let _ = with_db_raw(state, |db| {
                     db.retire_queue_acknowledgement(pr_id, &run.head_sha, Some(run.id))
                 });
-                spawn_queue_acknowledgements(state.config.db_path.clone());
+                spawn_queue_acknowledgements(state.config.db.clone());
                 if has_findings {
-                    let db_path = state.config.db_path.clone();
+                    let db_handle = state.config.db.clone();
                     let retire_repo = full_name.clone();
                     let findings_run_id = run.id;
                     thread::spawn(move || {
-                        if let Ok(db) = Database::open_at(db_path) {
+                        if let Ok(db) = db_handle.open() {
                             retire_clean_comments_after_findings(&db, &retire_repo, number, findings_run_id);
                         }
                     });
@@ -267,14 +267,14 @@ pub(crate) fn effective_review_result_for_decision(
 }
 
 pub(crate) fn retry_review_result_http(state: &SharedState, pr_id: i64) -> Result<serde_json::Value, String> {
-    let (db_path, result, full_name, number) = with_db_raw(state, |db| {
+    let (db_handle, result, full_name, number) = with_db_raw(state, |db| {
         let result = db.retry_review_result(pr_id)?;
         let (_repo_id, full_name, number, _head) = db.pr_review_coords(pr_id)?;
-        Ok((db.path(), result, full_name, number))
+        Ok((db.handle(), result, full_name, number))
     })?;
     let repo_path = state.config.repos_dir.join(&full_name);
     thread::spawn(move || {
-        if let Ok(db) = Database::open_at(PathBuf::from(db_path)) {
+        if let Ok(db) = db_handle.open() {
             let _ = publish_effective_review_result(&db, &result, &full_name, number, &repo_path);
         }
     });

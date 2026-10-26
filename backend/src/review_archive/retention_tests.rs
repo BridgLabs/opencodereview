@@ -61,7 +61,7 @@ fn setup_env(dir: &Directory) -> (Database, ArchiveStore, RetentionCoordinator) 
     let leases = ArchiveLeaseTracker::new();
     let status = Arc::new(Mutex::new(ArchiveStorageStatus::default()));
     let notify = Arc::new((Mutex::new(false), Condvar::new()));
-    let coordinator = RetentionCoordinator::new(db_path, archive_root, leases, status, notify);
+    let coordinator = RetentionCoordinator::new(crate::db::Db::sqlite(db_path), archive_root, leases, status, notify);
     (db, store, coordinator)
 }
 

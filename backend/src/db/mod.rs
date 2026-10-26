@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 mod accounts;
 mod comment_activation;
 mod findings;
+mod handle;
 mod indexing;
 mod lifecycle;
 mod migrations;
@@ -26,6 +27,7 @@ mod review_usage;
 mod settings;
 mod skills;
 pub use accounts::AiAccount;
+pub use handle::Db;
 
 pub(super) use migrations::MIGRATIONS;
 #[cfg(test)]

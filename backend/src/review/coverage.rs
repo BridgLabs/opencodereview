@@ -232,8 +232,8 @@ fn recover_full_coverage(
     }))
 }
 
-fn backfill_historical(repo: &Path, db_path: &str, repo_id: i64, cancel: &AtomicBool) -> Result<(), String> {
-    let db = crate::db::Database::open_at(db_path.into())?;
+fn backfill_historical(repo: &Path, db: &crate::db::Db, repo_id: i64, cancel: &AtomicBool) -> Result<(), String> {
+    let db = db.open()?;
     for candidate in db.historical_review_coverage_candidates(repo_id)? {
         if db.review_coverage_exists(candidate.run_id)? {
             continue;
@@ -317,7 +317,7 @@ pub(crate) fn reuse_stacked_scope(
 
 pub(crate) fn resolve(
     repo: &Path,
-    db_path: &str,
+    db: &crate::db::Db,
     repo_id: i64,
     base: &str,
     head: &str,
@@ -325,8 +325,8 @@ pub(crate) fn resolve(
     prior_head: Option<&str>,
     cancel: &AtomicBool,
 ) -> Result<Option<CoverageResolution>, String> {
-    backfill_historical(repo, db_path, repo_id, cancel)?;
-    let known = crate::db::Database::open_at(db_path.into())?.review_coverage_patch_ids(repo_id)?;
+    backfill_historical(repo, db, repo_id, cancel)?;
+    let known = db.open()?.review_coverage_patch_ids(repo_id)?;
     let Some(known) = known else {
         return Ok(Some(CoverageResolution {
             review_base: None,

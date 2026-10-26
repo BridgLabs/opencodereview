@@ -186,7 +186,16 @@ pub struct ReviewInputs {
     pub review_deep_threshold: usize,
     pub review_chunk_size: usize,
     pub review_parallel_chunks: usize,
-    pub db_path: String,
+    /// None for diagnostics, which run without a database.
+    pub db_handle: Option<crate::db::Db>,
+    /// Where frozen review archives are stored.
+    pub archive_dir: PathBuf,
+}
+
+impl ReviewInputs {
+    pub(crate) fn open_db(&self) -> Result<Database, String> {
+        self.db_handle.as_ref().ok_or("Review storage unavailable")?.open()
+    }
 }
 
 pub(crate) fn should_reuse_review_coverage(inputs: &ReviewInputs) -> bool {
@@ -346,7 +355,7 @@ fn record_stage(
     started_at: i64,
     finished_at: i64,
 ) {
-    if let Ok(db) = Database::open_at(PathBuf::from(&inputs.db_path)) {
+    if let Ok(db) = inputs.open_db() {
         let _ = db.insert_review_run_stage(&ReviewRunStageInput {
             run_id: inputs.run_id,
             pr_id: inputs.pr_id,

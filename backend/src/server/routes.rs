@@ -150,7 +150,6 @@ pub(crate) fn health(state: &SharedState) -> Result<serde_json::Value, String> {
     let response = HealthResponse {
         ok: true,
         message: "OpenCodeReview server ready".to_string(),
-        db_path: state.config.db_path.to_string_lossy().to_string(),
         repos_dir: state.config.repos_dir.to_string_lossy().to_string(),
         github: github_status(),
         git: command_status("git", &["--version"]),

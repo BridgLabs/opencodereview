@@ -162,7 +162,7 @@ fn legacy_full_coverage_is_recovered_read_only_using_the_recorded_merge_base() {
         .unwrap()
         .is_none());
     assert!(snapshot_for_reuse(&root, &db, 1, pr, &head, &AtomicBool::new(true)).is_err());
-    backfill_historical(&root, &db.path(), 1, &cancel).unwrap();
+    backfill_historical(&root, &db.handle(), 1, &cancel).unwrap();
     let backfilled = db.review_coverage_snapshot(pr, &head).unwrap().unwrap();
     assert_eq!(backfilled.diff_text, coverage.diff_text);
     assert_eq!(backfilled.changed_files, coverage.changed_files);
@@ -343,7 +343,11 @@ fn legacy_merge_with_only_excluded_delta_finishes_without_inference() {
         review_deep_threshold: 20,
         review_chunk_size: 5,
         review_parallel_chunks: 1,
-        db_path: db.path(),
+        db_handle: Some(db.handle()),
+        archive_dir: std::path::Path::new(&db.path())
+            .parent()
+            .unwrap()
+            .join("review-archives"),
     };
     let output = crate::review::execute(&input, &AtomicBool::new(false), &mut |_, _| {}).unwrap();
     assert!(output.no_new_changes);
@@ -497,7 +501,11 @@ fn stacked_child_integration_finishes_without_inference(integration: &str) {
         review_deep_threshold: 20,
         review_chunk_size: 5,
         review_parallel_chunks: 1,
-        db_path: db.path(),
+        db_handle: Some(db.handle()),
+        archive_dir: std::path::Path::new(&db.path())
+            .parent()
+            .unwrap()
+            .join("review-archives"),
     };
     let output = crate::review::execute(&input, &cancel, &mut |_, _| {})
         .expect("Reviewed child must be skipped before model preparation");
@@ -892,7 +900,7 @@ fn stacked_rebase_reuses_verified_patch_coverage_and_reviews_only_new_commit() {
     let child_diff = crate::review::diff_local(&root, &format!("{parent_head}...{child_head}"), &cancel).unwrap();
     let first = resolve(
         &root,
-        &db_path.to_string_lossy(),
+        &crate::db::Db::sqlite(db_path.clone()),
         1,
         &parent_head,
         &child_head,
@@ -919,7 +927,7 @@ fn stacked_rebase_reuses_verified_patch_coverage_and_reviews_only_new_commit() {
         crate::review::diff_local(&root, &format!("{rebased_parent}...{rebased_child}"), &cancel).unwrap();
     let rebased = resolve(
         &root,
-        &db_path.to_string_lossy(),
+        &crate::db::Db::sqlite(db_path.clone()),
         1,
         &rebased_parent,
         &rebased_child,
@@ -940,7 +948,7 @@ fn stacked_rebase_reuses_verified_patch_coverage_and_reviews_only_new_commit() {
         crate::review::diff_local(&root, &format!("{rebased_parent}...{child_with_new_change}"), &cancel).unwrap();
     let incremental = resolve(
         &root,
-        &db_path.to_string_lossy(),
+        &crate::db::Db::sqlite(db_path.clone()),
         1,
         &rebased_parent,
         &child_with_new_change,
@@ -1034,9 +1042,18 @@ fn malformed_persisted_coverage_is_quarantined_before_fresh_reuse() {
     db.finalize_review_coverage(fresh_run_id).unwrap();
     drop(db);
 
-    let resolution = resolve(&root, &db_path.to_string_lossy(), 1, &base, &head, &diff, None, &cancel)
-        .unwrap()
-        .unwrap();
+    let resolution = resolve(
+        &root,
+        &crate::db::Db::sqlite(db_path.clone()),
+        1,
+        &base,
+        &head,
+        &diff,
+        None,
+        &cancel,
+    )
+    .unwrap()
+    .unwrap();
     assert!(resolution.usable);
     assert!(resolution.fully_covered);
     assert_eq!(resolution.review_base.as_deref(), Some(base.as_str()));

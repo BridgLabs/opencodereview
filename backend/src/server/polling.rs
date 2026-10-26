@@ -79,7 +79,7 @@ pub(crate) fn poll_reviews(state: &SharedState) -> Result<serde_json::Value, Str
     let result = run_poll_reviews(state).inspect_err(|error| {
         let _ = with_db_raw(state, |db| db.record_poll_result(crate::db::now_millis(), Some(error)));
     });
-    spawn_queue_acknowledgements(state.config.db_path.clone());
+    spawn_queue_acknowledgements(state.config.db.clone());
     state.poll_running.store(false, Ordering::Relaxed);
     result
 }
@@ -110,7 +110,7 @@ fn sync_monitor_all_workspaces(state: &SharedState) {
 }
 
 pub(crate) fn run_poll_reviews(state: &SharedState) -> Result<serde_json::Value, String> {
-    spawn_failed_clean_result_retry(state.config.db_path.clone(), state.config.repos_dir.clone());
+    spawn_failed_clean_result_retry(state.config.db.clone(), state.config.repos_dir.clone());
     sync_monitor_all_workspaces(state);
     let (repos, settings) = with_db_raw(state, |db| Ok((db.monitored_repos()?, db.settings()?)))?;
     let mut target_logins = std::collections::HashSet::new();

@@ -101,7 +101,7 @@ pub(crate) fn reconcile_queue_acknowledgements(db: &Database) {
 
 /// Per-key background task: a request while a pass for the same key runs makes
 /// that pass run once more instead of starting another thread.
-pub(crate) struct CoalescedTask(Mutex<BTreeMap<PathBuf, bool>>);
+pub(crate) struct CoalescedTask(Mutex<BTreeMap<String, bool>>);
 
 impl CoalescedTask {
     pub(crate) const fn new() -> Self {
@@ -112,7 +112,7 @@ impl CoalescedTask {
     /// The running pass removes its key under the same lock acquisition as the
     /// rerun check so no request is lost; the drop guard frees the key if the
     /// task unwinds.
-    pub(crate) fn spawn(&'static self, key: PathBuf, task: impl Fn() + Send + 'static) {
+    pub(crate) fn spawn(&'static self, key: String, task: impl Fn() + Send + 'static) {
         {
             let mut running = self.0.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(rerun) = running.get_mut(&key) {
@@ -124,7 +124,7 @@ impl CoalescedTask {
         thread::spawn(move || {
             struct Remove<'a> {
                 task: &'a CoalescedTask,
-                key: PathBuf,
+                key: String,
             }
             impl Drop for Remove<'_> {
                 fn drop(&mut self) {
@@ -158,9 +158,9 @@ static QUEUE_ACKNOWLEDGEMENT_TASK: CoalescedTask = CoalescedTask::new();
 /// The reconcile pass runs GitHub list/post/delete calls, so callers in request
 /// or review-job paths hand it to a background pass with its own connection;
 /// requests coalesce per database instead of starting a thread per call.
-pub(crate) fn spawn_queue_acknowledgements(db_path: PathBuf) {
-    QUEUE_ACKNOWLEDGEMENT_TASK.spawn(db_path.clone(), move || {
-        if let Ok(db) = Database::open_at(db_path.clone()) {
+pub(crate) fn spawn_queue_acknowledgements(db_handle: Db) {
+    QUEUE_ACKNOWLEDGEMENT_TASK.spawn(db_handle.id(), move || {
+        if let Ok(db) = db_handle.open() {
             reconcile_queue_acknowledgements(&db);
         }
     });

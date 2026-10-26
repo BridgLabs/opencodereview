@@ -7,9 +7,9 @@ pub(crate) fn start_runtime_cleanup_worker() {
     });
 }
 
-pub(crate) fn start_review_result_reconciliation(db_path: PathBuf, repos_dir: PathBuf) {
+pub(crate) fn start_review_result_reconciliation(db_handle: Db, repos_dir: PathBuf) {
     thread::spawn(move || {
-        let Ok(db) = Database::open_at(db_path) else {
+        let Ok(db) = db_handle.open() else {
             return;
         };
         reconcile_interrupted_review_posts(&db, &repos_dir);
@@ -74,7 +74,7 @@ pub(crate) fn reconcile_silent_review_result(
             let _ = db.finish_review_result_publication(result.id, comment_id);
             let _ = finish_published_result_lane(db, result);
             let _ = db.retire_queue_acknowledgement(result.pr_id, &result.observed_head_sha, result.run_id);
-            spawn_queue_acknowledgements(PathBuf::from(db.path()));
+            spawn_queue_acknowledgements(db.handle());
         }
         Ok(None) => record_review_result_failure(
             db,
@@ -149,9 +149,9 @@ pub(crate) fn spawn_single_flight(gate: &'static AtomicBool, task: impl FnOnce()
 
 /// Failed clean-result publications are retried on a background thread so the
 /// poll never waits on GitHub calls; a retry already in flight is not doubled.
-pub(crate) fn spawn_failed_clean_result_retry(db_path: PathBuf, repos_dir: PathBuf) {
+pub(crate) fn spawn_failed_clean_result_retry(db_handle: Db, repos_dir: PathBuf) {
     spawn_single_flight(&CLEAN_RESULT_RETRY_RUNNING, move || {
-        if let Ok(db) = Database::open_at(db_path) {
+        if let Ok(db) = db_handle.open() {
             retry_failed_clean_results(&db, &repos_dir);
         }
     });
@@ -302,9 +302,9 @@ pub(crate) fn is_older_than(path: &Path, max_age: Duration) -> bool {
 }
 
 // Restoration is independent of review/result publication: it must never repost a review.
-pub(crate) fn start_review_request_restoration(db_path: PathBuf) {
+pub(crate) fn start_review_request_restoration(db_handle: Db) {
     thread::spawn(move || {
-        let Ok(db) = Database::open_at(db_path) else {
+        let Ok(db) = db_handle.open() else {
             return;
         };
         loop {

@@ -75,7 +75,8 @@ pub(super) fn review_inputs(depth: &str, threshold: usize, chunk_size: usize) ->
         review_deep_threshold: threshold,
         review_chunk_size: chunk_size,
         review_parallel_chunks: 1,
-        db_path: ":memory:".to_string(),
+        db_handle: Some(crate::db::Db::sqlite(":memory:".into())),
+        archive_dir: std::path::PathBuf::from("review-archives"),
     }
 }
 
@@ -1508,7 +1509,9 @@ fn verify_retained_final_and_audit() {
     let archive = crate::review_archive::Archive::read(&source.join("snapshot.archive"), &descriptor).unwrap();
     let map: super::ReviewMap = serde_json::from_value(packet["map"].clone()).unwrap();
     let mut inputs = review_inputs("deep", 20, 5);
-    inputs.db_path = source.join("diagnostic.sqlite").to_str().unwrap().into();
+    let db_path = source.join("diagnostic.sqlite");
+    inputs.db_handle = Some(crate::db::Db::sqlite(db_path.clone()));
+    inputs.archive_dir = source.join("review-archives");
     inputs.frozen = Some(std::sync::Arc::new(super::frozen::FrozenContext::new(archive)));
     let mut payload = super::integration::Payload::empty(&map.head_sha);
     payload.sources = serde_json::from_slice(&std::fs::read(root.join("merge/chunk_findings.json")).unwrap()).unwrap();
@@ -1658,7 +1661,7 @@ fn repair_diagnostic_final(
     )
     .map_err(|error| error.to_string())?;
     let payload = super::integration::Payload::from_results(results, sources)?;
-    crate::db::Database::open_at(inputs.db_path.clone().into())?.store_finding_audit(
+    inputs.open_db()?.store_finding_audit(
         inputs.run_id,
         &crate::review::findings::seed_audit(&payload.sources, &map.head_sha, full_diff),
     )?;
@@ -1828,13 +1831,12 @@ fn validate_complete_real_review() {
     inputs.skill_content = fixture["skill"].as_str().unwrap().into();
     inputs.fixed_head_sha = Some(map.head_sha.clone());
     inputs.review_parallel_chunks = targets.len();
-    inputs.db_path = source.join("diagnostic.sqlite").to_str().unwrap().into();
-    assert!(
-        !std::path::Path::new(&inputs.db_path).exists(),
-        "Diagnostic ledger already exists"
-    );
-    drop(crate::db::Database::open_at(inputs.db_path.clone().into()).unwrap());
-    let ledger = rusqlite::Connection::open(&inputs.db_path).unwrap();
+    let db_path = source.join("diagnostic.sqlite");
+    inputs.db_handle = Some(crate::db::Db::sqlite(db_path.clone()));
+    inputs.archive_dir = source.join("review-archives");
+    assert!(!db_path.exists(), "Diagnostic ledger already exists");
+    drop(inputs.open_db().unwrap());
+    let ledger = rusqlite::Connection::open(&db_path).unwrap();
     ledger
         .execute(
             "INSERT INTO repos(id,owner,name,full_name,created_at,updated_at) VALUES(1,'diagnostic','repo',?1,0,0)",

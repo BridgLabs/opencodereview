@@ -218,7 +218,7 @@ pub(crate) fn run_sharded_review(
     let merge_dir = run_dir.join("merge");
     fs::create_dir_all(&merge_dir).map_err(|error| error.to_string())?;
     let chunk_findings = merge_chunk_findings(&results, head_sha);
-    Database::open_at(PathBuf::from(&inputs.db_path))?.store_finding_audit(
+    inputs.open_db()?.store_finding_audit(
         inputs.run_id,
         &crate::review::findings::seed_audit(&chunk_findings, head_sha, full_pr_diff),
     )?;
@@ -442,7 +442,7 @@ pub(crate) fn run_adaptive_final(
 ) -> Result<ReviewOutput, String> {
     let active_diff = fs::read_to_string(context.join("PR_DIFF.patch")).map_err(|error| error.to_string())?;
     let sources = merge_chunk_findings(results, head);
-    Database::open_at(PathBuf::from(&inputs.db_path))?.store_finding_audit(
+    inputs.open_db()?.store_finding_audit(
         inputs.run_id,
         &crate::review::findings::seed_audit(&sources, head, full_diff),
     )?;
@@ -1119,11 +1119,12 @@ pub(crate) fn run_review_chunk(
         "diffHash": diff_hash,
     });
     let cache_key = sha256_hex(serde_json::to_string(&cache_payload).unwrap_or_default().as_bytes());
-    let potential_cache_hit = Database::open_at(PathBuf::from(&inputs.db_path))
+    let potential_cache_hit = inputs
+        .open_db()
         .and_then(|db| db.review_chunk_cache_exists(&cache_key))
         .unwrap_or(false);
     if should_reuse_chunk_results(inputs) {
-        if let Some((report, _)) = Database::open_at(PathBuf::from(&inputs.db_path))?.cached_review_chunk(&cache_key)? {
+        if let Some((report, _)) = inputs.open_db()?.cached_review_chunk(&cache_key)? {
             fs::write(chunk_dir.join("report.json"), &report).map_err(|error| error.to_string())?;
             let evidence_warnings = frozen::materialize(
                 inputs,
@@ -1309,10 +1310,7 @@ pub(crate) fn run_review_chunk(
         .last()
         .ok_or("Incomplete review: no chunk execution recorded")?
         .metrics;
-    if let Some(db) = (attempts.len() == 1)
-        .then(|| Database::open_at(PathBuf::from(&inputs.db_path)).ok())
-        .flatten()
-    {
+    if let Some(db) = (attempts.len() == 1).then(|| inputs.open_db().ok()).flatten() {
         let _ = db.upsert_review_chunk_cache(&ReviewChunkCacheInput {
             cache_key,
             repo_id: inputs.repo_id,

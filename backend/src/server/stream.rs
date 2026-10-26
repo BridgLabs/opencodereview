@@ -70,7 +70,7 @@ pub(crate) fn stream_review_progress(
     stream.write_all(head.as_bytes()).map_err(|error| error.to_string())?;
     stream.flush().map_err(|error| error.to_string())?;
 
-    let db = Database::open_read_at(state.config.db_path.clone())?;
+    let db = state.config.db.open_read()?;
     let started = Instant::now();
     let mut last_key: Option<(i64, i64)> = None;
     let mut sent_initial = false;

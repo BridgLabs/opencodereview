@@ -78,7 +78,8 @@ fn review_preflight_refreshes_and_reuses_a_shared_index() {
     let repo = db.save_repo_default_branch(1, "main").unwrap();
     let state = Arc::new(ServerState::new(ServerConfig {
         bind: "127.0.0.1:0".to_string(),
-        db_path: root.join("test.sqlite"),
+        db: crate::db::Db::sqlite(root.join("test.sqlite")),
+        data_dir: root.to_path_buf(),
         repos_dir: root.join("repos"),
         auto_reindex: false,
         poll_interval_seconds: 300,
@@ -262,7 +263,11 @@ fn clean_reviews_are_completed_without_finding_selection_even_with_auto_post_ena
         review_deep_threshold: 5,
         review_chunk_size: 5,
         review_parallel_chunks: 2,
-        db_path: db.path(),
+        db_handle: Some(db.handle()),
+        archive_dir: std::path::Path::new(&db.path())
+            .parent()
+            .unwrap()
+            .join("review-archives"),
     };
     for no_changes in [false, true] {
         handle_completed_review(&db, &inputs, no_changes, false);
@@ -822,7 +827,8 @@ fn skip_decision_leaves_attention_and_survives_restore() {
         .unwrap();
     let state = Arc::new(ServerState::new(ServerConfig {
         bind: "127.0.0.1:0".into(),
-        db_path: root.join("test.sqlite"),
+        db: crate::db::Db::sqlite(root.join("test.sqlite")),
+        data_dir: root.to_path_buf(),
         repos_dir: root.join("repos"),
         auto_reindex: false,
         poll_interval_seconds: 300,

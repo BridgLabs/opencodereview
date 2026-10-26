@@ -180,7 +180,7 @@ pub(crate) fn run_index_job(state: SharedState, repo_id: i64, repo: Repo, repo_p
     let mut last_emit = std::time::Instant::now() - Duration::from_secs(1);
     let mut last_stage = String::new();
     let mut stage_started = std::time::Instant::now();
-    let db_path = state.config.db_path.clone();
+    let db_handle = state.config.db.clone();
     let progress_map = state.index_progress.clone();
     let mut on_progress = |progress: indexer::IndexProgress| {
         let now = std::time::Instant::now();
@@ -188,7 +188,7 @@ pub(crate) fn run_index_job(state: SharedState, repo_id: i64, repo: Repo, repo_p
         if stage_changed {
             last_stage = progress.stage.clone();
             stage_started = now;
-            if let Ok(db) = Database::open_at(db_path.clone()) {
+            if let Ok(db) = db_handle.open() {
                 let _ = db.update_repo_index_stage(
                     repo_id,
                     &progress.stage,
@@ -239,14 +239,18 @@ pub(crate) fn run_index_job(state: SharedState, repo_id: i64, repo: Repo, repo_p
     let result = match indexer::run_index(&repo_path, repo.default_branch.as_deref(), &cancel, &mut on_progress) {
         Ok(mut write) => {
             write.duration_ms = started.elapsed().as_millis() as i64;
-            Database::open_at(state.config.db_path.clone()).and_then(|db| db.finish_repo_index(repo_id, &write))
+            state
+                .config
+                .db
+                .open()
+                .and_then(|db| db.finish_repo_index(repo_id, &write))
         }
-        Err(error) if error == "cancelled" => {
-            Database::open_at(state.config.db_path.clone()).and_then(|db| db.cancel_repo_index(repo_id))
-        }
-        Err(error) => {
-            Database::open_at(state.config.db_path.clone()).and_then(|db| db.fail_repo_index(repo_id, &error))
-        }
+        Err(error) if error == "cancelled" => state.config.db.open().and_then(|db| db.cancel_repo_index(repo_id)),
+        Err(error) => state
+            .config
+            .db
+            .open()
+            .and_then(|db| db.fail_repo_index(repo_id, &error)),
     };
     if let Err(error) = result {
         let _ = with_db_raw(&state, |db| db.fail_repo_index(repo_id, &error));

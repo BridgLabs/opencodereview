@@ -51,7 +51,8 @@ impl Fixture {
             .collect();
         let state = Arc::new(ServerState::new(ServerConfig {
             bind: "127.0.0.1:0".into(),
-            db_path: root.join("test.sqlite"),
+            db: crate::db::Db::sqlite(root.join("test.sqlite")),
+            data_dir: root.to_path_buf(),
             repos_dir: root.join("repos"),
             auto_reindex: false,
             poll_interval_seconds: 300,
@@ -96,7 +97,7 @@ impl Drop for Fixture {
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
-        std::fs::remove_dir_all(self.state.config.db_path.parent().unwrap()).unwrap();
+        std::fs::remove_dir_all(&self.state.config.data_dir).unwrap();
     }
 }
 

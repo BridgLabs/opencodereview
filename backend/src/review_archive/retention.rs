@@ -1,9 +1,9 @@
-use crate::db::Database;
+use crate::db::{Database, Db};
 use crate::review_archive::{ArchiveStore, STORE_QUOTA};
 use crate::server::SharedState;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -85,7 +85,7 @@ impl Default for ArchiveStorageStatus {
 }
 
 pub struct RetentionCoordinator {
-    pub db_path: PathBuf,
+    pub db: Db,
     pub archive_root: PathBuf,
     pub leases: ArchiveLeaseTracker,
     pub status: Arc<Mutex<ArchiveStorageStatus>>,
@@ -95,14 +95,14 @@ pub struct RetentionCoordinator {
 
 impl RetentionCoordinator {
     pub fn new(
-        db_path: PathBuf,
+        db: Db,
         archive_root: PathBuf,
         leases: ArchiveLeaseTracker,
         status: Arc<Mutex<ArchiveStorageStatus>>,
         notify: Arc<(Mutex<bool>, Condvar)>,
     ) -> Self {
         Self {
-            db_path,
+            db,
             archive_root,
             leases,
             status,
@@ -137,7 +137,7 @@ impl RetentionCoordinator {
     ) -> Result<MaintenanceResult, String> {
         let mut warnings = Vec::new();
         let now_ms = crate::sandbox::now();
-        let db = Database::open_at(self.db_path.clone()).map_err(|e| format!("Could not open database: {e}"))?;
+        let db = self.db.open().map_err(|e| format!("Could not open database: {e}"))?;
         let mut store =
             ArchiveStore::open(&self.archive_root).map_err(|e| format!("Could not open archive store: {e:?}"))?;
 
@@ -486,13 +486,8 @@ fn wait_for_maintenance(notify: &(Mutex<bool>, Condvar), interval: Duration) -> 
 
 pub(crate) fn start_archive_retention_worker(state: SharedState) {
     let coordinator = Arc::new(RetentionCoordinator::new(
-        state.config.db_path.clone(),
-        state
-            .config
-            .db_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .join("review-archives"),
+        state.config.db.clone(),
+        state.config.archive_dir(),
         state.archive_leases.clone(),
         state.archive_storage_status.clone(),
         state.retention_worker_notify.clone(),

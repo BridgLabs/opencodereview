@@ -388,7 +388,8 @@ fn activation_poll_reset_keeps_normal_manual_and_automatic_scope_semantics() {
 fn fixture_state(f: &Fixture) -> SharedState {
     Arc::new(ServerState::new(ServerConfig {
         bind: "127.0.0.1:0".into(),
-        db_path: f.root.join("test.sqlite"),
+        db: crate::db::Db::sqlite(f.root.join("test.sqlite")),
+        data_dir: f.root.to_path_buf(),
         repos_dir: f.root.join("repos"),
         auto_reindex: false,
         poll_interval_seconds: 60,
