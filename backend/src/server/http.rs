@@ -60,12 +60,14 @@ pub(crate) fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
     let mut parts = first.split_whitespace();
     let method = parts.next().ok_or("missing method")?.to_string();
     let raw_path = parts.next().ok_or("missing path")?;
-    let path = raw_path.split('?').next().unwrap_or(raw_path).to_string();
+    let (path, query) = raw_path.split_once('?').unwrap_or((raw_path, ""));
+    let (path, query) = (path.to_string(), query.to_string());
     let body_start = end + 4;
     let body_end = (body_start + content_length).min(buffer.len());
     Ok(Request {
         method,
         path,
+        query,
         origin,
         authorization,
         content_type,

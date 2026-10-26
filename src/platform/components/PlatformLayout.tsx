@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useLocation } from "@tanstack/react-router";
-import { Database, FileText, GitPullRequest, type LucideIcon, SettingsIcon } from "lucide-react";
+import { BarChart3, Database, FileText, GitPullRequest, type LucideIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { BrandMark } from "../../components/BrandMark";
 import { setupApi } from "../../services/setupApi";
@@ -14,11 +14,13 @@ const navigation = [
   { to: "/platform/reviews", label: "Reviews", icon: GitPullRequest },
   { to: "/platform/indexing", label: "Indexing", icon: Database },
   { to: "/platform/skills", label: "Skills", icon: FileText },
+  { to: "/platform/usage", label: "Usage", icon: BarChart3 },
 ] as const;
 const pageTitles: Record<string, string> = {
   "/platform/reviews": "Reviews",
   "/platform/indexing": "Indexing",
   "/platform/skills": "Skills",
+  "/platform/usage": "Usage",
   "/platform/settings": "Settings",
 };
 

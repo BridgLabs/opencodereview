@@ -1,4 +1,11 @@
-import { createRootRoute, createRoute, createRouter, Navigate, Outlet } from "@tanstack/react-router";
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  lazyRouteComponent,
+  Navigate,
+  Outlet,
+} from "@tanstack/react-router";
 import { ErrorScreen } from "./components/ErrorScreen";
 import { Onboarding } from "./pages/Onboarding";
 import { PlatformLayout } from "./platform/components/PlatformLayout";
@@ -36,6 +43,12 @@ const platformSkillsRoute = createRoute({
   path: "/skills",
   component: SkillsPage,
 });
+// Lazy so Recharts stays out of the main chunk.
+const platformUsageRoute = createRoute({
+  getParentRoute: () => platformRoute,
+  path: "/usage",
+  component: lazyRouteComponent(() => import("./platform/pages/UsagePage"), "UsagePage"),
+});
 const platformSettingsRoute = createRoute({
   getParentRoute: () => platformRoute,
   path: "/settings",
@@ -50,6 +63,7 @@ const routeTree = rootRoute.addChildren([
     platformIndexingRoute,
     platformReviewsRoute,
     platformSkillsRoute,
+    platformUsageRoute,
     platformSettingsRoute,
   ]),
 ]);

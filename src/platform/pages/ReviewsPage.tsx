@@ -45,6 +45,7 @@ import { Avatar } from "./reviews/Avatar";
 import { ReviewDetail } from "./reviews/ReviewDetail";
 import { ReviewProcessColumns } from "./reviews/ReviewProcessColumns";
 import { parseComments, type ReviewDecision, reviewError, streamStatusLabel } from "./reviews/reviewHelpers";
+import { useReviewSelection } from "./reviews/useReviewSelection";
 
 const ReviewFlow = lazy(() => import("../components/ReviewFlow").then((module) => ({ default: module.ReviewFlow })));
 
@@ -66,7 +67,6 @@ export function ReviewsPage() {
     return { view: null, processesOpen: wide, restoreProcesses: wide };
   });
   const [streamVersion, setStreamVersion] = useState(0);
-  const [monitoringId, setMonitoringId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const listWidth = useResizableWidth("ocr.reviewsListWidth", { initial: 344, compact: 76, max: 560 });
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -86,7 +86,7 @@ export function ReviewsPage() {
     refetchInterval: 5000,
   });
   const items = useMemo(() => (boardQuery.data ?? []).flatMap((group) => group.items), [boardQuery.data]);
-  const monitoring = items.find((item) => item.id === monitoringId) ?? null;
+  const { monitoringId, setMonitoringId, monitoring } = useReviewSelection(items);
   const viewing = isReviewResultView(workspace.view) ? monitoring : null;
   const streamPrId = monitoringId;
   const runQuery = useReviewRunStream(streamPrId, streamVersion);
@@ -211,10 +211,6 @@ export function ReviewsPage() {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
-  useEffect(() => {
-    if (monitoring) return;
-    setMonitoringId(items.find((item) => ["reviewing", "queued"].includes(item.lane))?.id ?? items[0]?.id ?? null);
-  }, [items, monitoring]);
   const monitoredRun = monitoring?.lane === "queued" ? null : (runQuery.data ?? null);
   const stagesQuery = useQuery({
     queryKey: ["reviews", monitoringId, "stages", monitoredRun?.id, monitoredRun?.status],

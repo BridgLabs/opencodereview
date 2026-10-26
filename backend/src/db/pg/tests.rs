@@ -315,3 +315,56 @@ fn a_test_database_written_outside_the_pools_is_emptied_before_reuse() {
         assert!(leftover.is_none(), "a reused test database kept another test's rows");
     }
 }
+
+/// Migration 9 on a database already holding pull requests and runs at version 8: the version is
+/// recorded, existing runs keep their rows, attempts can point at them and go with them.
+#[test]
+fn migration_9_upgrades_a_version_8_database_with_runs() {
+    let db = super::test_support::UpgradeDb::at_version(8);
+    let mut client = db.client();
+    client
+        .batch_execute(
+            "INSERT INTO repos (owner, name, full_name, created_at, updated_at) VALUES ('acme', 'api', 'acme/api', 1, 1);
+             INSERT INTO pull_requests (repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at)
+               VALUES (1, 1, 'PR', 'alice', 'head', 1, 1, 1);
+             INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at) VALUES (1, 'head', 'posted', 5, 5);",
+        )
+        .unwrap();
+    let attempts_before: bool = client
+        .query_one("SELECT to_regclass('review_run_usage_attempts') IS NOT NULL", &[])
+        .unwrap()
+        .get(0);
+    assert!(!attempts_before, "version 8 must not have the attempts table yet");
+
+    super::migrate::migrate_client(&mut client).unwrap();
+
+    let latest: i64 = client
+        .query_one("SELECT MAX(version) FROM schema_migrations", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(latest, 9);
+    let runs: i64 = client
+        .query_one("SELECT COUNT(*) FROM review_runs", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(runs, 1);
+    let index: bool = client
+        .query_one("SELECT to_regclass('idx_review_runs_created') IS NOT NULL", &[])
+        .unwrap()
+        .get(0);
+    assert!(index);
+    client
+        .execute(
+            "INSERT INTO review_run_usage_attempts (run_id, pr_id, stage, account_id, account_label, provider, model,
+               input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, created_at)
+             VALUES (1, 1, 'final', 7, 'Work', 'claude', 'claude-opus', 10, 2, 0, 0, 6)",
+            &[],
+        )
+        .unwrap();
+    client.execute("DELETE FROM review_runs WHERE id = 1", &[]).unwrap();
+    let left: i64 = client
+        .query_one("SELECT COUNT(*) FROM review_run_usage_attempts", &[])
+        .unwrap()
+        .get(0);
+    assert_eq!(left, 0, "deleting a run deletes its attempts");
+}
