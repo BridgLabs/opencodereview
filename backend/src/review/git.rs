@@ -404,6 +404,8 @@ pub(crate) fn git_capture(
     crate::github::apply_git_https_auth(&mut command);
     let mut child = command.spawn().map_err(|error| error.to_string())?;
     let started = Instant::now();
+    // Most git calls finish in a few milliseconds; the wait grows to 80ms only for long ones.
+    let mut wait = Duration::from_millis(1);
     loop {
         if cancel.load(Ordering::Relaxed) {
             let _ = child.kill();
@@ -422,7 +424,8 @@ pub(crate) fn git_capture(
         if child.try_wait().map_err(|error| error.to_string())?.is_some() {
             break;
         }
-        std::thread::sleep(Duration::from_millis(80));
+        std::thread::sleep(wait);
+        wait = (wait * 2).min(Duration::from_millis(80));
     }
     let status = child.wait().map_err(|error| error.to_string())?;
     let stdout = fs::read(&stdout_path).unwrap_or_default();

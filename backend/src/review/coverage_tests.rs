@@ -369,222 +369,232 @@ fn legacy_merge_with_only_excluded_delta_finishes_without_inference() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+// One test per integration, so the three run in parallel.
 #[test]
-fn stacked_child_integrations_finish_without_inference() {
-    for integration in ["merge", "squash", "cherry-pick"] {
-        let (root, db, pr, previous_run, previous_head) = legacy_fixture();
-        let git = |args: &[&str]| {
-            let output = std::process::Command::new("git")
-                .arg("-C")
-                .arg(&root)
-                .args(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test"])
-                .args(args)
-                .output()
-                .unwrap();
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-            String::from_utf8(output.stdout).unwrap().trim().to_string()
-        };
-        git(&["checkout", "-qb", "child", &previous_head]);
-        std::fs::write(root.join("child.rs"), "reviewed child\n").unwrap();
-        std::fs::write(root.join("code.rs"), "reviewed child update\n").unwrap();
-        git(&["add", "child.rs", "code.rs"]);
-        git(&["commit", "-qm", "child"]);
-        let child_head = git(&["rev-parse", "HEAD"]);
-        let child_pr = db
-            .upsert_pull_request(&crate::db::PullRequestInput {
-                repo_id: 1,
-                number: 2,
-                title: "Child".into(),
-                author: "fixture".into(),
-                author_avatar_url: None,
-                is_draft: false,
-                head_sha: child_head.clone(),
-                base_sha: Some(previous_head.clone()),
-                base_ref: Some("feature".into()),
-                head_ref: Some("child".into()),
-                default_branch: Some("main".into()),
-                url: None,
-                lane: "posted".into(),
-                status_reason: None,
-            })
+fn stacked_child_merge_finishes_without_inference() {
+    stacked_child_integration_finishes_without_inference("merge");
+}
+
+#[test]
+fn stacked_child_squash_finishes_without_inference() {
+    stacked_child_integration_finishes_without_inference("squash");
+}
+
+#[test]
+fn stacked_child_cherry_pick_finishes_without_inference() {
+    stacked_child_integration_finishes_without_inference("cherry-pick");
+}
+
+fn stacked_child_integration_finishes_without_inference(integration: &str) {
+    let (root, db, pr, previous_run, previous_head) = legacy_fixture();
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test"])
+            .args(args)
+            .output()
             .unwrap();
-        let child_run = db.start_review_skeleton_with(child_pr, Some("fixture")).unwrap();
-        let cancel = AtomicBool::new(false);
-        let range = format!("{previous_head}...{child_head}");
-        let diff = crate::review::diff_local(&root, &range, &cancel).unwrap();
-        let files = crate::review::changed_files_local(&root, &range, &cancel).unwrap();
-        db.begin_review_coverage(&crate::db::ReviewCoverageInput {
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    };
+    git(&["checkout", "-qb", "child", &previous_head]);
+    std::fs::write(root.join("child.rs"), "reviewed child\n").unwrap();
+    std::fs::write(root.join("code.rs"), "reviewed child update\n").unwrap();
+    git(&["add", "child.rs", "code.rs"]);
+    git(&["commit", "-qm", "child"]);
+    let child_head = git(&["rev-parse", "HEAD"]);
+    let child_pr = db
+        .upsert_pull_request(&crate::db::PullRequestInput {
             repo_id: 1,
-            pr_id: child_pr,
-            run_id: child_run,
-            base_ref: "feature",
-            base_sha: &previous_head,
-            merge_base_sha: &previous_head,
-            head_sha: &child_head,
-            changed_files: &files,
-            covered_patch_ids: &current_patch_ids(&root, &previous_head, &child_head, &diff, &cancel).unwrap(),
-            diff_hash: &diff_hash(&diff),
-            diff_text: &diff,
-            source_json: None,
+            number: 2,
+            title: "Child".into(),
+            author: "fixture".into(),
+            author_avatar_url: None,
+            is_draft: false,
+            head_sha: child_head.clone(),
+            base_sha: Some(previous_head.clone()),
+            base_ref: Some("feature".into()),
+            head_ref: Some("child".into()),
+            default_branch: Some("main".into()),
+            url: None,
+            lane: "posted".into(),
+            status_reason: None,
         })
         .unwrap();
-        db.finalize_review_coverage(child_run).unwrap();
-        let conn = rusqlite::Connection::open(db.path()).unwrap();
-        conn.execute(
-            "UPDATE review_runs SET status='posted',review_body='Reviewed child',finished_at=1 WHERE id=?1",
-            [child_run],
-        )
-        .unwrap();
-        git(&["checkout", "-q", "feature"]);
-        match integration {
-            "merge" => {
-                git(&["merge", "--no-ff", "-qm", "integrate child", "child"]);
-            }
-            "squash" => {
-                git(&["merge", "--squash", "child"]);
-                git(&["commit", "-qm", "squash child"]);
-            }
-            _ => {
-                git(&["cherry-pick", &child_head]);
-            }
+    let child_run = db.start_review_skeleton_with(child_pr, Some("fixture")).unwrap();
+    let cancel = AtomicBool::new(false);
+    let range = format!("{previous_head}...{child_head}");
+    let diff = crate::review::diff_local(&root, &range, &cancel).unwrap();
+    let files = crate::review::changed_files_local(&root, &range, &cancel).unwrap();
+    db.begin_review_coverage(&crate::db::ReviewCoverageInput {
+        repo_id: 1,
+        pr_id: child_pr,
+        run_id: child_run,
+        base_ref: "feature",
+        base_sha: &previous_head,
+        merge_base_sha: &previous_head,
+        head_sha: &child_head,
+        changed_files: &files,
+        covered_patch_ids: &current_patch_ids(&root, &previous_head, &child_head, &diff, &cancel).unwrap(),
+        diff_hash: &diff_hash(&diff),
+        diff_text: &diff,
+        source_json: None,
+    })
+    .unwrap();
+    db.finalize_review_coverage(child_run).unwrap();
+    let conn = rusqlite::Connection::open(db.path()).unwrap();
+    conn.execute(
+        "UPDATE review_runs SET status='posted',review_body='Reviewed child',finished_at=1 WHERE id=?1",
+        [child_run],
+    )
+    .unwrap();
+    git(&["checkout", "-q", "feature"]);
+    match integration {
+        "merge" => {
+            git(&["merge", "--no-ff", "-qm", "integrate child", "child"]);
         }
-        let head = git(&["rev-parse", "HEAD"]);
-        git(&["remote", "add", "origin", root.to_str().unwrap()]);
-        git(&["update-ref", "refs/pull/1/head", &head]);
-        conn.execute(
-            "UPDATE pull_requests SET head_sha=?2 WHERE id=?1",
-            rusqlite::params![pr, head],
-        )
-        .unwrap();
-        let run = db.start_review_skeleton_with(pr, Some("fixture")).unwrap();
-        db.set_review_run_running(run, "[]").unwrap();
-        let input = crate::review::ReviewInputs {
-            frozen: None,
-            run_id: run,
-            repo_id: 1,
-            pr_id: pr,
-            repo_path: root.clone(),
-            full_name: "acme/fixture".into(),
-            number: 1,
-            base_ref: "main".into(),
-            fixed_head_sha: None,
-            expected_scope: None,
-            prior_scope: db.review_run_scope(previous_run).unwrap(),
-            last_reviewed_sha: Some(previous_head),
-            force_full: false,
-            reprocess: false,
-            skill_content: "Review correctness".into(),
-            unresolved_review_head: None,
-            unresolved_review_body: None,
-            pr_title: "Integrate reviewed child".into(),
-            pr_body: String::new(),
-            model: "fixture".into(),
-            review_depth_mode: "auto".into(),
-            review_deep_threshold: 20,
-            review_chunk_size: 5,
-            review_parallel_chunks: 1,
-            db_path: db.path(),
-        };
-        let output = crate::review::execute(&input, &cancel, &mut |_, _| {})
-            .expect("Reviewed child must be skipped before model preparation");
-        assert!(output.no_new_changes, "{integration}");
-        let plan = db.context_plan_for_review_run(run).unwrap().unwrap();
-        assert!(plan.changed_files.is_empty());
-        assert_eq!(plan.scope_selection.unwrap().reused_files, ["child.rs", "code.rs"]);
-        let source_json: String = conn
-            .query_row(
-                "SELECT source_json FROM review_coverage WHERE run_id=?1",
-                [run],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&source_json).unwrap()["stackedSourceRunIds"],
-            serde_json::json!([child_run])
-        );
-        let previous = snapshot_for_reuse(&root, &db, 1, pr, input.last_reviewed_sha.as_deref().unwrap(), &cancel)
-            .unwrap()
-            .unwrap();
-        let current = crate::review::scope::ReviewScope {
-            head_sha: head,
-            base_ref: "main".into(),
-            base_sha: git(&["rev-parse", "main"]),
-        };
-        let select = |current: &crate::review::scope::ReviewScope, force_full: bool| {
-            let full = crate::review::changed_files_local(
-                &root,
-                &format!("{}...{}", current.base_sha, current.head_sha),
-                &cancel,
-            )
-            .unwrap();
-            let (mut changed, _) = crate::review::incremental_review_changes(
-                &root,
-                &previous.scope.head_sha,
-                &current.head_sha,
-                &full,
-                &cancel,
-            )
-            .unwrap();
-            let mut selection = crate::review::scope::ScopeSelection {
-                mode: "incremental".into(),
-                requested_full: force_full,
-                source_run_id: Some(previous_run),
-                full_pr_files: full,
-                reused_files: vec![],
-                excluded_files: vec![],
-            };
-            let sources = reuse_stacked_scope(
-                &root,
-                &db,
-                1,
-                pr,
-                Some(&previous),
-                current,
-                &mut changed,
-                &mut selection,
-                &cancel,
-            )
-            .unwrap();
-            (changed, sources)
-        };
-        assert_eq!(select(&current, true).0, ["child.rs", "code.rs"]);
-        for status in ["failed", "cancelled", "pending", "running"] {
-            conn.execute(
-                "UPDATE review_runs SET status=?2 WHERE id=?1",
-                rusqlite::params![child_run, status],
-            )
-            .unwrap();
-            assert_eq!(select(&current, false).0, ["child.rs", "code.rs"], "{status}");
+        "squash" => {
+            git(&["merge", "--squash", "child"]);
+            git(&["commit", "-qm", "squash child"]);
         }
-        conn.execute("UPDATE review_runs SET status='posted' WHERE id=?1", [child_run])
-            .unwrap();
-        conn.execute(
-            "UPDATE review_coverage SET diff_hash='invalid' WHERE run_id=?1",
-            [child_run],
-        )
-        .unwrap();
-        assert_eq!(select(&current, false).0, ["child.rs", "code.rs"]);
-        conn.execute(
-            "UPDATE review_coverage SET diff_hash=?2 WHERE run_id=?1",
-            rusqlite::params![child_run, diff_hash(&diff)],
-        )
-        .unwrap();
-        assert!(select(&current, false).0.is_empty());
-        std::fs::write(root.join("child.rs"), "reviewed child \n").unwrap();
-        std::fs::write(root.join("new.rs"), "unreviewed\n").unwrap();
-        git(&["add", "child.rs", "new.rs"]);
-        git(&["commit", "-qm", "new author changes"]);
-        let current = crate::review::scope::ReviewScope {
-            head_sha: git(&["rev-parse", "HEAD"]),
-            ..current
-        };
-        let (changed, sources) = select(&current, false);
-        assert_eq!(changed, ["child.rs", "new.rs"]);
-        assert_eq!(sources, [child_run]);
-        drop(conn);
-        drop(db);
-        std::fs::remove_dir_all(root).unwrap();
+        _ => {
+            git(&["cherry-pick", &child_head]);
+        }
     }
+    let head = git(&["rev-parse", "HEAD"]);
+    git(&["remote", "add", "origin", root.to_str().unwrap()]);
+    git(&["update-ref", "refs/pull/1/head", &head]);
+    conn.execute(
+        "UPDATE pull_requests SET head_sha=?2 WHERE id=?1",
+        rusqlite::params![pr, head],
+    )
+    .unwrap();
+    let run = db.start_review_skeleton_with(pr, Some("fixture")).unwrap();
+    db.set_review_run_running(run, "[]").unwrap();
+    let input = crate::review::ReviewInputs {
+        frozen: None,
+        run_id: run,
+        repo_id: 1,
+        pr_id: pr,
+        repo_path: root.clone(),
+        full_name: "acme/fixture".into(),
+        number: 1,
+        base_ref: "main".into(),
+        fixed_head_sha: None,
+        expected_scope: None,
+        prior_scope: db.review_run_scope(previous_run).unwrap(),
+        last_reviewed_sha: Some(previous_head),
+        force_full: false,
+        reprocess: false,
+        skill_content: "Review correctness".into(),
+        unresolved_review_head: None,
+        unresolved_review_body: None,
+        pr_title: "Integrate reviewed child".into(),
+        pr_body: String::new(),
+        model: "fixture".into(),
+        review_depth_mode: "auto".into(),
+        review_deep_threshold: 20,
+        review_chunk_size: 5,
+        review_parallel_chunks: 1,
+        db_path: db.path(),
+    };
+    let output = crate::review::execute(&input, &cancel, &mut |_, _| {})
+        .expect("Reviewed child must be skipped before model preparation");
+    assert!(output.no_new_changes, "{integration}");
+    let plan = db.context_plan_for_review_run(run).unwrap().unwrap();
+    assert!(plan.changed_files.is_empty());
+    assert_eq!(plan.scope_selection.unwrap().reused_files, ["child.rs", "code.rs"]);
+    let source_json: String = conn
+        .query_row(
+            "SELECT source_json FROM review_coverage WHERE run_id=?1",
+            [run],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&source_json).unwrap()["stackedSourceRunIds"],
+        serde_json::json!([child_run])
+    );
+    let previous = snapshot_for_reuse(&root, &db, 1, pr, input.last_reviewed_sha.as_deref().unwrap(), &cancel)
+        .unwrap()
+        .unwrap();
+    let current = crate::review::scope::ReviewScope {
+        head_sha: head,
+        base_ref: "main".into(),
+        base_sha: git(&["rev-parse", "main"]),
+    };
+    let select = |current: &crate::review::scope::ReviewScope, force_full: bool| {
+        let full =
+            crate::review::changed_files_local(&root, &format!("{}...{}", current.base_sha, current.head_sha), &cancel)
+                .unwrap();
+        let (mut changed, _) = crate::review::incremental_review_changes(
+            &root,
+            &previous.scope.head_sha,
+            &current.head_sha,
+            &full,
+            &cancel,
+        )
+        .unwrap();
+        let mut selection = crate::review::scope::ScopeSelection {
+            mode: "incremental".into(),
+            requested_full: force_full,
+            source_run_id: Some(previous_run),
+            full_pr_files: full,
+            reused_files: vec![],
+            excluded_files: vec![],
+        };
+        let sources = reuse_stacked_scope(
+            &root,
+            &db,
+            1,
+            pr,
+            Some(&previous),
+            current,
+            &mut changed,
+            &mut selection,
+            &cancel,
+        )
+        .unwrap();
+        (changed, sources)
+    };
+    assert_eq!(select(&current, true).0, ["child.rs", "code.rs"]);
+    for status in ["failed", "cancelled", "pending", "running"] {
+        conn.execute(
+            "UPDATE review_runs SET status=?2 WHERE id=?1",
+            rusqlite::params![child_run, status],
+        )
+        .unwrap();
+        assert_eq!(select(&current, false).0, ["child.rs", "code.rs"], "{status}");
+    }
+    conn.execute("UPDATE review_runs SET status='posted' WHERE id=?1", [child_run])
+        .unwrap();
+    conn.execute(
+        "UPDATE review_coverage SET diff_hash='invalid' WHERE run_id=?1",
+        [child_run],
+    )
+    .unwrap();
+    assert_eq!(select(&current, false).0, ["child.rs", "code.rs"]);
+    conn.execute(
+        "UPDATE review_coverage SET diff_hash=?2 WHERE run_id=?1",
+        rusqlite::params![child_run, diff_hash(&diff)],
+    )
+    .unwrap();
+    assert!(select(&current, false).0.is_empty());
+    std::fs::write(root.join("child.rs"), "reviewed child \n").unwrap();
+    std::fs::write(root.join("new.rs"), "unreviewed\n").unwrap();
+    git(&["add", "child.rs", "new.rs"]);
+    git(&["commit", "-qm", "new author changes"]);
+    let current = crate::review::scope::ReviewScope {
+        head_sha: git(&["rev-parse", "HEAD"]),
+        ..current
+    };
+    let (changed, sources) = select(&current, false);
+    assert_eq!(changed, ["child.rs", "new.rs"]);
+    assert_eq!(sources, [child_run]);
+    drop(conn);
+    drop(db);
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

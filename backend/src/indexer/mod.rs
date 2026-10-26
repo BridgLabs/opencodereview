@@ -689,6 +689,8 @@ fn git_command_with_input(
                 .iter()
                 .any(|path| fs::metadata(path).is_ok_and(|meta| meta.len() > 16 * 1024 * 1024))
     };
+    // Most git calls finish in a few milliseconds; the wait grows to 50ms only for long ones.
+    let mut wait = Duration::from_millis(1);
     loop {
         if oversized() {
             crate::review::kill_tree(child.id(), &mut child);
@@ -714,7 +716,8 @@ fn git_command_with_input(
                 return Err(error.to_string());
             }
         }
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(wait);
+        wait = (wait * 2).min(Duration::from_millis(50));
     }
     let status = child.wait().map_err(|error| error.to_string())?;
     if oversized() {
