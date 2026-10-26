@@ -138,3 +138,83 @@ fn exclusive_work_runs_on_one_instance_at_a_time() {
         "the lock ends with the work"
     );
 }
+
+#[test]
+fn a_repository_indexing_on_a_live_instance_is_not_indexed_again() {
+    let shared = Db::for_test();
+    shared
+        .open()
+        .unwrap()
+        .ensure_temp_repo_for_index(1, "acme/api")
+        .unwrap();
+    let a = shared.clone().with_instance("a");
+    let b = shared.clone().with_instance("b");
+    a.open().unwrap().register_instance("a", "host-a").unwrap();
+    b.open().unwrap().register_instance("b", "host-b").unwrap();
+    assert!(a.open().unwrap().claim_repo_index(1, Some("main")).unwrap().is_some());
+    assert!(b.open().unwrap().claim_repo_index(1, Some("main")).unwrap().is_none());
+    // Once instance a stops, the index can be taken over.
+    let db = shared.open().unwrap();
+    db.conn
+        .execute(
+            "UPDATE server_instances SET heartbeat_at = $1 WHERE id = 'a'",
+            [now_millis() - INSTANCE_TIMEOUT_MS - 1],
+        )
+        .unwrap();
+    assert!(b.open().unwrap().claim_repo_index(1, Some("main")).unwrap().is_some());
+}
+
+#[test]
+fn only_posts_of_stopped_instances_are_reconciled() {
+    let shared = Db::for_test();
+    shared
+        .open()
+        .unwrap()
+        .ensure_temp_repo_for_index(1, "acme/api")
+        .unwrap();
+    let live = shared.clone().with_instance("live");
+    live.open().unwrap().register_instance("live", "host-a").unwrap();
+    let db = shared.open().unwrap();
+    let live_post = pr_with_run(&live.open().unwrap(), 1);
+    let stopped_post = pr_with_run(&db, 2);
+    db.conn
+        .execute(
+            "UPDATE review_runs SET status = 'posting', owner_instance = CASE id WHEN $1 THEN 'live' ELSE 'gone' END",
+            [live_post],
+        )
+        .unwrap();
+    let posts: Vec<i64> = db
+        .interrupted_review_posts()
+        .unwrap()
+        .iter()
+        .map(|post| post.run_id)
+        .collect();
+    assert_eq!(posts, [stopped_post], "a live instance's post in flight is left alone");
+}
+
+#[test]
+fn work_requested_during_another_run_waits_for_it() {
+    let shared = Db::for_test();
+    let (first, second) = (shared.clone(), shared.clone());
+    let started = Arc::new(Barrier::new(2));
+    let holder = {
+        let started = started.clone();
+        thread::spawn(move || {
+            first
+                .run_exclusive(7, || {
+                    started.wait();
+                    thread::sleep(std::time::Duration::from_millis(300));
+                    std::time::Instant::now()
+                })
+                .unwrap()
+                .unwrap()
+        })
+    };
+    started.wait();
+    let ran_at = second.run_exclusive_after(7, std::time::Instant::now).unwrap();
+    let finished_at = holder.join().unwrap();
+    assert!(
+        ran_at >= finished_at,
+        "the request ran during the other run instead of after it"
+    );
+}
