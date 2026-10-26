@@ -304,9 +304,12 @@ impl Database {
         .map_err(|error| error.to_string())?;
         let busy: bool = tx
             .query_row(
+                // This instance's own row is not busy: the caller found no job of its own for it,
+                // so that job ended without recording its outcome.
                 "SELECT EXISTS (SELECT 1 FROM repo_index_state WHERE repo_id = $1 AND status = 'indexing'
+                   AND owner_instance IS DISTINCT FROM $3
                    AND owner_instance IN (SELECT id FROM server_instances WHERE heartbeat_at > $2))",
-                params![repo_id, self.instance_live_after()?],
+                params![repo_id, self.instance_live_after()?, self.db.instance_id()],
                 |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
@@ -323,7 +326,7 @@ impl Database {
         self.conn.execute(
       "INSERT INTO repo_index_state (repo_id, status, stage, spec_version, base_ref, file_count, package_count, edge_count, skipped_count, total_count, started_at, error_message, updated_at, owner_instance)
        VALUES ($1, 'indexing', 'preparing', $2, $3, 0, 0, 0, 0, 0, $4, NULL, $4, $5)
-       ON CONFLICT(repo_id) DO UPDATE SET
+       ON CONFLICT(repo_id) DO UPDATE SET progress_json = NULL,
          status = 'indexing', stage = 'preparing', spec_version = excluded.spec_version,
          base_ref = excluded.base_ref, file_count = 0, package_count = 0, edge_count = 0,
          skipped_count = 0, total_count = 0, started_at = excluded.started_at, indexed_at = NULL,
@@ -350,6 +353,43 @@ impl Database {
       params![stage, file_count, total_count, package_count, edge_count, skipped_count, now, repo_id],
     ).map_err(|error| error.to_string())?;
         Ok(())
+    }
+
+    /// Records the progress of an index this instance runs, for whichever instance is asked.
+    pub fn record_repo_index_progress(&self, repo_id: i64, progress_json: &str) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE repo_index_state SET progress_json = $1 WHERE repo_id = $2 AND status = 'indexing'",
+                params![progress_json, repo_id],
+            )
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    /// The last recorded progress of a repository's index that a live instance is running.
+    pub fn repo_index_progress(&self, repo_id: i64) -> Result<Option<String>, String> {
+        self.conn
+            .query_row(
+                "SELECT progress_json FROM repo_index_state WHERE repo_id = $1 AND status = 'indexing'
+                   AND owner_instance IN (SELECT id FROM server_instances WHERE heartbeat_at > $2)",
+                params![repo_id, self.instance_live_after()?],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map(Option::flatten)
+            .map_err(|error| error.to_string())
+    }
+
+    /// How many repositories live instances are indexing, across every instance.
+    pub fn active_index_count(&self) -> Result<i64, String> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM repo_index_state WHERE status = 'indexing'
+                   AND owner_instance IN (SELECT id FROM server_instances WHERE heartbeat_at > $1)",
+                [self.instance_live_after()?],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())
     }
 
     pub fn finish_repo_index(&self, repo_id: i64, write: &RepoIndexWrite) -> Result<RepoIndexStatus, String> {

@@ -26,11 +26,8 @@ pub(crate) fn start_poll_scheduler(state: SharedState) {
 }
 
 pub(crate) fn list_index_jobs(state: &SharedState) -> Result<serde_json::Value, String> {
-    let active = state
-        .index_jobs
-        .lock()
-        .map_err(|_| "index job lock poisoned".to_string())?
-        .len();
+    // Every instance's index runs, not only this one's.
+    let active = with_db_read_raw(state, |db| db.active_index_count())?;
     let jobs = with_db_read_raw(state, |db| db.list_index_queue())?
         .into_iter()
         .map(|(repo, status)| {

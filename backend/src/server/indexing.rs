@@ -185,6 +185,7 @@ pub(crate) fn run_index_job(state: SharedState, repo_id: i64, repo: Repo, repo_p
     let mut stage_started = std::time::Instant::now();
     let db_handle = state.config.db.clone();
     let progress_map = state.index_progress.clone();
+    let mut last_recorded = std::time::Instant::now() - Duration::from_secs(1);
     let mut on_progress = |progress: indexer::IndexProgress| {
         let now = std::time::Instant::now();
         let stage_changed = progress.stage != last_stage;
@@ -234,6 +235,13 @@ pub(crate) fn run_index_job(state: SharedState, repo_id: i64, repo: Repo, repo_p
             current_path: progress.current_path,
             updated_at: crate::db::now_millis(),
         };
+        // Other instances answer progress requests from the database; a write a second is enough.
+        if stage_changed || now.duration_since(last_recorded) >= Duration::from_secs(1) {
+            last_recorded = now;
+            if let (Ok(json), Ok(db)) = (serde_json::to_string(&event), db_handle.open()) {
+                let _ = db.record_repo_index_progress(repo_id, &json);
+            }
+        }
         if let Ok(mut map) = progress_map.lock() {
             map.insert(repo_id, event);
         }
@@ -274,7 +282,14 @@ pub(crate) fn index_progress(state: &SharedState, repo_id: i64) -> Result<serde_
         .map_err(|_| "index progress lock poisoned".to_string())?
         .get(&repo_id)
         .cloned();
-    serde_json::to_value(value).map_err(|error| error.to_string())
+    if value.is_some() {
+        return serde_json::to_value(value).map_err(|error| error.to_string());
+    }
+    // An index another instance runs.
+    match with_db_read_raw(state, |db| db.repo_index_progress(repo_id))? {
+        Some(json) => serde_json::from_str(&json).map_err(|error| error.to_string()),
+        None => Ok(serde_json::Value::Null),
+    }
 }
 
 pub(crate) fn check_freshness(state: &SharedState, repo_id: i64) -> Result<serde_json::Value, String> {
