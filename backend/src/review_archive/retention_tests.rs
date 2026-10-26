@@ -582,6 +582,27 @@ fn maintenance_failure_preserves_last_successful_metrics_and_reports_error() {
 }
 
 #[test]
+fn a_failure_shows_locally_when_the_database_is_unreachable() {
+    let dir = Directory::new();
+    let unreachable = RetentionCoordinator::new(
+        crate::db::Db::unreachable_for_test(),
+        dir.0.join("archives"),
+        ArchiveLeaseTracker::new(),
+        Arc::new(Mutex::new(ArchiveStorageStatus::default())),
+        Arc::new((Mutex::new(false), Condvar::new())),
+    );
+    unreachable.publish_failure();
+    assert!(unreachable
+        .status
+        .lock()
+        .unwrap()
+        .last_error
+        .as_deref()
+        .unwrap()
+        .contains("maintenance failed"));
+}
+
+#[test]
 fn another_instance_failing_keeps_the_recorded_metrics() {
     let dir = Directory::new();
     let (db, _store, coordinator) = setup_env(&dir);

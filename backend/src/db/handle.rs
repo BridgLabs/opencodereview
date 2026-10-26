@@ -137,6 +137,21 @@ impl Db {
         format!("{hosts}/{}", config.get_dbname().unwrap_or_default())
     }
 
+    /// A handle whose database cannot be reached: every `open` fails.
+    #[cfg(test)]
+    pub fn unreachable_for_test() -> Self {
+        use std::str::FromStr;
+        let config = postgres::Config::from_str("postgres://ocr@127.0.0.1:1/unreachable").unwrap();
+        let mut settings = pg::DbSettings::new(config.clone(), config.clone(), config, 1, 1, None).unwrap();
+        settings.min_idle = 0;
+        Self {
+            pool: pg::DbPool::connect(settings).unwrap(),
+            instance: None,
+            _test: None,
+            defaults: done(),
+        }
+    }
+
     /// A migrated database of its own, dropped with the last handle to it.
     #[cfg(test)]
     pub fn for_test() -> Self {
