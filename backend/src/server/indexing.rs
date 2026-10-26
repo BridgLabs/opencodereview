@@ -312,60 +312,69 @@ fn due_for_remote_check(repo_id: i64) -> bool {
 pub(crate) fn start_reindex_worker(state: SharedState) {
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(2));
-        let repos = match with_db_raw(&state, |db| db.monitored_repos()) {
-            Ok(repos) => repos,
+        // One instance decides what to index at a time; the index job it starts records that
+        // instance, and the others see the repository as indexing.
+        let _ = state
+            .config
+            .db
+            .run_exclusive(exclusive::REINDEX, || reindex_pass(&state));
+    });
+}
+
+fn reindex_pass(state: &SharedState) {
+    let repos = match with_db_raw(state, |db| db.monitored_repos()) {
+        Ok(repos) => repos,
+        Err(error) => {
+            eprintln!("worker could not load repos: {error}");
+            return;
+        }
+    };
+    for repo in repos {
+        let should_skip = state
+            .index_jobs
+            .lock()
+            .map(|jobs| jobs.len() >= 2 || jobs.contains_key(&repo.id))
+            .unwrap_or(true);
+        if should_skip {
+            continue;
+        }
+        let status = match with_db_raw(state, |db| db.repo_index_status(repo.id)) {
+            Ok(status) => status,
             Err(error) => {
-                eprintln!("worker could not load repos: {error}");
+                eprintln!("worker could not load index status for {}: {error}", repo.full_name);
                 continue;
             }
         };
-        for repo in repos {
-            let should_skip = state
-                .index_jobs
-                .lock()
-                .map(|jobs| jobs.len() >= 2 || jobs.contains_key(&repo.id))
-                .unwrap_or(true);
-            if should_skip {
-                continue;
-            }
-            let status = match with_db_raw(&state, |db| db.repo_index_status(repo.id)) {
-                Ok(status) => status,
-                Err(error) => {
-                    eprintln!("worker could not load index status for {}: {error}", repo.full_name);
-                    continue;
-                }
+        if matches!(status.status.as_str(), "queued" | "not_indexed" | "stale")
+            || (status.status == "ready" && status.spec_version != crate::db::INDEX_SPEC_VERSION)
+        {
+            let _ = start_index(state, repo.id);
+            continue;
+        }
+        // An empty repository indexes itself after its first push; check for one each minute.
+        if status.status == "empty" && crate::db::now_millis() - status.updated_at > 60_000 {
+            let pushed = ensure_repo_checkout(&state.config.repos_dir, &repo)
+                .and_then(|path| indexer::git(&path, &["ls-remote", "--heads", "origin"], None))
+                .is_ok_and(|heads| !heads.is_empty());
+            let _ = if pushed {
+                start_index(state, repo.id).map(drop)
+            } else {
+                with_db_raw(state, |db| db.mark_repo_index_empty(repo.id)).map(drop)
             };
-            if matches!(status.status.as_str(), "queued" | "not_indexed" | "stale")
-                || (status.status == "ready" && status.spec_version != crate::db::INDEX_SPEC_VERSION)
-            {
-                let _ = start_index(&state, repo.id);
-                continue;
-            }
-            // An empty repository indexes itself after its first push; check for one each minute.
-            if status.status == "empty" && crate::db::now_millis() - status.updated_at > 60_000 {
-                let pushed = ensure_repo_checkout(&state.config.repos_dir, &repo)
-                    .and_then(|path| indexer::git(&path, &["ls-remote", "--heads", "origin"], None))
-                    .is_ok_and(|heads| !heads.is_empty());
-                let _ = if pushed {
-                    start_index(&state, repo.id).map(drop)
-                } else {
-                    with_db_raw(&state, |db| db.mark_repo_index_empty(repo.id)).map(drop)
-                };
-                continue;
-            }
-            // Ask GitHub whether the default branch moved at most once a minute per repository.
-            if status.status == "ready" && status.base_sha.is_some() && due_for_remote_check(repo.id) {
-                if let Ok(repo_path) = ensure_repo_checkout(&state.config.repos_dir, &repo) {
-                    if let Ok(remote_sha) = indexer::remote_default_sha(&repo_path, repo.default_branch.as_deref()) {
-                        if status.base_sha.as_deref() != Some(remote_sha.as_str()) {
-                            let _ = with_db_raw(&state, |db| db.mark_repo_index_stale(repo.id, &remote_sha));
-                            let _ = start_index(&state, repo.id);
-                        }
+            continue;
+        }
+        // Ask GitHub whether the default branch moved at most once a minute per repository.
+        if status.status == "ready" && status.base_sha.is_some() && due_for_remote_check(repo.id) {
+            if let Ok(repo_path) = ensure_repo_checkout(&state.config.repos_dir, &repo) {
+                if let Ok(remote_sha) = indexer::remote_default_sha(&repo_path, repo.default_branch.as_deref()) {
+                    if status.base_sha.as_deref() != Some(remote_sha.as_str()) {
+                        let _ = with_db_raw(state, |db| db.mark_repo_index_stale(repo.id, &remote_sha));
+                        let _ = start_index(state, repo.id);
                     }
                 }
             }
         }
-    });
+    }
 }
 
 pub(crate) fn ensure_repo_checkout(repos_dir: &Path, repo: &Repo) -> Result<PathBuf, String> {

@@ -1001,7 +1001,15 @@ fn malformed_persisted_coverage_is_quarantined_before_fresh_reuse() {
         })
         .unwrap();
     let run_id = db.start_review_skeleton_with(pr_id, Some("fixture")).unwrap();
-    let second_malformed_run_id = db.start_review_skeleton_with(pr_id, Some("fixture")).unwrap();
+    // A second pending run of the PR, as an older version could leave behind; starting one now
+    // is refused while the first is active.
+    let second_malformed_run_id: i64 = db
+        .query_row(
+            "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, model) SELECT pr_id, head_sha, 'pending', created_at, updated_at, model FROM review_runs WHERE id = $1 RETURNING id",
+            [run_id],
+            |row| row.get(0),
+        )
+        .unwrap();
     drop(db);
     let conn = crate::db::Db::for_test_at(&db_path).open().unwrap();
     for malformed_run_id in [run_id, second_malformed_run_id] {
@@ -1017,6 +1025,12 @@ fn malformed_persisted_coverage_is_quarantined_before_fresh_reuse() {
     assert!(db.review_coverage_patch_ids_for_pr(pr_id).unwrap().is_none());
     assert!(!db.review_coverage_exists(run_id).unwrap());
     assert!(!db.review_coverage_exists(second_malformed_run_id).unwrap());
+    // The malformed runs ended; a fresh review of the PR may start.
+    db.execute(
+        "UPDATE review_runs SET status = 'failed' WHERE id = ANY($1)",
+        crate::pg_params![vec![run_id, second_malformed_run_id]],
+    )
+    .unwrap();
     let fresh_run_id = db.start_review_skeleton_with(pr_id, Some("fixture")).unwrap();
     db.begin_review_coverage(&crate::db::ReviewCoverageInput {
         repo_id: 1,

@@ -75,12 +75,19 @@ pub(crate) fn poll_reviews(state: &SharedState) -> Result<serde_json::Value, Str
     if state.poll_running.swap(true, Ordering::Relaxed) {
         return with_db_read(state, |db| db.poll_status());
     }
-    let _ = with_db_raw(state, |db| db.record_poll_start());
-    let result = run_poll_reviews(state).inspect_err(|error| {
-        let _ = with_db_raw(state, |db| db.record_poll_result(crate::db::now_millis(), Some(error)));
+    // Another instance may be polling; one poll at a time across them all.
+    let polled = state.config.db.run_exclusive(exclusive::POLL, || {
+        let _ = with_db_raw(state, |db| db.record_poll_start());
+        run_poll_reviews(state).inspect_err(|error| {
+            let _ = with_db_raw(state, |db| db.record_poll_result(crate::db::now_millis(), Some(error)));
+        })
     });
-    spawn_queue_acknowledgements(state.config.db.clone());
     state.poll_running.store(false, Ordering::Relaxed);
+    let result = match polled? {
+        Some(result) => result,
+        None => return with_db_read(state, |db| db.poll_status()),
+    };
+    spawn_queue_acknowledgements(state.config.db.clone());
     result
 }
 

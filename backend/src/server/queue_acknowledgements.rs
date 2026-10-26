@@ -160,9 +160,12 @@ static QUEUE_ACKNOWLEDGEMENT_TASK: CoalescedTask = CoalescedTask::new();
 /// requests coalesce per database instead of starting a thread per call.
 pub(crate) fn spawn_queue_acknowledgements(db_handle: Db) {
     QUEUE_ACKNOWLEDGEMENT_TASK.spawn(db_handle.id(), move || {
-        if let Ok(db) = db_handle.open() {
-            reconcile_queue_acknowledgements(&db);
-        }
+        // GitHub comments: one instance reconciles at a time.
+        let _ = db_handle.run_exclusive(exclusive::QUEUE_ACKNOWLEDGEMENTS, || {
+            if let Ok(db) = db_handle.open() {
+                reconcile_queue_acknowledgements(&db);
+            }
+        });
     });
 }
 

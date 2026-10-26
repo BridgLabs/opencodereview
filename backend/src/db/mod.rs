@@ -9,6 +9,7 @@ mod comment_activation;
 mod findings;
 mod handle;
 mod indexing;
+mod instances;
 mod lifecycle;
 mod migrations;
 pub(crate) mod pg;
@@ -26,6 +27,7 @@ mod skills;
 pub use accounts::AiAccount;
 pub use handle::Db;
 pub(crate) use handle::ARCHIVE_GATE_KEY;
+pub use instances::{INSTANCE_HEARTBEAT, INSTANCE_TIMEOUT_MS};
 
 #[cfg(test)]
 pub(crate) use queue_acknowledgements::QUEUE_POST_SETTLE_MS;
@@ -924,3 +926,7 @@ mod tests;
 #[cfg(test)]
 #[path = "concurrency_tests.rs"]
 mod concurrency_tests;
+
+#[cfg(test)]
+#[path = "instances_tests.rs"]
+mod instances_tests;

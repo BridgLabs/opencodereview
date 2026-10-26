@@ -1,5 +1,87 @@
 use super::*;
 
+/// Advisory lock keys for work one server instance does at a time when several share a database.
+pub(crate) mod exclusive {
+    pub(crate) const POLL: i64 = 0x6f63_725f_706f_6c6c; // "ocr_poll"
+    pub(crate) const REINDEX: i64 = 0x6f63_725f_7265_6978; // "ocr_reix"
+    pub(crate) const RETENTION: i64 = 0x6f63_725f_7265_746e; // "ocr_retn"
+    pub(crate) const RESULT_RECONCILIATION: i64 = 0x6f63_725f_7265_636e; // "ocr_recn"
+    pub(crate) const CLEAN_RESULT_RETRY: i64 = 0x6f63_725f_636c_6e72; // "ocr_clnr"
+    pub(crate) const QUEUE_ACKNOWLEDGEMENTS: i64 = 0x6f63_725f_6163_6b73; // "ocr_acks"
+    pub(crate) const ORPHAN_REAPER: i64 = 0x6f63_725f_7265_6170; // "ocr_reap"
+}
+
+/// This server's identity among the instances sharing the database.
+pub(crate) struct Instance {
+    pub(crate) id: String,
+    pub(crate) host: String,
+}
+
+impl Instance {
+    pub(crate) fn new() -> Result<Self, String> {
+        Ok(Self {
+            id: crate::sandbox::secret().map_err(|error| error.to_string())?,
+            host: host_name(),
+        })
+    }
+}
+
+fn host_name() -> String {
+    let mut name = [0u8; 256];
+    if unsafe { libc::gethostname(name.as_mut_ptr().cast(), name.len()) } != 0 {
+        return "unknown".into();
+    }
+    let length = name.iter().position(|byte| *byte == 0).unwrap_or(name.len());
+    String::from_utf8_lossy(&name[..length]).into_owned()
+}
+
+/// Keeps this instance marked alive, so other instances leave its reviews and indexing alone.
+pub(crate) fn start_instance_heartbeat(db_handle: Db, instance: Instance) {
+    thread::spawn(move || loop {
+        thread::sleep(crate::db::INSTANCE_HEARTBEAT);
+        if let Err(error) = db_handle
+            .open()
+            .and_then(|db| db.heartbeat_instance(&instance.id, &instance.host))
+        {
+            eprintln!("instance heartbeat failed: {error}");
+        }
+    });
+}
+
+/// Interrupts reviews and indexing whose instance stopped (its heartbeat ran out), and drops
+/// their per-review indexes. One instance does it at a time.
+pub(crate) fn start_orphan_reaper(db_handle: Db) {
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_millis(crate::db::INSTANCE_TIMEOUT_MS as u64 / 2));
+        let _ = db_handle.run_exclusive(exclusive::ORPHAN_REAPER, || {
+            let db = db_handle.open()?;
+            db.reclaim_orphaned_work()?;
+            db.reap_snapshot_indexes()
+        });
+    });
+}
+
+/// Every instance starts queued reviews while it has free review slots, so the queue spreads
+/// across instances. The PR lock in `start_review_skeleton_with` keeps two instances from both
+/// starting the same PR. PRs queued by an author command wait for the poll, which checks them.
+pub(crate) fn start_review_queue_drain(state: SharedState) {
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(15));
+        let Ok((settings, queued)) = with_db_read_raw(&state, |db| Ok((db.settings()?, db.queued_pr_ids()?))) else {
+            continue;
+        };
+        for pr_id in queued {
+            if active_review_count(&state) >= settings.review_concurrency as usize {
+                break;
+            }
+            if with_db_read_raw(&state, |db| db.comment_queue_requires_eligibility(pr_id)).unwrap_or(true) {
+                continue;
+            }
+            let _ = start_review_job(&state, pr_id, false);
+        }
+    });
+}
+
 pub(crate) fn start_runtime_cleanup_worker() {
     thread::spawn(|| loop {
         thread::sleep(Duration::from_secs(60 * 60));
@@ -9,31 +91,38 @@ pub(crate) fn start_runtime_cleanup_worker() {
 
 pub(crate) fn start_review_result_reconciliation(db_handle: Db, repos_dir: PathBuf) {
     thread::spawn(move || {
-        let Ok(db) = db_handle.open() else {
-            return;
-        };
-        reconcile_interrupted_review_posts(&db, &repos_dir);
-        // A "reviewing" comment left behind by a review that has since finished.
-        if db.retire_finished_queue_acknowledgements().unwrap_or(0) > 0 {
-            reconcile_queue_acknowledgements(&db);
-        }
-        let enabled = db
-            .settings()
-            .map(|settings| settings.review_result_mode == "result_comment")
-            .unwrap_or(false);
-        let results = db.posting_review_results().unwrap_or_default();
-        for result in results {
-            let Ok((repo_id, full_name, number, _head)) = db.pr_review_coords(result.pr_id) else {
-                continue;
-            };
-            let repo_path = repos_dir.join(&full_name);
-            if enabled {
-                let _ = publish_reserved_review_result(&db, &result, &full_name, number, &repo_path, true);
-            } else {
-                reconcile_silent_review_result(&db, &result, repo_id, &full_name, number, &repo_path);
-            }
-        }
+        let exclusive = db_handle.clone();
+        let _ = exclusive.run_exclusive(exclusive::RESULT_RECONCILIATION, || {
+            reconcile_review_results(&db_handle, &repos_dir)
+        });
     });
+}
+
+fn reconcile_review_results(db_handle: &Db, repos_dir: &Path) {
+    let Ok(db) = db_handle.open() else {
+        return;
+    };
+    reconcile_interrupted_review_posts(&db, repos_dir);
+    // A "reviewing" comment left behind by a review that has since finished.
+    if db.retire_finished_queue_acknowledgements().unwrap_or(0) > 0 {
+        reconcile_queue_acknowledgements(&db);
+    }
+    let enabled = db
+        .settings()
+        .map(|settings| settings.review_result_mode == "result_comment")
+        .unwrap_or(false);
+    let results = db.posting_review_results().unwrap_or_default();
+    for result in results {
+        let Ok((repo_id, full_name, number, _head)) = db.pr_review_coords(result.pr_id) else {
+            continue;
+        };
+        let repo_path = repos_dir.join(&full_name);
+        if enabled {
+            let _ = publish_reserved_review_result(&db, &result, &full_name, number, &repo_path, true);
+        } else {
+            reconcile_silent_review_result(&db, &result, repo_id, &full_name, number, &repo_path);
+        }
+    }
 }
 
 pub(crate) fn reconcile_silent_review_result(
@@ -151,9 +240,11 @@ pub(crate) fn spawn_single_flight(gate: &'static AtomicBool, task: impl FnOnce()
 /// poll never waits on GitHub calls; a retry already in flight is not doubled.
 pub(crate) fn spawn_failed_clean_result_retry(db_handle: Db, repos_dir: PathBuf) {
     spawn_single_flight(&CLEAN_RESULT_RETRY_RUNNING, move || {
-        if let Ok(db) = db_handle.open() {
-            retry_failed_clean_results(&db, &repos_dir);
-        }
+        let _ = db_handle.run_exclusive(exclusive::CLEAN_RESULT_RETRY, || {
+            if let Ok(db) = db_handle.open() {
+                retry_failed_clean_results(&db, &repos_dir);
+            }
+        });
     });
 }
 

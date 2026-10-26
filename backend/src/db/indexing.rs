@@ -295,14 +295,14 @@ impl Database {
     pub fn begin_repo_index(&self, repo_id: i64, base_ref: Option<&str>) -> Result<RepoIndexStatus, String> {
         let now = now_millis();
         self.conn.execute(
-      "INSERT INTO repo_index_state (repo_id, status, stage, spec_version, base_ref, file_count, package_count, edge_count, skipped_count, total_count, started_at, error_message, updated_at)
-       VALUES ($1, 'indexing', 'preparing', $2, $3, 0, 0, 0, 0, 0, $4, NULL, $4)
+      "INSERT INTO repo_index_state (repo_id, status, stage, spec_version, base_ref, file_count, package_count, edge_count, skipped_count, total_count, started_at, error_message, updated_at, owner_instance)
+       VALUES ($1, 'indexing', 'preparing', $2, $3, 0, 0, 0, 0, 0, $4, NULL, $4, $5)
        ON CONFLICT(repo_id) DO UPDATE SET
          status = 'indexing', stage = 'preparing', spec_version = excluded.spec_version,
          base_ref = excluded.base_ref, file_count = 0, package_count = 0, edge_count = 0,
          skipped_count = 0, total_count = 0, started_at = excluded.started_at, indexed_at = NULL,
-         duration_ms = NULL, error_message = NULL, updated_at = excluded.updated_at",
-      params![repo_id, INDEX_SPEC_VERSION, base_ref, now],
+         duration_ms = NULL, error_message = NULL, updated_at = excluded.updated_at, owner_instance = excluded.owner_instance",
+      params![repo_id, INDEX_SPEC_VERSION, base_ref, now, self.db.instance_id()],
     ).map_err(|error| error.to_string())?;
         self.repo_index_status(repo_id)
     }

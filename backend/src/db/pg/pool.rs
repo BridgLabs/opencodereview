@@ -94,6 +94,11 @@ impl DbSettings {
     pub fn connect_owner(&self) -> Result<postgres::Client, Error> {
         self.owner.connect(self.tls()).map_err(Error::from)
     }
+
+    /// A connection outside the pools as the application role, for session-long advisory locks.
+    pub fn connect_app(&self) -> Result<postgres::Client, Error> {
+        self.app.connect(self.tls()).map_err(Error::from)
+    }
 }
 
 /// Both pools; cheap to clone, shared by every thread.

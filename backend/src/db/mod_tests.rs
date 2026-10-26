@@ -62,6 +62,9 @@ fn run_context_does_not_leak_a_previous_same_head_snapshot() {
     db.ensure_temp_repo_for_index(1, "acme/api").unwrap();
     db.conn.execute("INSERT INTO pull_requests (id, repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at) VALUES (1, 1, 1, 'PR', 'a', 'abc', 1, 1, 1)", []).unwrap();
     let first = db.start_review_skeleton_with(1, None).unwrap();
+    db.conn
+        .execute("UPDATE review_runs SET status = 'superseded' WHERE id = $1", [first])
+        .unwrap();
     let second = db.start_review_skeleton_with(1, None).unwrap();
     let plan = serde_json::json!({ "repoId": 1, "changedFiles": ["old.ts"], "relatedFiles": [], "packages": [], "dependentPackages": [], "testFiles": [], "conventionFiles": [], "omittedCount": 0 });
     db.save_review_context_snapshot(1, 1, Some(first), "abc", None, None, &plan.to_string(), 1, 0)

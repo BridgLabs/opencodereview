@@ -17,6 +17,10 @@ fn two_preview_runs(handle: &Db) -> (i64, i64, i64) {
         )
         .unwrap();
     let first = db.start_review_skeleton_with(1, None).unwrap();
+    // One active review per PR: the first finishes before the second starts.
+    db.conn
+        .execute("UPDATE review_runs SET status = 'preview' WHERE id = $1", [first])
+        .unwrap();
     let second = db.start_review_skeleton_with(1, None).unwrap();
     db.conn
         .execute(

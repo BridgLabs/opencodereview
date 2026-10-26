@@ -498,7 +498,10 @@ pub(crate) fn start_archive_retention_worker(state: SharedState) {
         .spawn(move || {
             let cancel = AtomicBool::new(false);
             loop {
-                let _ = coordinator.perform_maintenance(&cancel);
+                // Several instances may share the archive; one maintains it at a time.
+                let _ = coordinator.db.run_exclusive(crate::server::exclusive::RETENTION, || {
+                    coordinator.perform_maintenance(&cancel)
+                });
 
                 if wait_for_maintenance(&coordinator.notify, Duration::from_secs(3600)).is_err() {
                     break;

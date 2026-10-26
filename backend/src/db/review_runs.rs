@@ -57,11 +57,23 @@ impl Database {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|error| error.to_string())?;
+        // Another instance may run a review of this PR; the PR lock above makes this check stick.
+        let running: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM review_runs WHERE pr_id = $1 AND status IN ('pending', 'running'))",
+                params![pr_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if running {
+            return Err("A review is already running for this PR.".to_string());
+        }
         self.repo_index_status(repo_id)?;
         let run_id: i64 = self.conn.query_row(
-      "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, started_at, model, human_selection_required, review_scope_revision)
-       VALUES ($1, $2, 'pending', $3, $3, $3, $4, 1, (SELECT review_scope_revision FROM pull_requests WHERE id = $1)) RETURNING id",
-      params![pr_id, head_sha, now, model],
+      "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, started_at, model, human_selection_required, review_scope_revision, owner_instance)
+       VALUES ($1, $2, 'pending', $3, $3, $3, $4, 1, (SELECT review_scope_revision FROM pull_requests WHERE id = $1), $5) RETURNING id",
+      params![pr_id, head_sha, now, model, self.db.instance_id()],
       |row| row.get(0),
     ).map_err(|error| error.to_string())?;
         self.conn.execute("UPDATE pull_requests SET review_lane = 'reviewing', status_reason = 'AI review queued', updated_at = $1 WHERE id = $2", params![now, pr_id])
@@ -135,25 +147,8 @@ impl Database {
     /// in-flight in the DB was orphaned by a restart/crash — reconcile it so the UI
     /// never shows a stuck "reviewing"/"indexing" state with no live work.
     pub fn reconcile_interrupted_jobs(&self) -> Result<(), String> {
+        self.reclaim_orphaned_work()?;
         let now = now_millis();
-        // Interrupted reviews → failed; their PRs go back to manual_required.
-        self.conn.execute(
-      "UPDATE pull_requests SET review_lane = 'manual_required', status_reason = 'Review interrupted by app restart', updated_at = $1
-       WHERE id IN (SELECT pr_id FROM review_runs WHERE status IN ('pending','running'))",
-      params![now],
-    ).map_err(|error| error.to_string())?;
-        self.conn.execute(
-      "UPDATE review_runs SET status = 'cancelled', error_message = 'Interrupted by app restart.', finished_at = $1, updated_at = $1
-       WHERE status IN ('pending','running')",
-      params![now],
-    ).map_err(|error| error.to_string())?;
-        self.conn.execute("UPDATE review_finding_audits SET audit_json = json_without_member(audit_json, 'diff') WHERE run_id IN (SELECT id FROM review_runs WHERE status = 'cancelled') AND json_member_type(audit_json, 'diff') IS NOT NULL", []).map_err(|error| error.to_string())?;
-        // Interrupted index runs → cancelled.
-        self.conn.execute(
-      "UPDATE repo_index_state SET status = 'cancelled', stage = 'cancelled', error_message = 'Indexing interrupted by app restart.', updated_at = $1
-       WHERE status = 'indexing'",
-      params![now],
-    ).map_err(|error| error.to_string())?;
         // Heal pending actions that contradict the PR's current lane (stale ready/failed).
         self.conn
             .execute(

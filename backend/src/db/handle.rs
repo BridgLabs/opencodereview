@@ -6,6 +6,9 @@ use super::*;
 #[derive(Clone)]
 pub struct Db {
     pool: pg::DbPool,
+    /// The server instance working through this handle; recorded on the reviews and index runs
+    /// it starts so other instances can tell whose work stopped.
+    instance: Option<std::sync::Arc<str>>,
     /// Keeps a test's throwaway database alive while any handle to it exists.
     #[cfg(test)]
     _test: Option<std::sync::Arc<pg::test_support::TestDb>>,
@@ -32,6 +35,7 @@ impl Db {
         pg::migrate(&settings)?;
         let db = Self {
             pool: pg::DbPool::connect(settings)?,
+            instance: None,
             #[cfg(test)]
             _test: None,
             #[cfg(test)]
@@ -39,6 +43,34 @@ impl Db {
         };
         db.open()?.ensure_defaults()?;
         Ok(db)
+    }
+
+    /// This handle, recording `instance` on the work it starts.
+    pub fn with_instance(mut self, instance: &str) -> Self {
+        self.instance = Some(instance.into());
+        self
+    }
+
+    pub fn instance_id(&self) -> Option<&str> {
+        self.instance.as_deref()
+    }
+
+    /// Runs `work` unless another instance is running work under the same key, and returns
+    /// `None` then. The lock is a session advisory lock on a connection of its own, outside the
+    /// pools: the work may take minutes of GitHub calls, and the lock ends with the connection
+    /// if this instance dies.
+    pub fn run_exclusive<T>(&self, key: i64, work: impl FnOnce() -> T) -> Result<Option<T>, String> {
+        let mut client = self.pool.settings().connect_app().map_err(|error| error.to_string())?;
+        let locked: bool = client
+            .query_one("SELECT pg_try_advisory_lock($1)", &[&key])
+            .map_err(|error| pg::Error::from(error).to_string())?
+            .get(0);
+        if !locked {
+            return Ok(None);
+        }
+        let result = work();
+        let _ = client.execute("SELECT pg_advisory_unlock($1)", &[&key]);
+        Ok(Some(result))
     }
 
     pub fn open(&self) -> Result<Database, String> {
@@ -99,6 +131,7 @@ impl Db {
         let test = pg::test_support::TestDb::new();
         Self {
             pool: test.pool().clone(),
+            instance: None,
             _test: Some(std::sync::Arc::new(test)),
             defaults: std::sync::Arc::new(std::sync::Once::new()),
         }
@@ -137,6 +170,7 @@ impl Db {
         };
         Self {
             pool: pg::DbPool::connect(test.settings().clone()).expect("test pool"),
+            instance: None,
             _test: Some(test),
             defaults: if created {
                 std::sync::Arc::new(std::sync::Once::new())
@@ -153,6 +187,7 @@ impl Db {
     pub fn diagnostic_from_env() -> Self {
         Self {
             pool: pg::DbPool::connect(pg::DbSettings::from_env().expect("database settings")).expect("connect"),
+            instance: None,
             _test: None,
             defaults: done(),
         }

@@ -248,9 +248,13 @@ pub fn run_from_env() -> Result<(), String> {
     run(ServerConfig::from_env()?)
 }
 
-pub fn run(config: ServerConfig) -> Result<(), String> {
+pub fn run(mut config: ServerConfig) -> Result<(), String> {
     std::fs::create_dir_all(&config.repos_dir).map_err(|error| error.to_string())?;
+    let instance = Instance::new()?;
+    config.db = config.db.with_instance(&instance.id);
     let db = config.db.open()?;
+    db.register_instance(&instance.id, &instance.host)?;
+    // Only work whose instance is gone: other instances sharing the database keep theirs.
     db.reconcile_interrupted_jobs()?;
     db.reap_snapshot_indexes()?;
     crate::accounts::adopt_legacy_token(&db)?;
@@ -261,6 +265,9 @@ pub fn run(config: ServerConfig) -> Result<(), String> {
     if config.auto_reindex {
         start_reindex_worker(state.clone());
     }
+    start_instance_heartbeat(config.db.clone(), instance);
+    start_orphan_reaper(config.db.clone());
+    start_review_queue_drain(state.clone());
     start_review_result_reconciliation(config.db.clone(), config.repos_dir.clone());
     start_review_request_restoration(config.db.clone());
     start_poll_scheduler(state.clone());
