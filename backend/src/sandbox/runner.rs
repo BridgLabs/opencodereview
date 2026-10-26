@@ -859,10 +859,13 @@ fn escape_stray_backslashes(text: &str) -> String {
 
 fn final_response(transcript: Option<&str>) -> Result<(String, Option<String>), String> {
     let raw = transcript.ok_or("Review final response is missing: no transcript")?;
-    parse_final_response(&crate::providers::claude::final_result(raw)?)
+    parse_final_response(&crate::providers::claude::final_result(raw)?, false)
 }
 
-fn parse_final_response(text: &str) -> Result<(String, Option<String>), String> {
+/// `lenient` is for the CLIs other than Claude, which sometimes send an object as a JSON string,
+/// the decisions list bare, or an empty list when no decisions were asked for. Claude's output
+/// stays strict.
+fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<String>), String> {
     let text = text.trim();
     if text.is_empty() {
         return Err("Review final response is empty".into());
@@ -898,6 +901,23 @@ fn parse_final_response(text: &str) -> Result<(String, Option<String>), String> 
     if fence.is_some() && !text.starts_with('{') && !closed {
         return Err("Review final response has an unclosed JSON fence".into());
     }
+    let unwrap = |value: serde_json::Value| match value {
+        serde_json::Value::String(raw) if lenient => {
+            serde_json::from_str(&raw).unwrap_or(serde_json::Value::String(raw))
+        }
+        value => value,
+    };
+    let decisions = response.finding_decisions.map(unwrap);
+    let decisions = if lenient {
+        decisions
+            .filter(|value| !value.is_null() && value.as_array().is_none_or(|items| !items.is_empty()))
+            .map(|value| match value {
+                serde_json::Value::Array(items) => serde_json::json!({ "decisions": items }),
+                value => value,
+            })
+    } else {
+        decisions
+    };
     let encode = |value: serde_json::Value| -> Result<String, String> {
         if !value.is_object() {
             return Err("Review final response requires JSON objects for report and findingDecisions".into());
@@ -908,10 +928,7 @@ fn parse_final_response(text: &str) -> Result<(String, Option<String>), String> 
         }
         Ok(raw)
     };
-    Ok((
-        encode(response.report)?,
-        response.finding_decisions.map(encode).transpose()?,
-    ))
+    Ok((encode(unwrap(response.report))?, decisions.map(encode).transpose()?))
 }
 
 #[cfg(unix)]
@@ -1152,7 +1169,7 @@ fn run(
                 _ => read_output(&Path::new(CODEX_HOME).join("last-message.txt"), 4_000_000)?
                     .ok_or("Codex final response is missing")?,
             };
-            parse_final_response(&text)
+            parse_final_response(&text, true)
         })
         .and_then(|(report, decisions)| {
             if secrets.iter().any(|secret| {
