@@ -138,8 +138,8 @@ impl RetentionCoordinator {
         let mut warnings = Vec::new();
         let now_ms = crate::sandbox::now();
         let db = self.db.open().map_err(|e| format!("Could not open database: {e}"))?;
-        let mut store =
-            ArchiveStore::open(&self.archive_root).map_err(|e| format!("Could not open archive store: {e:?}"))?;
+        let mut store = ArchiveStore::open(&self.archive_root, &self.db)
+            .map_err(|e| format!("Could not open archive store: {e:?}"))?;
 
         // 1. Validate retention setting.
         let raw_setting = db

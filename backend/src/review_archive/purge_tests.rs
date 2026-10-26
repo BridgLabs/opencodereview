@@ -1,7 +1,7 @@
 use super::*;
 use crate::db::{Database, Db};
+use crate::pg_params as params;
 use crate::review_archive::{Archive, ArchiveStore, Scope, SourceEntry};
-use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 
@@ -88,7 +88,7 @@ impl Fixture {
             )
             .unwrap();
         let archive = self.archive(id);
-        let mut store = ArchiveStore::open(&self.root.join("review-archives")).unwrap();
+        let mut store = ArchiveStore::open(&self.root.join("review-archives"), &self.handle).unwrap();
         store.deposit(&archive).unwrap();
         store.link(&format!("review:{id}"), &archive.descriptor()).unwrap();
         archive
@@ -100,8 +100,8 @@ impl Fixture {
             .join(format!("{}.archive", archive.descriptor().id))
     }
 
-    fn index(&self) -> Connection {
-        Connection::open(self.root.join("review-archives/index.sqlite")).unwrap()
+    fn index(&self) -> Database {
+        self.handle.open().unwrap()
     }
 }
 
@@ -125,7 +125,7 @@ fn archive_retention_preview_is_read_only_and_apply_preserves_review_history() {
         fixture
             .index()
             .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'archive_retention_%'",
+                "SELECT (SELECT COUNT(*) FROM archive.retention_queue) + (SELECT COUNT(*) FROM archive.retention_events)",
                 [],
                 |row| row.get::<_, i64>(0)
             )
@@ -156,14 +156,14 @@ fn archive_retention_preview_is_read_only_and_apply_preserves_review_history() {
     assert_eq!(
         fixture
             .index()
-            .query_row("SELECT COUNT(*) FROM receipts", [], |row| row.get::<_, i64>(0))
+            .query_row("SELECT COUNT(*) FROM archive.receipts", [], |row| row.get::<_, i64>(0))
             .unwrap(),
         0
     );
     assert_eq!(
         fixture
             .index()
-            .query_row("SELECT COUNT(*) FROM archive_retention_events", [], |row| row
+            .query_row("SELECT COUNT(*) FROM archive.retention_events", [], |row| row
                 .get::<_, i64>(0))
             .unwrap(),
         1
@@ -250,7 +250,7 @@ fn archive_retention_requires_every_shared_reference_to_be_eligible() {
     let archive = fixture.add(1);
     fixture.pr(2, "open");
     fixture.review_run(2, 2, "posted", Some(NOW - 2 * RETENTION_MS));
-    let store = ArchiveStore::open(&fixture.root.join("review-archives")).unwrap();
+    let store = ArchiveStore::open(&fixture.root.join("review-archives"), &fixture.handle).unwrap();
     store.link("review:2", &archive.descriptor()).unwrap();
     assert!(run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW)
         .unwrap()
@@ -269,7 +269,7 @@ fn archive_retention_requires_every_shared_reference_to_be_eligible() {
     assert_eq!(
         fixture
             .index()
-            .query_row("SELECT COUNT(*) FROM archive_retention_events", [], |row| row
+            .query_row("SELECT COUNT(*) FROM archive.retention_events", [], |row| row
                 .get::<_, i64>(0))
             .unwrap(),
         2
@@ -281,7 +281,7 @@ fn archive_retention_protects_unknown_owners_and_uploads() {
     for owner in ["external:case", "review:999", "review:01"] {
         let fixture = Fixture::new();
         let archive = fixture.add(1);
-        let store = ArchiveStore::open(&fixture.root.join("review-archives")).unwrap();
+        let store = ArchiveStore::open(&fixture.root.join("review-archives"), &fixture.handle).unwrap();
         store.link(owner, &archive.descriptor()).unwrap();
         assert!(run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW)
             .unwrap()
@@ -293,7 +293,7 @@ fn archive_retention_protects_unknown_owners_and_uploads() {
     fixture
         .index()
         .execute(
-            "INSERT INTO uploads VALUES('upload',?1,'{}',X'00',?2,100)",
+            "INSERT INTO archive.uploads VALUES ('upload', $1, '{}', '\\x00'::BYTEA, $2, 100)",
             params![archive.descriptor().id, NOW + RETENTION_MS],
         )
         .unwrap();
@@ -324,14 +324,14 @@ fn archive_retention_recovers_interrupted_deletion_and_protects_reused_archives(
         let archive = fixture.add(1);
         let index = fixture.index();
         index
-            .execute_batch("CREATE TABLE archive_retention_queue(id TEXT PRIMARY KEY,bytes INTEGER NOT NULL)")
-            .unwrap();
-        index
-            .execute("INSERT INTO archive_retention_queue SELECT id,bytes FROM artifacts", [])
+            .execute(
+                "INSERT INTO archive.retention_queue SELECT id, bytes FROM archive.artifacts",
+                [],
+            )
             .unwrap();
         if detached {
             index
-                .execute_batch("DELETE FROM receipts; DELETE FROM artifacts;")
+                .execute_batch("DELETE FROM archive.receipts; DELETE FROM archive.artifacts;")
                 .unwrap();
         } else {
             fixture.db.execute("UPDATE pull_requests SET state='open'", []).unwrap();
@@ -360,7 +360,7 @@ fn archive_retention_refuses_symlinked_artifacts_without_detaching_references() 
     assert_eq!(
         fixture
             .index()
-            .query_row("SELECT COUNT(*) FROM receipts", [], |row| row.get::<_, i64>(0))
+            .query_row("SELECT COUNT(*) FROM archive.receipts", [], |row| row.get::<_, i64>(0))
             .unwrap(),
         1
     );

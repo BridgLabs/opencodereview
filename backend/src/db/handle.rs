@@ -59,22 +59,21 @@ impl Db {
         Ok(Database { conn, db: self.clone() })
     }
 
+    /// A bare connection, for code with its own SQL outside the `db` modules (the archive index).
+    pub(crate) fn connection(&self) -> Result<pg::Conn, String> {
+        self.open().map(|db| db.conn)
+    }
+
+    /// `connection`, read-only.
+    pub(crate) fn read_connection(&self) -> Result<pg::Conn, String> {
+        self.open_read().map(|db| db.conn)
+    }
+
     /// A connection to the per-review index of a pull request's head commit (`scratch`). Use the
     /// review's run id as the repository id: it keeps concurrent reviews apart.
     pub fn open_scratch(&self) -> Result<Database, String> {
         let conn = self.pool.get_scratch().map_err(|error| error.to_string())?;
         Ok(Database { conn, db: self.clone() })
-    }
-
-    /// Holds the archive gate exclusively until dropped: archive retention takes it for its whole
-    /// run, reviews take it shared as they start, so retention never deletes an archive while a
-    /// review that could read it is starting.
-    pub fn lock_archive_gate(&self) -> Result<ArchiveGate, String> {
-        let db = self.open()?;
-        db.conn
-            .execute("SELECT pg_advisory_lock($1)", [ARCHIVE_GATE_KEY])
-            .map_err(|error| error.to_string())?;
-        Ok(ArchiveGate(db))
     }
 
     /// Names this database (host and database, never credentials), for coalescing background work
@@ -166,60 +165,11 @@ impl Db {
     }
 }
 
-/// Advisory lock key shared by every instance for the archive gate.
+/// Advisory lock key for the archive gate: reviews take it shared as they start, archive retention
+/// takes it exclusively while it decides what to delete. Shared by every instance.
 pub(crate) const ARCHIVE_GATE_KEY: i64 = 0x6f63_725f_6172_6368; // "ocr_arch"
 
-pub struct ArchiveGate(Database);
-
-impl Drop for ArchiveGate {
-    fn drop(&mut self) {
-        let _ = self.0.conn.execute("SELECT pg_advisory_unlock($1)", [ARCHIVE_GATE_KEY]);
-    }
-}
-
-/// What archive retention reads from the operational tables, taken in one consistent snapshot.
-pub struct OperationalSnapshot {
-    pub review_runs: Vec<(i64, i64, String, Option<i64>)>,
-    pub pull_requests: Vec<(i64, String, String, i64, i64)>,
-    pub review_results: Vec<(i64, String, String)>,
-}
-
 impl Database {
-    pub fn operational_snapshot(&self) -> Result<OperationalSnapshot, String> {
-        let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
-        tx.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", [])
-            .map_err(|error| error.to_string())?;
-        let review_runs = tx
-            .prepare("SELECT id, pr_id, status, finished_at FROM review_runs")
-            .and_then(|mut stmt| {
-                stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?
-                    .collect()
-            })
-            .map_err(|error| error.to_string())?;
-        let pull_requests = tx
-            .prepare("SELECT id, state, review_lane, reprocess_next_review, force_full_next_review FROM pull_requests")
-            .and_then(|mut stmt| {
-                stmt.query_map([], |row| {
-                    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
-                })?
-                .collect()
-            })
-            .map_err(|error| error.to_string())?;
-        let review_results = tx
-            .prepare("SELECT pr_id, effective_state, publication_status FROM review_results")
-            .and_then(|mut stmt| {
-                stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
-                    .collect()
-            })
-            .map_err(|error| error.to_string())?;
-        tx.commit().map_err(|error| error.to_string())?;
-        Ok(OperationalSnapshot {
-            review_runs,
-            pull_requests,
-            review_results,
-        })
-    }
-
     /// The database this connection came from, for handing work to another thread.
     pub fn handle(&self) -> Db {
         self.db.clone()

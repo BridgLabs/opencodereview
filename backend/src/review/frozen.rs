@@ -52,7 +52,8 @@ pub fn capture(
         true,
         cancel,
     )?;
-    let mut store = ArchiveStore::open(&inputs.archive_dir).map_err(|e| e.to_string())?;
+    let db = inputs.db_handle.as_ref().ok_or("Review storage unavailable")?;
+    let mut store = ArchiveStore::open(&inputs.archive_dir, db).map_err(|e| e.to_string())?;
     store
         .deposit_and_link(&archive, &format!("review:{}", inputs.run_id))
         .map_err(|e| e.to_string())?;

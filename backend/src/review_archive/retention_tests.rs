@@ -57,7 +57,7 @@ fn setup_env(dir: &Directory) -> (Database, ArchiveStore, RetentionCoordinator) 
     let archive_root = dir.0.join("archives");
     let db = crate::db::Db::for_test_at(db_path.clone()).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/repo").unwrap();
-    let store = ArchiveStore::open(&archive_root).unwrap();
+    let store = ArchiveStore::open(&archive_root, &db.handle()).unwrap();
     let leases = ArchiveLeaseTracker::new();
     let status = Arc::new(Mutex::new(ArchiveStorageStatus::default()));
     let notify = Arc::new((Mutex::new(false), Condvar::new()));
@@ -400,7 +400,11 @@ fn retention_coordinator_recovers_crashed_deletions() {
     store.record_deletion_for_test(&descriptor.id, 100, now_ms);
 
     // Reopening the store should recover and complete unlinking
-    let recovered_store = ArchiveStore::open(&dir.0.join("archives")).unwrap();
+    let recovered_store = ArchiveStore::open(
+        &dir.0.join("archives"),
+        &crate::db::Db::for_test_at(dir.0.join("test.sqlite")),
+    )
+    .unwrap();
     assert!(!sealed_path.exists());
     assert!(recovered_store.list_artifacts().unwrap().is_empty());
 }
@@ -502,8 +506,9 @@ fn cleanup_rechecks_receipts_after_another_connection_links_the_archive() {
     store.deposit_and_link(&archive, "review:1").unwrap();
     let checked = store.receipts_for_artifact(&id).unwrap();
     let root = dir.0.join("archives");
+    let db = crate::db::Db::for_test_at(dir.0.join("test.sqlite"));
     std::thread::spawn(move || {
-        ArchiveStore::open(&root)
+        ArchiveStore::open(&root, &db)
             .unwrap()
             .deposit_and_link(&archive, "review:2")
             .unwrap();
@@ -522,16 +527,23 @@ fn deposit_completes_reserved_deletion_before_republishing() {
     let archive = sample_archive("concurrent-deletion");
     let descriptor = archive.descriptor();
     store.deposit_and_link(&archive, "review:1").unwrap();
-    let mut writer = ArchiveStore::open(&dir.0.join("archives")).unwrap();
+    let mut writer = ArchiveStore::open(
+        &dir.0.join("archives"),
+        &crate::db::Db::for_test_at(dir.0.join("test.sqlite")),
+    )
+    .unwrap();
     store.record_deletion_for_test(&descriptor.id, 100, crate::sandbox::now());
     writer.deposit_and_link(&archive, "review:2").unwrap();
     assert_eq!(store.receipts_for_artifact(&descriptor.id).unwrap(), vec!["review:2"]);
     assert!(store.load(&descriptor).is_ok());
     drop(writer);
-    assert!(ArchiveStore::open(&dir.0.join("archives"))
-        .unwrap()
-        .load(&descriptor)
-        .is_ok());
+    assert!(ArchiveStore::open(
+        &dir.0.join("archives"),
+        &crate::db::Db::for_test_at(dir.0.join("test.sqlite"))
+    )
+    .unwrap()
+    .load(&descriptor)
+    .is_ok());
 }
 
 #[test]

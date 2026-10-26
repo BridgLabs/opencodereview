@@ -374,7 +374,11 @@ fn archive_compacts_repeated_metadata_without_dropping_revision_entries() {
         );
     }
     let directory = Directory::new();
-    let mut store = ArchiveStore::open(&directory.0.join("store")).unwrap();
+    let mut store = ArchiveStore::open(
+        &directory.0.join("store"),
+        &crate::db::Db::for_test_at(directory.0.join("store")),
+    )
+    .unwrap();
     store.deposit(&archive).unwrap();
     assert_eq!(
         store.load(&archive.descriptor()).unwrap().manifest_bytes().unwrap(),
@@ -657,7 +661,11 @@ fn archive_store_publishes_atomically_and_preserves_sealed_data_on_abort() {
     let head = scope().head_sha;
     let archive = build(&[("a.rs", &head, b"source")]);
     let descriptor = archive.descriptor();
-    let mut store = ArchiveStore::open(&directory.0.join("store")).unwrap();
+    let mut store = ArchiveStore::open(
+        &directory.0.join("store"),
+        &crate::db::Db::for_test_at(directory.0.join("store")),
+    )
+    .unwrap();
     let owner = hash(b"owner");
     assert!(!store
         .begin(
@@ -689,7 +697,11 @@ fn archive_store_publishes_atomically_and_preserves_sealed_data_on_abort() {
         )
         .unwrap());
     drop(store);
-    let store = ArchiveStore::open(&directory.0.join("store")).unwrap();
+    let store = ArchiveStore::open(
+        &directory.0.join("store"),
+        &crate::db::Db::for_test_at(directory.0.join("store")),
+    )
+    .unwrap();
     assert_eq!(store.load(&descriptor).unwrap().descriptor(), descriptor);
 }
 
@@ -699,7 +711,7 @@ fn archive_store_recovers_interrupted_deposits_without_evicting_history() {
     let root = directory.0.join("store");
     let history = build(&[("a.rs", &scope().head_sha, b"history")]);
     let orphan = build(&[("a.rs", &scope().head_sha, b"interrupted")]);
-    let mut store = ArchiveStore::open(&root).unwrap();
+    let mut store = ArchiveStore::open(&root, &crate::db::Db::for_test_at(&root)).unwrap();
     store.deposit(&history).unwrap();
     store.link("review:published", &history.descriptor()).unwrap();
     let uploading = build(&[("a.rs", &scope().head_sha, b"uploading")]);
@@ -723,7 +735,7 @@ fn archive_store_recovers_interrupted_deposits_without_evicting_history() {
     let staging = root.join("sealed").join(format!(".publish-{}", orphan.descriptor().id));
     orphan.write_new(&staging).unwrap();
     std::fs::rename(staging, &orphan_path).unwrap();
-    let mut store = ArchiveStore::open(&root).unwrap();
+    let mut store = ArchiveStore::open(&root, &crate::db::Db::for_test_at(&root)).unwrap();
     assert!(!staged_path.exists());
     assert!(!orphan_path.exists());
     assert!(uploading_path.exists());
@@ -735,14 +747,21 @@ fn archive_store_recovers_interrupted_deposits_without_evicting_history() {
     assert!(store.load_linked("review:missing").unwrap().is_none());
     store.deposit(&orphan).unwrap();
     drop(store);
-    assert!(ArchiveStore::open(&root).unwrap().load(&orphan.descriptor()).is_ok());
+    assert!(ArchiveStore::open(&root, &crate::db::Db::for_test_at(&root))
+        .unwrap()
+        .load(&orphan.descriptor())
+        .is_ok());
 }
 
 #[test]
 fn archive_store_rejects_expired_uploads_and_quota_without_evicting_history() {
     let directory = Directory::new();
     let archive = build(&[("a.rs", &scope().head_sha, b"source")]);
-    let mut store = ArchiveStore::open(&directory.0.join("store")).unwrap();
+    let mut store = ArchiveStore::open(
+        &directory.0.join("store"),
+        &crate::db::Db::for_test_at(directory.0.join("store")),
+    )
+    .unwrap();
     let descriptor = archive.descriptor();
     let owner = hash(b"expired");
     assert!(store
@@ -756,14 +775,15 @@ fn archive_store_rejects_expired_uploads_and_quota_without_evicting_history() {
             crate::sandbox::now() + 90_000,
         )
         .unwrap();
-    let conn = rusqlite::Connection::open(directory.0.join("store/index.sqlite")).unwrap();
-    conn.execute("UPDATE uploads SET deadline=0", []).unwrap();
+    let conn = crate::db::Db::for_test_at(directory.0.join("store")).open().unwrap();
+    conn.execute("UPDATE archive.uploads SET deadline=0", []).unwrap();
     let (digest, bytes) = archive.transfer_blobs().next().unwrap();
     assert!(store.put(&owner, digest, bytes).is_err());
     store.expire().unwrap();
     assert!(!directory.0.join("store/pending").join(&owner).exists());
     store.deposit(&archive).unwrap();
-    conn.execute("UPDATE artifacts SET bytes=?1", [STORE_QUOTA]).unwrap();
+    conn.execute("UPDATE archive.artifacts SET bytes=$1", [STORE_QUOTA as i64])
+        .unwrap();
     let other = build(&[("a.rs", &scope().head_sha, b"changed")]);
     assert!(matches!(
         store.begin(
@@ -782,12 +802,12 @@ fn concurrent_archive_reservations_cannot_overbook_storage() {
     let directory = Directory::new();
     let path = directory.0.join("store");
     let historical = build(&[("a.rs", &scope().head_sha, b"history")]);
-    let mut store = ArchiveStore::open(&path).unwrap();
+    let mut store = ArchiveStore::open(&path, &crate::db::Db::for_test_at(&path)).unwrap();
     store.deposit(&historical).unwrap();
-    let conn = rusqlite::Connection::open(path.join("index.sqlite")).unwrap();
+    let conn = crate::db::Db::for_test_at(&path).open().unwrap();
     conn.execute(
-        "UPDATE artifacts SET bytes=?1",
-        [STORE_QUOTA - (MAX_BLOB_BYTES + MAX_MANIFEST_BYTES + 128 * 1024 * 1024)],
+        "UPDATE archive.artifacts SET bytes=$1",
+        [(STORE_QUOTA - (MAX_BLOB_BYTES + MAX_MANIFEST_BYTES + 128 * 1024 * 1024)) as i64],
     )
     .unwrap();
     let next = build(&[("a.rs", &scope().head_sha, b"next")]);
@@ -797,7 +817,7 @@ fn concurrent_archive_reservations_cannot_overbook_storage() {
         for index in 0..2 {
             let (path, next, barrier) = (path.clone(), &next, barrier.clone());
             handles.push(scope.spawn(move || {
-                let mut store = ArchiveStore::open(&path).unwrap();
+                let mut store = ArchiveStore::open(&path, &crate::db::Db::for_test_at(&path)).unwrap();
                 barrier.wait();
                 store
                     .begin(
@@ -1206,11 +1226,14 @@ fn archive_store_open_read_and_load_linked_integrity() {
     let store_path = directory.0.join("store");
 
     // 1. open_read on non-existent path fails with Path error and does not create path
-    assert!(matches!(ArchiveStore::open_read(&store_path), Err(Error::Path)));
+    assert!(matches!(
+        ArchiveStore::open_read(&store_path, &crate::db::Db::for_test_at(&store_path)),
+        Err(Error::Path)
+    ));
     assert!(!store_path.exists());
 
     // 2. Setup a store using open, deposit archive, link receipt
-    let mut store = ArchiveStore::open(&store_path).unwrap();
+    let mut store = ArchiveStore::open(&store_path, &crate::db::Db::for_test_at(&store_path)).unwrap();
     let archive_a = build(&[("a.rs", &scope().head_sha, b"source_a")]);
     let archive_b = build(&[("b.rs", &scope().head_sha, b"source_b")]);
     store.deposit(&archive_a).unwrap();
@@ -1219,7 +1242,7 @@ fn archive_store_open_read_and_load_linked_integrity() {
     drop(store);
 
     // 3. open_read successfully opens existing store read-only
-    let ro_store = ArchiveStore::open_read(&store_path).unwrap();
+    let ro_store = ArchiveStore::open_read(&store_path, &crate::db::Db::for_test_at(&store_path)).unwrap();
     let loaded = ro_store
         .load_linked("review:100")
         .unwrap()
@@ -1229,24 +1252,45 @@ fn archive_store_open_read_and_load_linked_integrity() {
     drop(ro_store);
 
     // 4. Integrity error when receipt points to missing artifact row
-    let conn = rusqlite::Connection::open(store_path.join("index.sqlite")).unwrap();
-    conn.execute("INSERT INTO receipts(owner, id) VALUES('review:corrupt', '0000000000000000000000000000000000000000000000000000000000000000')", []).unwrap();
+    let conn = crate::db::Db::for_test_at(&store_path).open().unwrap();
+    conn.execute("INSERT INTO archive.receipts(owner, id) VALUES('review:corrupt', '0000000000000000000000000000000000000000000000000000000000000000')", []).unwrap();
     drop(conn);
 
-    let ro_store = ArchiveStore::open_read(&store_path).unwrap();
+    let ro_store = ArchiveStore::open_read(&store_path, &crate::db::Db::for_test_at(&store_path)).unwrap();
     assert!(matches!(ro_store.load_linked("review:corrupt"), Err(Error::Integrity)));
     drop(ro_store);
 
     // 5. Integrity error when artifact row descriptor.id does not match receipt ID
     let raw_b = serde_json::to_string(&archive_b.descriptor()).unwrap();
-    let conn = rusqlite::Connection::open(store_path.join("index.sqlite")).unwrap();
+    let conn = crate::db::Db::for_test_at(&store_path).open().unwrap();
     conn.execute(
-        "UPDATE artifacts SET descriptor=?1 WHERE id=?2",
-        rusqlite::params![raw_b, archive_a.descriptor().id],
+        "UPDATE archive.artifacts SET descriptor=$1 WHERE id=$2",
+        crate::pg_params![raw_b, archive_a.descriptor().id],
     )
     .unwrap();
     drop(conn);
 
-    let ro_store = ArchiveStore::open_read(&store_path).unwrap();
+    let ro_store = ArchiveStore::open_read(&store_path, &crate::db::Db::for_test_at(&store_path)).unwrap();
     assert!(matches!(ro_store.load_linked("review:100"), Err(Error::Integrity)));
+}
+
+#[test]
+fn a_store_with_an_unimported_sqlite_index_refuses_to_open_and_keeps_its_archives() {
+    let directory = Directory::new();
+    let root = directory.0.join("store");
+    let sealed = root.join("sealed").join(format!("{}.archive", "a".repeat(64)));
+    std::fs::create_dir_all(root.join("sealed")).unwrap();
+    std::fs::write(&sealed, b"frozen evidence").unwrap();
+    std::fs::write(root.join("index.sqlite"), b"").unwrap();
+    let db = crate::db::Db::for_test_at(&root);
+    // The Postgres index is empty until the import: recovery would delete every sealed archive.
+    assert!(matches!(ArchiveStore::open(&root, &db), Err(Error::UnimportedIndex)));
+    assert!(matches!(
+        ArchiveStore::open_read(&root, &db),
+        Err(Error::UnimportedIndex)
+    ));
+    assert!(sealed.exists());
+    let report = crate::review_archive::purge::run(&db, &root, true, 10 * crate::review_archive::purge::RETENTION_MS);
+    assert!(report.unwrap_err().contains("import-sqlite"));
+    assert!(sealed.exists());
 }

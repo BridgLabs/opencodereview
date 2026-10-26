@@ -10,6 +10,6 @@ pub(crate) mod test_support;
 mod tests;
 
 pub(crate) use crate::pg_params as params;
-pub use conn::{Conn, Error, OptionalExtension, Row};
+pub use conn::{Conn, Error, OptionalExtension, Row, Transaction};
 pub use migrate::migrate;
 pub use pool::{DbPool, DbSettings};

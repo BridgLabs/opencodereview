@@ -222,6 +222,20 @@ impl FromColumn for usize {
     }
 }
 
+impl FromColumn for Option<u64> {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        integer(row, index)?
+            .map(|value| u64::try_from(value).map_err(|_| Error::Conversion(format!("column {index} is negative"))))
+            .transpose()
+    }
+}
+
+impl FromColumn for u64 {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        required(Option::<u64>::from_column(row, index)?, index)
+    }
+}
+
 impl FromColumn for Option<bool> {
     fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
         match *row.columns()[index].type_() {

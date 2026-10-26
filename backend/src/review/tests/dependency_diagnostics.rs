@@ -107,13 +107,21 @@ fn offline_export_restores_submodule_only_and_mixed_archives() {
             .unwrap()
             .provenance
             .is_empty());
-        let mut store = crate::review_archive::ArchiveStore::open(&root.join("review-archives")).unwrap();
+        let mut store = crate::review_archive::ArchiveStore::open(
+            &root.join("review-archives"),
+            &crate::db::Db::for_test_at(root.join("review-archives")),
+        )
+        .unwrap();
         store.deposit_and_link(&archive, "review:42").unwrap();
         drop(store);
 
-        let recorded = super::load_recorded_dependencies(&root.join("review-archives"), 42)
-            .unwrap()
-            .unwrap();
+        let recorded = super::load_recorded_dependencies(
+            &root.join("review-archives"),
+            &crate::db::Db::for_test_at(root.join("review-archives")),
+            42,
+        )
+        .unwrap()
+        .unwrap();
         let expected = if with_file_link {
             prepared
         } else {

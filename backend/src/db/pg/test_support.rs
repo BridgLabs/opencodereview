@@ -106,7 +106,7 @@ fn reset(config: &postgres::Config, seed: &[(String, String, i64)]) -> Result<()
     let tables: Vec<String> = client
         .query(
             "SELECT format('%I.%I', schemaname, tablename) FROM pg_tables
-             WHERE schemaname IN ('public', 'scratch') AND tablename <> 'schema_migrations'",
+             WHERE schemaname IN ('public', 'scratch', 'archive') AND tablename <> 'schema_migrations'",
             &[],
         )?
         .iter()

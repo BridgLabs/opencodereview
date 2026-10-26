@@ -1,31 +1,30 @@
+use crate::db::pg::{params, Conn, Transaction};
 use crate::db::Db;
-use rusqlite::{params, Connection, OpenFlags, TransactionBehavior};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 pub const RETENTION_MS: i64 = 24 * 60 * 60 * 1000;
 pub const BATCH_LIMIT: usize = 256;
 type RetentionResult<T> = Result<T, Box<dyn std::error::Error>>;
 
 const CANDIDATES: &str = "
-    SELECT a.id,a.bytes FROM artifacts a
-    JOIN receipts x ON x.id=a.id
-    LEFT JOIN operational.review_runs r ON x.owner=printf('review:%d',r.id)
-    LEFT JOIN operational.pull_requests p ON p.id=r.pr_id
-    WHERE NOT EXISTS(SELECT 1 FROM uploads u WHERE u.id=a.id)
-    GROUP BY a.id,a.bytes
-    HAVING MIN(CASE WHEN r.id IS NOT NULL AND p.state='merged' AND p.review_lane='merged'
-        AND p.reprocess_next_review=0 AND p.force_full_next_review=0
-        AND r.status IN ('approved','posted','failed','cancelled','skipped','superseded','succeeded')
-        AND r.finished_at>0 AND r.finished_at<?1
-        AND NOT EXISTS(SELECT 1 FROM operational.review_runs j
-            WHERE j.pr_id=p.id AND j.status IN ('pending','running','posting','queued','cancelling','preview'))
-        AND NOT EXISTS(SELECT 1 FROM operational.review_results z
-            WHERE z.pr_id=p.id AND (z.effective_state='awaiting_action' OR z.publication_status IN ('pending','posting')))
-        THEN 1 ELSE 0 END)=1
-    ORDER BY MAX(r.finished_at),a.id LIMIT ?2";
+    SELECT a.id, a.bytes FROM archive.artifacts a
+    JOIN archive.receipts x ON x.id = a.id
+    LEFT JOIN review_runs r ON x.owner = 'review:' || r.id
+    LEFT JOIN pull_requests p ON p.id = r.pr_id
+    WHERE NOT EXISTS (SELECT 1 FROM archive.uploads u WHERE u.id = a.id)
+    GROUP BY a.id, a.bytes
+    HAVING MIN(CASE WHEN r.id IS NOT NULL AND p.state = 'merged' AND p.review_lane = 'merged'
+        AND p.reprocess_next_review = 0 AND p.force_full_next_review = 0
+        AND r.status IN ('approved', 'posted', 'failed', 'cancelled', 'skipped', 'superseded', 'succeeded')
+        AND r.finished_at > 0 AND r.finished_at < $1
+        AND NOT EXISTS (SELECT 1 FROM review_runs j
+            WHERE j.pr_id = p.id AND j.status IN ('pending', 'running', 'posting', 'queued', 'cancelling', 'preview'))
+        AND NOT EXISTS (SELECT 1 FROM review_results z
+            WHERE z.pr_id = p.id AND (z.effective_state = 'awaiting_action' OR z.publication_status IN ('pending', 'posting')))
+        THEN 1 ELSE 0 END) = 1
+    ORDER BY MAX(r.finished_at), a.id LIMIT $2";
 
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,32 +57,25 @@ fn archive_path(root: &Path, id: &str) -> RetentionResult<PathBuf> {
     Ok(root.join("sealed").join(format!("{id}.archive")))
 }
 
-fn used_bytes(conn: &Connection) -> rusqlite::Result<u64> {
-    conn.query_row(
-        "SELECT COALESCE((SELECT SUM(bytes) FROM artifacts),0)+COALESCE((SELECT SUM(reservation) FROM uploads),0)",
+fn used_bytes(conn: &Conn) -> RetentionResult<u64> {
+    Ok(conn.query_row(
+        "SELECT (COALESCE((SELECT SUM(bytes) FROM archive.artifacts), 0)
+           + COALESCE((SELECT SUM(reservation) FROM archive.uploads), 0))::BIGINT",
         [],
         |row| row.get(0),
-    )
+    )?)
 }
 
-fn pending_deletions(conn: &Connection) -> rusqlite::Result<usize> {
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='archive_retention_queue')",
-        [],
-        |row| row.get(0),
-    )?;
-    if exists {
-        conn.query_row("SELECT COUNT(*) FROM archive_retention_queue", [], |row| row.get(0))
-    } else {
-        Ok(0)
-    }
+fn pending_deletions(conn: &Conn) -> RetentionResult<usize> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM archive.retention_queue", [], |row| row.get(0))?)
 }
 
-fn drain(conn: &mut Connection, root: &Path, report: &mut Report) -> RetentionResult<()> {
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+fn drain(db: &Db, root: &Path, report: &mut Report) -> RetentionResult<()> {
+    let conn = db.connection()?;
+    let tx = super::store::write_transaction(&conn)?;
     let pending = tx
-        .prepare("SELECT id,bytes FROM archive_retention_queue ORDER BY id LIMIT ?1")?
-        .query_map([BATCH_LIMIT], |row| {
+        .prepare("SELECT id, bytes FROM archive.retention_queue ORDER BY id LIMIT $1")?
+        .query_map([BATCH_LIMIT as i64], |row| {
             Ok(Candidate {
                 id: row.get(0)?,
                 bytes: row.get(1)?,
@@ -91,7 +83,12 @@ fn drain(conn: &mut Connection, root: &Path, report: &mut Report) -> RetentionRe
         })?
         .collect::<Result<Vec<_>, _>>()?;
     for candidate in pending {
-        let referenced: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM artifacts WHERE id=?1 UNION ALL SELECT 1 FROM receipts WHERE id=?1 UNION ALL SELECT 1 FROM uploads WHERE id=?1)", [&candidate.id], |row| row.get(0))?;
+        let referenced: bool = tx.query_row(
+            "SELECT EXISTS (SELECT 1 FROM archive.artifacts WHERE id = $1 UNION ALL SELECT 1 FROM archive.receipts WHERE id = $1
+               UNION ALL SELECT 1 FROM archive.uploads WHERE id = $1)",
+            [&candidate.id],
+            |row| row.get(0),
+        )?;
         if !referenced {
             let path = archive_path(root, &candidate.id)?;
             match fs::symlink_metadata(&path) {
@@ -106,44 +103,26 @@ fn drain(conn: &mut Connection, root: &Path, report: &mut Report) -> RetentionRe
                 .checked_add(candidate.bytes)
                 .ok_or("Archive retention size overflow")?;
         }
-        tx.execute("DELETE FROM archive_retention_queue WHERE id=?1", [&candidate.id])?;
+        tx.execute("DELETE FROM archive.retention_queue WHERE id = $1", [&candidate.id])?;
     }
     fs::File::open(root.join("sealed"))?.sync_all()?;
     tx.commit()?;
     Ok(())
 }
 
-/// Copies the operational state the candidate query reads into the archive connection, as the
-/// in-memory database `operational`. The archive index is still SQLite while the operational
-/// tables are in Postgres; one repeatable-read snapshot keeps the three tables consistent.
-fn attach_operational(conn: &Connection, db: &Db) -> RetentionResult<()> {
-    conn.execute_batch(
-        "ATTACH DATABASE ':memory:' AS operational;
-         CREATE TABLE operational.review_runs(id INTEGER PRIMARY KEY,pr_id INTEGER,status TEXT,finished_at INTEGER);
-         CREATE TABLE operational.pull_requests(id INTEGER PRIMARY KEY,state TEXT,review_lane TEXT,reprocess_next_review INTEGER,force_full_next_review INTEGER);
-         CREATE TABLE operational.review_results(pr_id INTEGER,effective_state TEXT,publication_status TEXT);",
-    )?;
-    let snapshot = db.open_read()?;
-    let state = snapshot.operational_snapshot()?;
-    for (id, pr_id, status, finished_at) in state.review_runs {
-        conn.execute(
-            "INSERT INTO operational.review_runs VALUES(?1,?2,?3,?4)",
-            params![id, pr_id, status, finished_at],
-        )?;
-    }
-    for (id, state, lane, reprocess, force_full) in state.pull_requests {
-        conn.execute(
-            "INSERT INTO operational.pull_requests VALUES(?1,?2,?3,?4,?5)",
-            params![id, state, lane, reprocess, force_full],
-        )?;
-    }
-    for (pr_id, effective, publication) in state.review_results {
-        conn.execute(
-            "INSERT INTO operational.review_results VALUES(?1,?2,?3)",
-            params![pr_id, effective, publication],
-        )?;
-    }
-    Ok(())
+/// A preview reads through the read-only pool, so it cannot write even by mistake. Applying holds
+/// the archive gate (reviews take it shared as they start) and the index writers' lock until the
+/// deletions commit, as `BEGIN IMMEDIATE` across the two SQLite files did.
+fn begin<'c>(conn: &'c Conn, apply: bool) -> RetentionResult<Transaction<'c>> {
+    let tx = if apply {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute("SELECT pg_advisory_xact_lock($1)", [crate::db::ARCHIVE_GATE_KEY])?;
+        tx.execute("SELECT pg_advisory_xact_lock($1)", [super::store::ARCHIVE_INDEX_KEY])?;
+        tx
+    } else {
+        conn.unchecked_transaction()?
+    };
+    Ok(tx)
 }
 
 fn run_inner(db: &Db, root: &Path, apply: bool, now: i64) -> RetentionResult<Report> {
@@ -160,33 +139,20 @@ fn run_inner(db: &Db, root: &Path, apply: bool, now: i64) -> RetentionResult<Rep
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(report),
         Err(error) => return Err(error.into()),
     }
-    if !fs::symlink_metadata(root.join("sealed"))?.is_dir()
-        || !fs::symlink_metadata(root.join("index.sqlite"))?.is_file()
-    {
+    if !fs::symlink_metadata(root.join("sealed"))?.is_dir() {
         return Err("Archive retention refuses symlinked or nonregular storage".into());
     }
-    // Reviews take this gate shared when they start; holding it for the whole run keeps the
-    // operational snapshot below true until the deletions commit.
-    let _gate = db.lock_archive_gate()?;
-    // Writable so the in-memory operational copy can be filled; a preview then turns on
-    // query_only, which SQLite enforces for every database on the connection.
-    let mut conn = Connection::open_with_flags(root.join("index.sqlite"), OpenFlags::SQLITE_OPEN_READ_WRITE)?;
-    conn.busy_timeout(Duration::from_secs(5))?;
-    attach_operational(&conn, db)?;
-    if !apply {
-        conn.execute_batch("PRAGMA query_only=ON")?;
+    if fs::symlink_metadata(root.join("index.sqlite")).is_ok() {
+        return Err(crate::review_archive::Error::UnimportedIndex.to_string().into());
     }
-    let tx = conn.transaction_with_behavior(if apply {
-        TransactionBehavior::Immediate
-    } else {
-        TransactionBehavior::Deferred
-    })?;
+    let conn = if apply { db.connection()? } else { db.read_connection()? };
+    let tx = begin(&conn, apply)?;
     report.used_bytes = used_bytes(&tx)?;
     report.pending_deletions = pending_deletions(&tx)?;
     report.active_jobs = tx.query_row(
         "SELECT COUNT(*) FROM (
-        SELECT pr_id FROM operational.review_runs WHERE status IN ('pending','running','posting','queued','cancelling')
-        UNION SELECT id FROM operational.pull_requests WHERE review_lane IN ('queued','reviewing'))",
+           SELECT pr_id FROM review_runs WHERE status IN ('pending', 'running', 'posting', 'queued', 'cancelling')
+           UNION SELECT id FROM pull_requests WHERE review_lane IN ('queued', 'reviewing')) active",
         [],
         |row| row.get(0),
     )?;
@@ -195,7 +161,7 @@ fn run_inner(db: &Db, root: &Path, apply: bool, now: i64) -> RetentionResult<Rep
     }
     report.candidates = tx
         .prepare(CANDIDATES)?
-        .query_map(params![now.saturating_sub(RETENTION_MS), BATCH_LIMIT], |row| {
+        .query_map(params![now.saturating_sub(RETENTION_MS), BATCH_LIMIT as i64], |row| {
             Ok(Candidate {
                 id: row.get(0)?,
                 bytes: row.get(1)?,
@@ -214,22 +180,22 @@ fn run_inner(db: &Db, root: &Path, apply: bool, now: i64) -> RetentionResult<Rep
     if !apply {
         return Ok(report);
     }
-    tx.execute_batch("CREATE TABLE IF NOT EXISTS archive_retention_queue(id TEXT PRIMARY KEY,bytes INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS archive_retention_events(owner TEXT NOT NULL,id TEXT NOT NULL,expired_at INTEGER NOT NULL,bytes INTEGER NOT NULL,PRIMARY KEY(owner,id));")?;
     for candidate in &report.candidates {
         tx.execute(
-            "INSERT OR REPLACE INTO archive_retention_events SELECT owner,id,?2,?3 FROM receipts WHERE id=?1",
-            params![candidate.id, now, candidate.bytes],
+            "INSERT INTO archive.retention_events (owner, id, expired_at, bytes)
+             SELECT owner, id, $2, $3 FROM archive.receipts WHERE id = $1
+             ON CONFLICT (owner, id) DO UPDATE SET expired_at = excluded.expired_at, bytes = excluded.bytes",
+            params![candidate.id, now, candidate.bytes as i64],
         )?;
         tx.execute(
-            "INSERT OR IGNORE INTO archive_retention_queue VALUES(?1,?2)",
-            params![candidate.id, candidate.bytes],
+            "INSERT INTO archive.retention_queue (id, bytes) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            params![candidate.id, candidate.bytes as i64],
         )?;
-        tx.execute("DELETE FROM receipts WHERE id=?1", [&candidate.id])?;
-        tx.execute("DELETE FROM artifacts WHERE id=?1", [&candidate.id])?;
+        tx.execute("DELETE FROM archive.receipts WHERE id = $1", [&candidate.id])?;
+        tx.execute("DELETE FROM archive.artifacts WHERE id = $1", [&candidate.id])?;
     }
     tx.commit()?;
-    drain(&mut conn, root, &mut report)?;
+    drain(db, root, &mut report)?;
     report.pending_deletions = pending_deletions(&conn)?;
     report.used_bytes = used_bytes(&conn)?;
     Ok(report)

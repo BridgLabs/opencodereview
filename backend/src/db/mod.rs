@@ -24,8 +24,8 @@ mod review_usage;
 mod settings;
 mod skills;
 pub use accounts::AiAccount;
+pub use handle::Db;
 pub(crate) use handle::ARCHIVE_GATE_KEY;
-pub use handle::{ArchiveGate, Db, OperationalSnapshot};
 
 #[cfg(test)]
 pub(crate) use queue_acknowledgements::QUEUE_POST_SETTLE_MS;

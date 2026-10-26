@@ -577,6 +577,7 @@ pub(crate) struct RecordedDependencies {
 
 pub(crate) fn load_recorded_dependencies(
     archives_dir: &std::path::Path,
+    db: &crate::db::Db,
     run_id: i64,
 ) -> Result<Option<RecordedDependencies>, crate::review_archive::Error> {
     match std::fs::symlink_metadata(archives_dir) {
@@ -588,7 +589,7 @@ pub(crate) fn load_recorded_dependencies(
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err(crate::review_archive::Error::Preparation),
     }
-    let store = crate::review_archive::ArchiveStore::open_read(archives_dir)?;
+    let store = crate::review_archive::ArchiveStore::open_read(archives_dir, db)?;
     let archive = store.load_linked(&format!("review:{run_id}"))?;
     Ok(archive.map(|archive| RecordedDependencies {
         // Native submodules have no URL provenance, but retain authenticated archive membership.
@@ -612,31 +613,48 @@ mod dependency_diagnostics_tests;
 fn export_recorded_dependencies_distinguishes_absence_from_corruption() {
     let root = super::make_run_dir(-789).unwrap();
     // 1. Missing review-archives directory -> Ok(None) (legacy absence)
-    assert!(load_recorded_dependencies(&root.join("review-archives"), 42)
-        .unwrap()
-        .is_none());
+    assert!(load_recorded_dependencies(
+        &root.join("review-archives"),
+        &crate::db::Db::for_test_at(root.join("review-archives")),
+        42
+    )
+    .unwrap()
+    .is_none());
 
     // 1b. Existing review-archives path that is a regular file -> Err(Integrity)
     let archives_dir = root.join("review-archives");
     std::fs::write(&archives_dir, b"not a directory").unwrap();
     assert!(matches!(
-        load_recorded_dependencies(&root.join("review-archives"), 42),
+        load_recorded_dependencies(
+            &root.join("review-archives"),
+            &crate::db::Db::for_test_at(root.join("review-archives")),
+            42
+        ),
         Err(crate::review_archive::Error::Integrity)
     ));
     std::fs::remove_file(&archives_dir).unwrap();
 
     // 2. Existing store with no receipt for run -> Ok(None)
-    let _store = crate::review_archive::ArchiveStore::open(&archives_dir).unwrap();
-    assert!(load_recorded_dependencies(&root.join("review-archives"), 42)
-        .unwrap()
-        .is_none());
+    let _store =
+        crate::review_archive::ArchiveStore::open(&archives_dir, &crate::db::Db::for_test_at(&archives_dir)).unwrap();
+    assert!(load_recorded_dependencies(
+        &root.join("review-archives"),
+        &crate::db::Db::for_test_at(root.join("review-archives")),
+        42
+    )
+    .unwrap()
+    .is_none());
 
     // 3. Existing store with receipt pointing to missing artifact -> Err(Integrity)
-    let conn = rusqlite::Connection::open(archives_dir.join("index.sqlite")).unwrap();
-    conn.execute("INSERT INTO receipts(owner, id) VALUES('review:42', '0000000000000000000000000000000000000000000000000000000000000000')", []).unwrap();
+    let conn = crate::db::Db::for_test_at(&archives_dir).open().unwrap();
+    conn.execute("INSERT INTO archive.receipts(owner, id) VALUES('review:42', '0000000000000000000000000000000000000000000000000000000000000000')", []).unwrap();
     drop(conn);
     assert!(matches!(
-        load_recorded_dependencies(&root.join("review-archives"), 42),
+        load_recorded_dependencies(
+            &root.join("review-archives"),
+            &crate::db::Db::for_test_at(root.join("review-archives")),
+            42
+        ),
         Err(crate::review_archive::Error::Integrity)
     ));
 
@@ -716,6 +734,7 @@ fn export_read_only_review_context_fixture() {
         &crate::review_archive::archive_dir(std::path::Path::new(
             &std::env::var("OCR_DATA_DIR").unwrap_or_else(|_| "data".into()),
         )),
+        &db.handle(),
         run.id,
     )
     .expect("Review archive store and receipt must be valid if present")

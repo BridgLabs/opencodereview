@@ -39,6 +39,8 @@ pub enum Error {
     Excluded(Exclusion),
     #[error("Frozen evidence preparation failed")]
     Preparation,
+    #[error("Review archives still use the SQLite index; run `ocr-server import-sqlite` before starting the server")]
+    UnimportedIndex,
     #[error("cancelled")]
     Cancelled,
 }
