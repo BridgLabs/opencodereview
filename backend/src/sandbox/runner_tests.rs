@@ -407,6 +407,19 @@ fn final_response_of_other_clis_accepts_stringified_objects_and_bare_or_empty_de
 }
 
 #[test]
+fn final_response_of_other_clis_gives_a_bare_decisions_list_the_report_identity() {
+    let report =
+        json!({"contractVersion":2,"snapshotId":"snapshot","reviewedFiles":[],"missingEvidence":[],"findings":[]});
+    let decision = json!({"candidateId":"candidate-1","decision":"discard","reason":"Guard"});
+    let output = json!({"report":report,"findingDecisions":[decision]}).to_string();
+    let (_, decisions) = parse_final_response(&output, true).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&decisions.unwrap()).unwrap(),
+        json!({"contractVersion":2,"snapshotId":"snapshot","decisions":[decision]})
+    );
+}
+
+#[test]
 fn final_response_escapes_stray_backslashes_in_quoted_code() {
     let raw = r#"{"report":{"findings":[{"quote":"value.match(/\d+\s/) and \"done\" \\ \n"}]}}"#;
     let (report, _) = final_response(Some(&final_transcript(json!(raw)))).unwrap();

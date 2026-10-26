@@ -907,12 +907,22 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
         }
         value => value,
     };
+    let report = unwrap(response.report);
     let decisions = response.finding_decisions.map(unwrap);
     let decisions = if lenient {
         decisions
             .filter(|value| !value.is_null() && value.as_array().is_none_or(|items| !items.is_empty()))
             .map(|value| match value {
-                serde_json::Value::Array(items) => serde_json::json!({ "decisions": items }),
+                // A bare list takes the frozen identity from the report, as the wrapper would carry it.
+                serde_json::Value::Array(items) => {
+                    let mut wrapped = serde_json::json!({ "decisions": items });
+                    for key in ["contractVersion", "snapshotId"] {
+                        if let Some(value) = report.get(key) {
+                            wrapped[key] = value.clone();
+                        }
+                    }
+                    wrapped
+                }
                 value => value,
             })
     } else {
@@ -928,7 +938,7 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
         }
         Ok(raw)
     };
-    Ok((encode(unwrap(response.report))?, decisions.map(encode).transpose()?))
+    Ok((encode(report)?, decisions.map(encode).transpose()?))
 }
 
 #[cfg(unix)]
