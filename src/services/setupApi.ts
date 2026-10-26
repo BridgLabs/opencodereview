@@ -1,6 +1,7 @@
 import type { GitHubAuthStatus, Repo, Workspace } from "../types";
 import { setupApiAccess } from "./setupApiAccess";
 import { setupApiReviews } from "./setupApiReviews";
+import { setupApiUsage } from "./setupApiUsage";
 import { setupApiWorkspace } from "./setupApiWorkspace";
 
 export type { IndexJob, IndexJobsResponse } from "./setupApiTransport";
@@ -18,6 +19,7 @@ export interface SetupStatus {
 export const setupApi = {
   ...setupApiAccess,
   ...setupApiReviews,
+  ...setupApiUsage,
   ...setupApiWorkspace,
   async setupStatus(): Promise<SetupStatus> {
     const auth = await setupApiAccess.githubAuthStatus();
