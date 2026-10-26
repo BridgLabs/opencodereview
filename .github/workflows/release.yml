@@ -194,13 +194,18 @@ jobs:
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
       # Fast-forward only: if main moved during the build, the push fails and nothing is released.
+      # A re-run after this step finds the tag already pushed and goes on to publish.
       - name: Move main forward and tag the release
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "OpenCodeReview $TAG"
-          git push origin "HEAD:refs/heads/main" "$TAG"
-          git push origin --delete "release/$TAG"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "$TAG is already tagged."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "OpenCodeReview $TAG"
+            git push origin "HEAD:refs/heads/main" "$TAG"
+          fi
+          git push origin --delete "release/$TAG" || true
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
@@ -228,7 +233,11 @@ jobs:
             found && /^\[[^]]+\]: / { exit }
             found { print }
           ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag --latest
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --latest
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag --latest
+          fi
 
       # GHCR creates packages private, even for a public repository; users must pull without a login.
       - name: Check anonymous pulls
