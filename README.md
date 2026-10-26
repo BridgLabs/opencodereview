@@ -4,7 +4,7 @@
 
 # OpenCodeReview
 
-[![License](https://img.shields.io/badge/license-PolyForm_Small_Business_1.0.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue.svg)](LICENSE)
 
 AI code review for GitHub pull requests that runs on your own machine, using the Claude, ChatGPT or Gemini account you already have, or OpenCode's free models.
 
@@ -125,7 +125,7 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before openin
 
 Copyright 2026 BRIDG LABS LTDA.
 
-Licensed under the [PolyForm Small Business License 1.0.0](LICENSE). Individuals and companies with fewer than 100 people (employees and contractors) and less than USD 1,000,000 in revenue in the prior tax year (2019 dollars, adjusted for inflation) may use, modify and distribute it for free. Larger companies, counted together with the organizations they control or are controlled by, need a separate commercial license from the copyright owner. For a commercial license, or help rolling it out across a company, contact [contato@bridglabs.com](mailto:contato@bridglabs.com).
+Licensed under the [Functional Source License 1.1, Apache 2.0 Future License](LICENSE) (FSL-1.1-ALv2). Anyone, including companies of any size, may use, modify and redistribute it for free, for anything except offering it to others in a commercial product or service that competes with OpenCodeReview. Two years after each version is released, that version also becomes available under the Apache License 2.0. For other licensing, or help rolling it out across a company, contact [contato@bridglabs.com](mailto:contato@bridglabs.com).
 
 See [NOTICE](NOTICE) for attribution and third-party notices.
 

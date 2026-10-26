@@ -3,7 +3,7 @@ Copyright 2026 BRIDG LABS LTDA
 
 This product includes software developed by BRIDG LABS LTDA.
 
-For a commercial license, contact contato@bridglabs.com.
+For other licensing, support or setup, contact contato@bridglabs.com.
 
 OpenCodeReview runs the Claude Code, Codex, Gemini and OpenCode CLIs inside its Docker containers.
 These CLIs are installed from their vendors when the image is built and are covered by their own
