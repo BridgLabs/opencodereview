@@ -62,7 +62,7 @@ Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement by opening a
 private security advisory at
 <https://github.com/BridgLabs/opencodereview/security/advisories/new> or by
-email at bpinheiroms@gmail.com.
+email at contato@bridglabs.com.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the

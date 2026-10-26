@@ -57,9 +57,9 @@ You state that:
 2. You have the right to make this agreement. If an employer, a client or a different person has rights in your work, that person gave you written permission to make this agreement or waived those rights.
 3. You do not know of a claim that a Contribution infringes the rights of a different person.
 4. You are old enough to make a binding agreement where you live.
-5. You will tell the Maintainer at bpinheiroms@gmail.com if one of these statements becomes incorrect.
+5. You will tell the Maintainer at contato@bridglabs.com if one of these statements becomes incorrect.
 
-If you make Contributions for an organization, and the organization owns your work, the organization must also sign an agreement. Write to bpinheiroms@gmail.com.
+If you make Contributions for an organization, and the organization owns your work, the organization must also sign an agreement. Write to contato@bridglabs.com.
 
 ## 8. No warranty
 
