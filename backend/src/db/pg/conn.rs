@@ -36,14 +36,6 @@ impl Error {
         }
     }
 
-    /// Serialization failures and deadlocks: the transaction lost a race and may be run again.
-    pub fn is_retryable(&self) -> bool {
-        matches!(
-            self.code(),
-            Some(code) if *code == SqlState::T_R_SERIALIZATION_FAILURE || *code == SqlState::T_R_DEADLOCK_DETECTED
-        )
-    }
-
     pub fn is_unique_violation(&self) -> bool {
         self.code() == Some(&SqlState::UNIQUE_VIOLATION)
     }
@@ -255,36 +247,6 @@ impl Conn {
             done: false,
         })
     }
-
-    /// Runs `body` in a transaction, again from the start when it loses a serialization race or a
-    /// deadlock. Only for the outermost transaction: a savepoint cannot be retried on its own.
-    pub fn transaction_with_retry<T>(
-        &self,
-        mut body: impl FnMut(&Transaction<'_>) -> Result<T, Error>,
-    ) -> Result<T, Error> {
-        debug_assert!(self.is_autocommit(), "retry needs the outermost transaction");
-        let mut attempt = 0;
-        loop {
-            let result = self.unchecked_transaction().and_then(|tx| {
-                let value = body(&tx)?;
-                tx.commit()?;
-                Ok(value)
-            });
-            match result {
-                Err(error) if error.is_retryable() && attempt < 2 => {
-                    attempt += 1;
-                    std::thread::sleep(std::time::Duration::from_millis(20 << attempt));
-                }
-                result => return result,
-            }
-        }
-    }
-
-    /// Low-level access for code that needs the native client (COPY, LISTEN). It must not be held
-    /// across another call on this connection.
-    pub fn with_client<T>(&self, f: impl FnOnce(&mut postgres::Client) -> T) -> T {
-        f(&mut self.client.borrow_mut())
-    }
 }
 
 impl Drop for Conn {
@@ -316,11 +278,6 @@ impl Transaction<'_> {
         } else {
             self.conn.execute_batch(&format!("RELEASE SAVEPOINT sp{}", self.depth))
         }
-    }
-
-    pub fn rollback(mut self) -> Result<(), Error> {
-        self.done = true;
-        self.finish_rollback()
     }
 
     fn finish_rollback(&self) -> Result<(), Error> {
@@ -363,12 +320,6 @@ pub struct Statement<'c> {
 }
 
 impl Statement<'_> {
-    pub fn execute<P: Params>(&mut self, params: P) -> Result<usize, Error> {
-        let changed = params.with_params(|params| self.conn.run(|client| client.execute(&self.statement, params)))?;
-        self.conn.changes.set(changed);
-        Ok(changed as usize)
-    }
-
     pub fn query<P: Params>(&mut self, params: P) -> Result<Rows, Error> {
         let rows = params.with_params(|params| self.conn.run(|client| client.query(&self.statement, params)))?;
         Ok(Rows {
