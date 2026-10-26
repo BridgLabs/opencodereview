@@ -155,9 +155,18 @@ fn a_connection_dropped_mid_transaction_returns_clean_to_the_pool() {
             .unwrap();
         std::mem::forget(tx);
     }
+    // Whichever pooled session comes back next, none may still sit in that transaction.
+    let stuck: i64 = db
+        .client()
+        .query_one(
+            "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = current_database() AND state LIKE 'idle in transaction%'",
+            &[],
+        )
+        .unwrap()
+        .get(0);
+    assert_eq!(stuck, 0);
     let conn = db.pool().get().unwrap();
     assert_eq!(setting(&conn, "theme").as_deref(), Some("system"));
-    assert!(conn.unchecked_transaction().is_ok());
 }
 
 #[test]
