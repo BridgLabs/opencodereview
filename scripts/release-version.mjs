@@ -72,6 +72,7 @@ if (process.argv[2] === "notes" && !written) {
         `### ${group}\n\n${items.map((item) => `- ${item[0].toUpperCase()}${item.slice(1)}.`).join("\n")}\n`,
     )
     .join("\n");
-  writeFileSync("changelog.d/release.md", text);
+  // A bump forced by hand can have no feat, fix or perf commit to describe.
+  writeFileSync("changelog.d/release.md", text || "### Changed\n\n- Maintenance release.\n");
 }
 console.log(version);
