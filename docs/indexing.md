@@ -1,6 +1,6 @@
 # Repository indexing
 
-Every monitored repository gets a local context index that reviews use to find related code. The index lives in SQLite and is built from a Git cache under `/data/repos`. The Indexing page (`/platform/indexing`) shows each repository's status and an interactive graph.
+Every monitored repository gets a local context index that reviews use to find related code. The index lives in Postgres and is built from a Git cache under `/data/repos`. The Indexing page (`/platform/indexing`) shows each repository's status and an interactive graph.
 
 ## What is indexed
 
