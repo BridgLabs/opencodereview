@@ -7,7 +7,16 @@ use super::pool::DbSettings;
 
 /// Ordered migrations; `schema_migrations` records which have run. Append new ones to the end and
 /// never edit one that has shipped.
-pub(crate) const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("0001_baseline.sql"))];
+pub(crate) const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("0001_baseline.sql")),
+    (2, include_str!("0002_scratch.sql")),
+    (3, include_str!("0003_json_functions.sql")),
+    (4, include_str!("0004_scratch_access.sql")),
+    (5, include_str!("0005_archive.sql")),
+    (6, include_str!("0006_instances.sql")),
+    (7, include_str!("0007_result_publication_owner.sql")),
+    (8, include_str!("0008_index_progress.sql")),
+];
 
 /// Arbitrary, fixed key for `pg_advisory_lock`; shared by every instance of this application.
 const MIGRATION_LOCK_KEY: i64 = 0x6f63_725f_6d69_6772; // "ocr_migr"

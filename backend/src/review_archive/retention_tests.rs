@@ -55,13 +55,19 @@ fn sample_archive(suffix: &str) -> Archive {
 fn setup_env(dir: &Directory) -> (Database, ArchiveStore, RetentionCoordinator) {
     let db_path = dir.0.join("test.sqlite");
     let archive_root = dir.0.join("archives");
-    let db = Database::open_at(db_path.clone()).unwrap();
+    let db = crate::db::Db::for_test_at(db_path.clone()).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/repo").unwrap();
-    let store = ArchiveStore::open(&archive_root).unwrap();
+    let store = ArchiveStore::open(&archive_root, &db.handle()).unwrap();
     let leases = ArchiveLeaseTracker::new();
     let status = Arc::new(Mutex::new(ArchiveStorageStatus::default()));
     let notify = Arc::new((Mutex::new(false), Condvar::new()));
-    let coordinator = RetentionCoordinator::new(db_path, archive_root, leases, status, notify);
+    let coordinator = RetentionCoordinator::new(
+        crate::db::Db::for_test_at(db_path),
+        archive_root,
+        leases,
+        status,
+        notify,
+    );
     (db, store, coordinator)
 }
 
@@ -394,7 +400,11 @@ fn retention_coordinator_recovers_crashed_deletions() {
     store.record_deletion_for_test(&descriptor.id, 100, now_ms);
 
     // Reopening the store should recover and complete unlinking
-    let recovered_store = ArchiveStore::open(&dir.0.join("archives")).unwrap();
+    let recovered_store = ArchiveStore::open(
+        &dir.0.join("archives"),
+        &crate::db::Db::for_test_at(dir.0.join("test.sqlite")),
+    )
+    .unwrap();
     assert!(!sealed_path.exists());
     assert!(recovered_store.list_artifacts().unwrap().is_empty());
 }
@@ -496,8 +506,9 @@ fn cleanup_rechecks_receipts_after_another_connection_links_the_archive() {
     store.deposit_and_link(&archive, "review:1").unwrap();
     let checked = store.receipts_for_artifact(&id).unwrap();
     let root = dir.0.join("archives");
+    let db = crate::db::Db::for_test_at(dir.0.join("test.sqlite"));
     std::thread::spawn(move || {
-        ArchiveStore::open(&root)
+        ArchiveStore::open(&root, &db)
             .unwrap()
             .deposit_and_link(&archive, "review:2")
             .unwrap();
@@ -516,16 +527,23 @@ fn deposit_completes_reserved_deletion_before_republishing() {
     let archive = sample_archive("concurrent-deletion");
     let descriptor = archive.descriptor();
     store.deposit_and_link(&archive, "review:1").unwrap();
-    let mut writer = ArchiveStore::open(&dir.0.join("archives")).unwrap();
+    let mut writer = ArchiveStore::open(
+        &dir.0.join("archives"),
+        &crate::db::Db::for_test_at(dir.0.join("test.sqlite")),
+    )
+    .unwrap();
     store.record_deletion_for_test(&descriptor.id, 100, crate::sandbox::now());
     writer.deposit_and_link(&archive, "review:2").unwrap();
     assert_eq!(store.receipts_for_artifact(&descriptor.id).unwrap(), vec!["review:2"]);
     assert!(store.load(&descriptor).is_ok());
     drop(writer);
-    assert!(ArchiveStore::open(&dir.0.join("archives"))
-        .unwrap()
-        .load(&descriptor)
-        .is_ok());
+    assert!(ArchiveStore::open(
+        &dir.0.join("archives"),
+        &crate::db::Db::for_test_at(dir.0.join("test.sqlite"))
+    )
+    .unwrap()
+    .load(&descriptor)
+    .is_ok());
 }
 
 #[test]
@@ -564,6 +582,51 @@ fn maintenance_failure_preserves_last_successful_metrics_and_reports_error() {
 }
 
 #[test]
+fn a_failure_shows_locally_when_the_database_is_unreachable() {
+    let dir = Directory::new();
+    let unreachable = RetentionCoordinator::new(
+        crate::db::Db::unreachable_for_test(),
+        dir.0.join("archives"),
+        ArchiveLeaseTracker::new(),
+        Arc::new(Mutex::new(ArchiveStorageStatus::default())),
+        Arc::new((Mutex::new(false), Condvar::new())),
+    );
+    unreachable.publish_failure();
+    assert!(unreachable
+        .status
+        .lock()
+        .unwrap()
+        .last_error
+        .as_deref()
+        .unwrap()
+        .contains("maintenance failed"));
+}
+
+#[test]
+fn another_instance_failing_keeps_the_recorded_metrics() {
+    let dir = Directory::new();
+    let (db, _store, coordinator) = setup_env(&dir);
+    coordinator.perform_maintenance_with_backfill(|_, _| Ok(())).unwrap();
+    let recorded = coordinator.status.lock().unwrap().clone();
+    // A freshly started instance, with no metrics of its own, whose pass fails.
+    let other_root = dir.0.join("other-instance");
+    std::fs::write(&other_root, "file").unwrap();
+    let other = RetentionCoordinator::new(
+        db.handle(),
+        other_root,
+        ArchiveLeaseTracker::new(),
+        Arc::new(Mutex::new(ArchiveStorageStatus::default())),
+        Arc::new((Mutex::new(false), Condvar::new())),
+    );
+    assert!(other.perform_maintenance_with_backfill(|_, _| Ok(())).is_err());
+    let stored: ArchiveStorageStatus =
+        serde_json::from_str(&db.setting(STORAGE_STATUS_SETTING).unwrap().unwrap()).unwrap();
+    assert_eq!(stored.last_cleanup_at, recorded.last_cleanup_at);
+    assert_eq!(stored.used_bytes, recorded.used_bytes);
+    assert!(stored.last_error.as_deref().unwrap().contains("maintenance failed"));
+}
+
+#[test]
 fn successful_local_cleanup_preserves_safe_backfill_warning_until_recovery() {
     let dir = Directory::new();
     let (_db, _store, coordinator) = setup_env(&dir);
@@ -599,4 +662,15 @@ fn settings_notification_is_consumed_before_the_next_wait() {
     *notify.0.lock().unwrap() = true;
     wait_for_maintenance(&notify, Duration::from_secs(5)).unwrap();
     assert!(!*notify.0.lock().unwrap());
+}
+
+#[test]
+fn every_instance_reports_the_storage_status_of_the_last_pass() {
+    let dir = Directory::new();
+    let (db, _store, coordinator) = setup_env(&dir);
+    coordinator.perform_maintenance(&AtomicBool::new(false)).unwrap();
+    // Another instance reads what this one's pass recorded.
+    let stored = db.setting(STORAGE_STATUS_SETTING).unwrap().expect("status recorded");
+    let status: ArchiveStorageStatus = serde_json::from_str(&stored).unwrap();
+    assert!(status.last_cleanup_at.is_some());
 }

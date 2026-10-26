@@ -47,8 +47,8 @@ pub(crate) fn google_rejected(text: &str) -> bool {
 
 /// Saves a signed-in `oauth_creds.json` to `account` (a re-sign-in) or to a new Gemini account,
 /// named after the Google email from the ID token or the CLI's account cache.
-fn store_auth(db_path: &Path, account: Option<i64>, raw: &str, cached_email: Option<String>) -> Result<(), String> {
-    let db = Database::open_at(db_path.to_path_buf())?;
+fn store_auth(db_handle: &Db, account: Option<i64>, raw: &str, cached_email: Option<String>) -> Result<(), String> {
+    let db = db_handle.open()?;
     let id = match account {
         Some(id) => {
             if db.ai_account(id)?.provider != "gemini" {
@@ -110,7 +110,7 @@ pub(crate) fn start_gemini_auth(request: &Request, state: &SharedState) -> Resul
     if let Some(id) = account {
         with_db_read_raw(state, |db| db.ai_account(id))?;
     }
-    let db_path = state.config.db_path.clone();
+    let db_handle = state.config.db.clone();
     let mut current = flow();
     if current.cancel.is_some() {
         return Ok(serde_json::json!({ "running": true, "flowSecret": current.secret }));
@@ -220,7 +220,7 @@ pub(crate) fn start_gemini_auth(request: &Request, state: &SharedState) -> Resul
                     }
                 }
                 crate::review::kill_tree(pid, &mut child);
-                let message = match store_auth(&db_path, account, &raw, email) {
+                let message = match store_auth(&db_handle, account, &raw, email) {
                     Ok(()) => serde_json::json!({ "kind": "done", "success": true, "message": "Signed in to Gemini." }),
                     Err(error) => serde_json::json!({ "kind": "done", "success": false, "message": error }),
                 };

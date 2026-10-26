@@ -89,7 +89,7 @@ pub(crate) fn with_db_read<T: Serialize>(
 }
 
 pub(crate) fn with_db_raw<T>(state: &SharedState, f: impl FnOnce(&Database) -> Result<T, String>) -> Result<T, String> {
-    let db = Database::open_at(state.config.db_path.clone())?;
+    let db = state.config.db.open()?;
     f(&db)
 }
 
@@ -97,7 +97,7 @@ pub(crate) fn with_db_read_raw<T>(
     state: &SharedState,
     f: impl FnOnce(&Database) -> Result<T, String>,
 ) -> Result<T, String> {
-    let db = Database::open_read_at(state.config.db_path.clone())?;
+    let db = state.config.db.open_read()?;
     f(&db)
 }
 

@@ -10,8 +10,7 @@ use std::cell::{Cell, RefCell};
 use std::fmt;
 
 use postgres::error::SqlState;
-use postgres::row::RowIndex;
-use postgres::types::{FromSql, ToSql};
+use postgres::types::{FromSql, ToSql, Type};
 
 use super::pool::Pooled;
 
@@ -24,6 +23,8 @@ pub enum Error {
     /// A statement failed earlier in this transaction. Postgres had already aborted it, so the
     /// commit rolled back instead and nothing was saved.
     TransactionAborted,
+    /// A column could not be read as the requested Rust type.
+    Conversion(String),
     Postgres(postgres::Error),
     Pool(String),
 }
@@ -51,10 +52,13 @@ impl fmt::Display for Error {
                 f.write_str("database transaction aborted by an earlier failed statement; nothing was saved")
             }
             Error::Pool(message) => write!(f, "database unavailable: {message}"),
+            Error::Conversion(message) => write!(f, "database value: {message}"),
             Error::Postgres(error) => match error.as_db_error() {
                 Some(db) => write!(f, "database error {}: {}", db.code().code(), db.message()),
                 None if error.is_closed() => f.write_str("database connection closed"),
-                None => f.write_str("database error"),
+                // Client-side failures (a Rust type that does not fit the column, a lost connection)
+                // describe types and transport, never row values.
+                None => write!(f, "database error: {error}"),
             },
         }
     }
@@ -84,7 +88,7 @@ impl<T> OptionalExtension<T> for Result<T, Error> {
 }
 
 /// Bind parameters in the forms the `db` modules already write: `params![..]`, `[]`, `[a, b]`,
-/// `&[..]` and `params_from_iter(..)`.
+/// and `&[..]`. A variable-length list binds as one array parameter (`= ANY($1)`).
 pub trait Params {
     fn with_params<R>(self, f: impl FnOnce(&[Param<'_>]) -> R) -> R;
 }
@@ -120,28 +124,6 @@ macro_rules! impl_params_for_arrays {
 
 impl_params_for_arrays!(1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16);
 
-pub struct ParamsFromIter<I>(I);
-
-pub fn params_from_iter<I>(iter: I) -> ParamsFromIter<I>
-where
-    I: IntoIterator,
-    I::Item: ToSql + Sync,
-{
-    ParamsFromIter(iter)
-}
-
-impl<I> Params for ParamsFromIter<I>
-where
-    I: IntoIterator,
-    I::Item: ToSql + Sync,
-{
-    fn with_params<R>(self, f: impl FnOnce(&[Param<'_>]) -> R) -> R {
-        let values: Vec<I::Item> = self.0.into_iter().collect();
-        let refs: Vec<Param<'_>> = values.iter().map(|value| value as Param<'_>).collect();
-        f(&refs)
-    }
-}
-
 /// `params![a, b]`, as rusqlite's macro: a slice of borrowed parameters.
 #[macro_export]
 macro_rules! pg_params {
@@ -156,12 +138,156 @@ macro_rules! pg_params {
 pub struct Row(postgres::Row);
 
 impl Row {
-    pub fn get<I, T>(&self, index: I) -> Result<T, Error>
-    where
-        I: RowIndex + fmt::Display,
-        T: for<'a> FromSql<'a>,
-    {
-        self.0.try_get(index).map_err(Error::from)
+    pub fn get<I: ColumnIndex, T: FromColumn>(&self, index: I) -> Result<T, Error> {
+        let index = index.position(&self.0)?;
+        T::from_column(&self.0, index)
+    }
+}
+
+/// A column by position or by name, as rusqlite's `row.get` takes.
+pub trait ColumnIndex {
+    fn position(&self, row: &postgres::Row) -> Result<usize, Error>;
+}
+
+impl ColumnIndex for usize {
+    fn position(&self, row: &postgres::Row) -> Result<usize, Error> {
+        if *self < row.len() {
+            Ok(*self)
+        } else {
+            Err(Error::Conversion(format!("no column {self}")))
+        }
+    }
+}
+
+impl ColumnIndex for &str {
+    fn position(&self, row: &postgres::Row) -> Result<usize, Error> {
+        row.columns()
+            .iter()
+            .position(|column| column.name() == *self)
+            .ok_or_else(|| Error::Conversion(format!("no column {self}")))
+    }
+}
+
+/// The Rust types a column is read as. Reads are as lenient as rusqlite's were, which the `db`
+/// modules count on: an integer of any width or a boolean reads as `i64`, an integer reads as
+/// `bool` (non-zero is true). Postgres types expressions strictly (`CASE … THEN 1` is `int4`,
+/// `EXISTS` is `bool`), so without this every such column would fail at run time.
+pub trait FromColumn: Sized {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error>;
+}
+
+fn typed<'a, T: FromSql<'a>>(row: &'a postgres::Row, index: usize) -> Result<Option<T>, Error> {
+    row.try_get::<_, Option<T>>(index).map_err(Error::from)
+}
+
+fn integer(row: &postgres::Row, index: usize) -> Result<Option<i64>, Error> {
+    match *row.columns()[index].type_() {
+        Type::INT8 => typed::<i64>(row, index),
+        Type::INT4 => Ok(typed::<i32>(row, index)?.map(i64::from)),
+        Type::INT2 => Ok(typed::<i16>(row, index)?.map(i64::from)),
+        Type::BOOL => Ok(typed::<bool>(row, index)?.map(i64::from)),
+        ref other => Err(Error::Conversion(format!(
+            "column {index} is {other}, not an integer (cast it to bigint in the query)"
+        ))),
+    }
+}
+
+fn required<T>(value: Option<T>, index: usize) -> Result<T, Error> {
+    value.ok_or_else(|| Error::Conversion(format!("column {index} is NULL")))
+}
+
+impl FromColumn for Option<i64> {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        integer(row, index)
+    }
+}
+
+impl FromColumn for i64 {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        required(integer(row, index)?, index)
+    }
+}
+
+impl FromColumn for Option<usize> {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        integer(row, index)?
+            .map(|value| usize::try_from(value).map_err(|_| Error::Conversion(format!("column {index} is negative"))))
+            .transpose()
+    }
+}
+
+impl FromColumn for usize {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        required(Option::<usize>::from_column(row, index)?, index)
+    }
+}
+
+impl FromColumn for Option<u64> {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        integer(row, index)?
+            .map(|value| u64::try_from(value).map_err(|_| Error::Conversion(format!("column {index} is negative"))))
+            .transpose()
+    }
+}
+
+impl FromColumn for u64 {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        required(Option::<u64>::from_column(row, index)?, index)
+    }
+}
+
+impl FromColumn for Option<bool> {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        match *row.columns()[index].type_() {
+            Type::BOOL => typed::<bool>(row, index),
+            _ => Ok(integer(row, index)?.map(|value| value != 0)),
+        }
+    }
+}
+
+impl FromColumn for bool {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        required(Option::<bool>::from_column(row, index)?, index)
+    }
+}
+
+impl FromColumn for Option<f64> {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        match *row.columns()[index].type_() {
+            Type::FLOAT8 => typed::<f64>(row, index),
+            Type::FLOAT4 => Ok(typed::<f32>(row, index)?.map(f64::from)),
+            _ => Ok(integer(row, index)?.map(|value| value as f64)),
+        }
+    }
+}
+
+impl FromColumn for f64 {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        required(Option::<f64>::from_column(row, index)?, index)
+    }
+}
+
+impl FromColumn for Option<String> {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        typed::<String>(row, index)
+    }
+}
+
+impl FromColumn for String {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        required(typed::<String>(row, index)?, index)
+    }
+}
+
+impl FromColumn for Option<Vec<u8>> {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        typed::<Vec<u8>>(row, index)
+    }
+}
+
+impl FromColumn for Vec<u8> {
+    fn from_column(row: &postgres::Row, index: usize) -> Result<Self, Error> {
+        required(typed::<Vec<u8>>(row, index)?, index)
     }
 }
 
@@ -246,6 +372,14 @@ impl Conn {
             depth,
             done: false,
         })
+    }
+
+    /// The id the last insert on this session drew from an identity column, as rusqlite's
+    /// `last_insert_rowid`. Tests only: production code reads ids with `RETURNING`.
+    #[cfg(test)]
+    pub fn last_insert_rowid(&self) -> i64 {
+        self.query_row("SELECT lastval()", [], |row| row.get(0))
+            .expect("lastval")
     }
 }
 

@@ -26,11 +26,8 @@ pub(crate) fn start_poll_scheduler(state: SharedState) {
 }
 
 pub(crate) fn list_index_jobs(state: &SharedState) -> Result<serde_json::Value, String> {
-    let active = state
-        .index_jobs
-        .lock()
-        .map_err(|_| "index job lock poisoned".to_string())?
-        .len();
+    // Every instance's index runs, not only this one's.
+    let active = with_db_read_raw(state, |db| db.active_index_count())?;
     let jobs = with_db_read_raw(state, |db| db.list_index_queue())?
         .into_iter()
         .map(|(repo, status)| {
@@ -75,12 +72,19 @@ pub(crate) fn poll_reviews(state: &SharedState) -> Result<serde_json::Value, Str
     if state.poll_running.swap(true, Ordering::Relaxed) {
         return with_db_read(state, |db| db.poll_status());
     }
-    let _ = with_db_raw(state, |db| db.record_poll_start());
-    let result = run_poll_reviews(state).inspect_err(|error| {
-        let _ = with_db_raw(state, |db| db.record_poll_result(crate::db::now_millis(), Some(error)));
+    // Another instance may be polling; one poll at a time across them all.
+    let polled = state.config.db.run_exclusive(exclusive::POLL, || {
+        let _ = with_db_raw(state, |db| db.record_poll_start());
+        run_poll_reviews(state).inspect_err(|error| {
+            let _ = with_db_raw(state, |db| db.record_poll_result(crate::db::now_millis(), Some(error)));
+        })
     });
-    spawn_queue_acknowledgements(state.config.db_path.clone());
     state.poll_running.store(false, Ordering::Relaxed);
+    let result = match polled? {
+        Some(result) => result,
+        None => return with_db_read(state, |db| db.poll_status()),
+    };
+    spawn_queue_acknowledgements(state.config.db.clone());
     result
 }
 
@@ -110,7 +114,7 @@ fn sync_monitor_all_workspaces(state: &SharedState) {
 }
 
 pub(crate) fn run_poll_reviews(state: &SharedState) -> Result<serde_json::Value, String> {
-    spawn_failed_clean_result_retry(state.config.db_path.clone(), state.config.repos_dir.clone());
+    spawn_failed_clean_result_retry(state.config.db.clone(), state.config.repos_dir.clone());
     sync_monitor_all_workspaces(state);
     let (repos, settings) = with_db_raw(state, |db| Ok((db.monitored_repos()?, db.settings()?)))?;
     let mut target_logins = std::collections::HashSet::new();

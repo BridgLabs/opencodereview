@@ -1,8 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use super::*;
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[test]
 fn phase_progress_preserves_index_details_and_bounds_logs() {
@@ -62,10 +58,13 @@ fn phase_history_is_bounded_and_survives_empty_heartbeats() {
 
 #[test]
 fn run_context_does_not_leak_a_previous_same_head_snapshot() {
-    let db = Database::open_at(temp_db_path()).unwrap();
+    let db = Db::for_test().open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/api").unwrap();
     db.conn.execute("INSERT INTO pull_requests (id, repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at) VALUES (1, 1, 1, 'PR', 'a', 'abc', 1, 1, 1)", []).unwrap();
     let first = db.start_review_skeleton_with(1, None).unwrap();
+    db.conn
+        .execute("UPDATE review_runs SET status = 'superseded' WHERE id = $1", [first])
+        .unwrap();
     let second = db.start_review_skeleton_with(1, None).unwrap();
     let plan = serde_json::json!({ "repoId": 1, "changedFiles": ["old.ts"], "relatedFiles": [], "packages": [], "dependentPackages": [], "testFiles": [], "conventionFiles": [], "omittedCount": 0 });
     db.save_review_context_snapshot(1, 1, Some(first), "abc", None, None, &plan.to_string(), 1, 0)
@@ -77,50 +76,12 @@ fn run_context_does_not_leak_a_previous_same_head_snapshot() {
     );
 }
 
-fn temp_db_path() -> PathBuf {
-    let unique = format!(
-        "ocr-db-test-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    );
-    std::env::temp_dir().join(unique).join("opencodereview.sqlite")
-}
-
-#[test]
-fn open_runs_migrations_and_sets_user_version() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
-    assert_eq!(db.user_version(), MIGRATIONS.len() as i64);
-}
-
-#[test]
-fn newer_schema_is_rejected() {
-    let path = temp_db_path();
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    Connection::open(&path)
-        .unwrap()
-        .pragma_update(None, "user_version", MIGRATIONS.len() as i64 + 1)
-        .unwrap();
-    assert!(Database::open_at(path)
-        .err()
-        .unwrap()
-        .contains("newer than this application"));
-}
-
-#[test]
-fn migrations_are_idempotent_across_reopen() {
-    let path = temp_db_path();
-    let db = Database::open_at(path.clone()).expect("open db");
-    drop(db);
-    let db = Database::open_at(path).expect("reopen db");
-    assert_eq!(db.user_version(), MIGRATIONS.len() as i64);
-}
-
 #[test]
 fn force_full_next_review_is_consumed_once() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.conn.execute("INSERT INTO repos (owner, name, full_name, is_private, created_at, updated_at) VALUES ('acme','api','acme/api',1,1,1)", []).expect("repo");
     let repo_id = db.conn.last_insert_rowid();
-    db.conn.execute("INSERT INTO pull_requests (repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at) VALUES (?1, 1, 'PR', 'a', 'abc', 1, 1, 1)", params![repo_id]).expect("pr");
+    db.conn.execute("INSERT INTO pull_requests (repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at) VALUES ($1, 1, 'PR', 'a', 'abc', 1, 1, 1)", params![repo_id]).expect("pr");
     let pr_id = db.conn.last_insert_rowid();
     assert!(!db.take_force_full_next_review(pr_id).expect("initial"));
     db.set_force_full_next_review(pr_id, true).expect("set");
@@ -130,12 +91,12 @@ fn force_full_next_review_is_consumed_once() {
 
 #[test]
 fn superseded_review_run_preserves_pending_body() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.conn.execute("INSERT INTO repos (owner, name, full_name, is_private, created_at, updated_at) VALUES ('acme','api','acme/api',1,1,1)", []).expect("repo");
     let repo_id = db.conn.last_insert_rowid();
-    db.conn.execute("INSERT INTO pull_requests (repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at) VALUES (?1, 1, 'PR', 'a', 'newhead', 1, 1, 1)", params![repo_id]).expect("pr");
+    db.conn.execute("INSERT INTO pull_requests (repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at) VALUES ($1, 1, 'PR', 'a', 'newhead', 1, 1, 1)", params![repo_id]).expect("pr");
     let pr_id = db.conn.last_insert_rowid();
-    db.conn.execute("INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, started_at, model) VALUES (?1, 'oldhead', 'running', 1, 1, 1, 'gpt')", params![pr_id]).expect("run");
+    db.conn.execute("INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, started_at, model) VALUES ($1, 'oldhead', 'running', 1, 1, 1, 'gpt')", params![pr_id]).expect("run");
     let run_id = db.conn.last_insert_rowid();
     let body = "**[Finding] Stale but valid finding**\n\nDetails";
     let comments = r#"{"comments":[]}"#;
@@ -154,16 +115,16 @@ fn superseded_review_run_preserves_pending_body() {
 
 #[test]
 fn unresolved_review_context_keeps_inline_bodies_and_anchor_metadata() {
-    let db = Database::open_at(temp_db_path()).unwrap();
+    let db = Db::for_test().open().unwrap();
     db.conn.execute("INSERT INTO repos (owner,name,full_name,is_private,created_at,updated_at) VALUES ('acme','api','acme/api',1,1,1)", []).unwrap();
     let repo = db.conn.last_insert_rowid();
-    db.conn.execute("INSERT INTO pull_requests (repo_id,number,title,author,head_sha,last_synced_at,created_at,updated_at) VALUES (?1,1,'PR','a','head',1,1,1)", [repo]).unwrap();
+    db.conn.execute("INSERT INTO pull_requests (repo_id,number,title,author,head_sha,last_synced_at,created_at,updated_at) VALUES ($1,1,'PR','a','head',1,1,1)", [repo]).unwrap();
     let pr = db.conn.last_insert_rowid();
     let long_detail = "x".repeat(25_000);
     let first = format!("**[Finding] First concern**\n\n{long_detail}");
     let second = "**[Question] Second concern**\n\nFull confirmation request.";
     let comments = serde_json::json!({"comments":[{"path":"src/first.rs","line":12,"side":"RIGHT","start_line":10,"start_side":"RIGHT","body":first.clone()},{"path":"src/second.rs","line":7,"side":"LEFT","body":second}]}).to_string();
-    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,comments_json,created_at,updated_at) VALUES (?1,'head','superseded','1 finding(s), 1 question(s).',?2,1,1)", params![pr,comments]).unwrap();
+    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,comments_json,created_at,updated_at) VALUES ($1,'head','superseded','1 finding(s), 1 question(s).',$2,1,1)", params![pr,comments]).unwrap();
     let run = db.conn.last_insert_rowid();
     let fallback = db.latest_unresolved_review(pr).unwrap().unwrap();
     assert_eq!(fallback.0, "head");
@@ -202,25 +163,25 @@ fn unresolved_review_context_keeps_inline_bodies_and_anchor_metadata() {
         skill_version: "fixture",
     })
     .unwrap();
-    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,created_at,updated_at) VALUES (?1,'newer','preview','Unrelated newer summary',2,2)", [pr]).unwrap();
+    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,created_at,updated_at) VALUES ($1,'newer','preview','Unrelated newer summary',2,2)", [pr]).unwrap();
     assert_eq!(db.latest_unresolved_review(pr).unwrap().unwrap(), fallback);
     db.conn
-        .execute("UPDATE review_runs SET comments_json='invalid' WHERE id=?1", [run])
+        .execute("UPDATE review_runs SET comments_json='invalid' WHERE id=$1", [run])
         .unwrap();
     assert!(db.latest_unresolved_review(pr).is_err());
 }
 
 #[test]
 fn no_change_review_restores_superseded_awaiting_action_run() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.conn.execute("INSERT INTO repos (owner, name, full_name, is_private, created_at, updated_at) VALUES ('acme','api','acme/api',1,1,1)", []).expect("repo");
     let repo_id = db.conn.last_insert_rowid();
-    db.conn.execute("INSERT INTO pull_requests (repo_id, number, title, author, head_sha, review_lane, last_synced_at, created_at, updated_at) VALUES (?1, 1, 'PR', 'a', 'newhead', 'open', 1, 1, 1)", params![repo_id]).expect("pr");
+    db.conn.execute("INSERT INTO pull_requests (repo_id, number, title, author, head_sha, review_lane, last_synced_at, created_at, updated_at) VALUES ($1, 1, 'PR', 'a', 'newhead', 'open', 1, 1, 1)", params![repo_id]).expect("pr");
     let pr_id = db.conn.last_insert_rowid();
-    db.conn.execute("INSERT INTO review_runs (pr_id, head_sha, status, review_body, created_at, updated_at, model) VALUES (?1, 'oldhead', 'preview', 'finding', 1, 1, 'gpt')", params![pr_id]).expect("prior run");
+    db.conn.execute("INSERT INTO review_runs (pr_id, head_sha, status, review_body, created_at, updated_at, model) VALUES ($1, 'oldhead', 'preview', 'finding', 1, 1, 'gpt')", params![pr_id]).expect("prior run");
     let prior_run_id = db.conn.last_insert_rowid();
     db.supersede_review_runs(pr_id).expect("supersede prior preview");
-    db.conn.execute("INSERT INTO review_runs (pr_id, head_sha, status, review_body, created_at, updated_at, model) VALUES (?1, 'newhead', 'preview', 'no new changes', 2, 2, 'gpt')", params![pr_id]).expect("no-change run");
+    db.conn.execute("INSERT INTO review_runs (pr_id, head_sha, status, review_body, created_at, updated_at, model) VALUES ($1, 'newhead', 'preview', 'no new changes', 2, 2, 'gpt')", params![pr_id]).expect("no-change run");
     let no_change_run_id = db.conn.last_insert_rowid();
 
     db.preserve_awaiting_action_after_no_changes(no_change_run_id, pr_id, prior_run_id)
@@ -229,7 +190,7 @@ fn no_change_review_restores_superseded_awaiting_action_run() {
     let prior: (String, String, Option<String>) = db
         .conn
         .query_row(
-            "SELECT status, head_sha, reviewed_head_sha FROM review_runs WHERE id = ?1",
+            "SELECT status, head_sha, reviewed_head_sha FROM review_runs WHERE id = $1",
             params![prior_run_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -240,7 +201,7 @@ fn no_change_review_restores_superseded_awaiting_action_run() {
     let current_status: String = db
         .conn
         .query_row(
-            "SELECT status FROM review_runs WHERE id = ?1",
+            "SELECT status FROM review_runs WHERE id = $1",
             params![no_change_run_id],
             |row| row.get(0),
         )
@@ -249,7 +210,7 @@ fn no_change_review_restores_superseded_awaiting_action_run() {
     let lane: String = db
         .conn
         .query_row(
-            "SELECT review_lane FROM pull_requests WHERE id = ?1",
+            "SELECT review_lane FROM pull_requests WHERE id = $1",
             params![pr_id],
             |row| row.get(0),
         )
@@ -283,7 +244,7 @@ fn no_change_review_restores_superseded_awaiting_action_run() {
     assert_eq!(unresolved, ("newhead".to_string(), "finding".to_string()));
 
     db.supersede_review_runs(pr_id).expect("supersede restored findings");
-    db.conn.execute("INSERT INTO review_runs (pr_id, head_sha, status, review_body, created_at, updated_at, model) VALUES (?1, 'latesthead', 'preview', 'no new changes again', 3, 3, 'gpt')", params![pr_id]).expect("second no-change run");
+    db.conn.execute("INSERT INTO review_runs (pr_id, head_sha, status, review_body, created_at, updated_at, model) VALUES ($1, 'latesthead', 'preview', 'no new changes again', 3, 3, 'gpt')", params![pr_id]).expect("second no-change run");
     let second_no_change_run_id = db.conn.last_insert_rowid();
 
     db.preserve_awaiting_action_after_no_changes(second_no_change_run_id, pr_id, prior_run_id)
@@ -292,7 +253,7 @@ fn no_change_review_restores_superseded_awaiting_action_run() {
     let restored: (String, String, String) = db
         .conn
         .query_row(
-            "SELECT status, head_sha, review_body FROM review_runs WHERE id = ?1",
+            "SELECT status, head_sha, review_body FROM review_runs WHERE id = $1",
             params![prior_run_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -304,7 +265,7 @@ fn no_change_review_restores_superseded_awaiting_action_run() {
     let first_no_change_status: String = db
         .conn
         .query_row(
-            "SELECT status FROM review_runs WHERE id = ?1",
+            "SELECT status FROM review_runs WHERE id = $1",
             params![no_change_run_id],
             |row| row.get(0),
         )
@@ -314,12 +275,12 @@ fn no_change_review_restores_superseded_awaiting_action_run() {
 
 #[test]
 fn result_finalization_requires_the_current_pr_head() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.conn.execute("INSERT INTO repos (owner, name, full_name, is_private, created_at, updated_at) VALUES ('acme','api','acme/api',1,1,1)", []).expect("repo");
     let repo_id = db.conn.last_insert_rowid();
-    db.conn.execute("INSERT INTO pull_requests (repo_id, number, title, author, head_sha, review_lane, last_synced_at, created_at, updated_at) VALUES (?1, 1, 'PR', 'a', 'newhead', 'open', 1, 1, 1)", params![repo_id]).expect("pr");
+    db.conn.execute("INSERT INTO pull_requests (repo_id, number, title, author, head_sha, review_lane, last_synced_at, created_at, updated_at) VALUES ($1, 1, 'PR', 'a', 'newhead', 'open', 1, 1, 1)", params![repo_id]).expect("pr");
     let pr_id = db.conn.last_insert_rowid();
-    db.conn.execute("INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, model) VALUES (?1, 'oldhead', 'preview', 1, 1, 'gpt')", params![pr_id]).expect("run");
+    db.conn.execute("INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, model) VALUES ($1, 'oldhead', 'preview', 1, 1, 'gpt')", params![pr_id]).expect("run");
     let run_id = db.conn.last_insert_rowid();
 
     assert!(!db
@@ -338,7 +299,7 @@ fn result_finalization_requires_the_current_pr_head() {
     let state: (String, String) = db
         .conn
         .query_row(
-            "SELECT pr.review_lane, rr.status FROM pull_requests pr JOIN review_runs rr ON rr.pr_id = pr.id WHERE pr.id = ?1",
+            "SELECT pr.review_lane, rr.status FROM pull_requests pr JOIN review_runs rr ON rr.pr_id = pr.id WHERE pr.id = $1",
             params![pr_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -362,7 +323,7 @@ fn result_finalization_requires_the_current_pr_head() {
     let state: (String, String) = db
         .conn
         .query_row(
-            "SELECT pr.review_lane, rr.status FROM pull_requests pr JOIN review_runs rr ON rr.pr_id = pr.id WHERE pr.id = ?1",
+            "SELECT pr.review_lane, rr.status FROM pull_requests pr JOIN review_runs rr ON rr.pr_id = pr.id WHERE pr.id = $1",
             params![pr_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -372,13 +333,13 @@ fn result_finalization_requires_the_current_pr_head() {
 
 #[test]
 fn base_only_scope_changes_invalidate_decisions_and_allow_a_new_scope_to_post() {
-    let db = Database::open_at(temp_db_path()).unwrap();
+    let db = Db::for_test().open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/repo").unwrap();
     db.conn.execute("INSERT INTO pull_requests (repo_id,number,title,author,head_sha,base_ref,base_sha,last_decision_sha,review_lane,last_synced_at,created_at,updated_at) VALUES (1,1,'PR','author','head','parent','parent-sha','head','posted',1,1,1)", []).unwrap();
     let pr_id = db.conn.last_insert_rowid();
-    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,stacked_base_ref,reviewed_base_sha,created_at,updated_at) VALUES (?1,'head','posted','old finding','parent','parent-sha',1,1)", params![pr_id]).unwrap();
+    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,stacked_base_ref,reviewed_base_sha,created_at,updated_at) VALUES ($1,'head','posted','old finding','parent','parent-sha',1,1)", params![pr_id]).unwrap();
     let old = db.conn.last_insert_rowid();
-    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,stacked_base_ref,reviewed_base_sha,created_at,updated_at) VALUES (?1,'head','preview','pending finding','parent','parent-sha',2,2)", params![pr_id]).unwrap();
+    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,stacked_base_ref,reviewed_base_sha,created_at,updated_at) VALUES ($1,'head','preview','pending finding','parent','parent-sha',2,2)", params![pr_id]).unwrap();
     let pending = db.conn.last_insert_rowid();
     db.invalidate_review_scope(pr_id, None, "Retargeted").unwrap();
     assert!(db.pr_review_start_state(pr_id).unwrap().2.is_none());
@@ -403,7 +364,7 @@ fn base_only_scope_changes_invalidate_decisions_and_allow_a_new_scope_to_post() 
             Some("you")
         )
         .unwrap());
-    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,stacked_base_ref,reviewed_base_sha,created_at,updated_at,review_scope_revision) SELECT ?1,'head','preview','new finding','main','main-sha',3,3,review_scope_revision FROM pull_requests WHERE id=?1", params![pr_id]).unwrap();
+    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,stacked_base_ref,reviewed_base_sha,created_at,updated_at,review_scope_revision) SELECT $1,'head','preview','new finding','main','main-sha',3,3,review_scope_revision FROM pull_requests WHERE id=$1", params![pr_id]).unwrap();
     let new = db.conn.last_insert_rowid();
     assert!(db
         .try_begin_review_post(new, pr_id, "head", "COMMENT", "comment", "you", None)
@@ -432,12 +393,12 @@ fn base_only_scope_changes_invalidate_decisions_and_allow_a_new_scope_to_post() 
 
 #[test]
 fn base_sync_scope_revision_blocks_old_publication_without_forcing_full() {
-    let db = Database::open_at(temp_db_path()).unwrap();
+    let db = Db::for_test().open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/repo").unwrap();
     db.conn.execute("INSERT INTO pull_requests (repo_id,number,title,author,head_sha,base_ref,base_sha,last_synced_at,created_at,updated_at) VALUES (1,1,'PR','author','head','main','base',1,1,1)", []).unwrap();
     let pr_id = db.conn.last_insert_rowid();
     let old = db.start_review_skeleton_with(pr_id, None).unwrap();
-    db.conn.execute("UPDATE review_runs SET status='posting',review_body='finding',stacked_base_ref='main',reviewed_base_sha='base',human_selection_required=0 WHERE id=?1", params![old]).unwrap();
+    db.conn.execute("UPDATE review_runs SET status='posting',review_body='finding',stacked_base_ref='main',reviewed_base_sha='base',human_selection_required=0 WHERE id=$1", params![old]).unwrap();
     db.invalidate_review_scope(pr_id, None, "Same ref, changed base snapshot")
         .unwrap();
     assert!(!db.take_force_full_next_review(pr_id).unwrap());
@@ -455,7 +416,7 @@ fn base_sync_scope_revision_blocks_old_publication_without_forcing_full() {
         )
         .unwrap());
     db.conn
-        .execute("UPDATE review_runs SET status='preview' WHERE id=?1", params![old])
+        .execute("UPDATE review_runs SET status='preview' WHERE id=$1", params![old])
         .unwrap();
     assert!(!db
         .try_begin_review_post(old, pr_id, "head", "COMMENT", "comment", "you", None)
@@ -465,7 +426,7 @@ fn base_sync_scope_revision_blocks_old_publication_without_forcing_full() {
         .unwrap();
     db.conn
         .execute(
-            "UPDATE review_runs SET status='preview',human_selection_required=0,stacked_base_ref='main' WHERE id=?1",
+            "UPDATE review_runs SET status='preview',human_selection_required=0,stacked_base_ref='main' WHERE id=$1",
             params![fresh],
         )
         .unwrap();
@@ -480,7 +441,7 @@ fn base_sync_scope_revision_blocks_old_publication_without_forcing_full() {
 
 #[test]
 fn base_sync_coverage_snapshot_excludes_incomplete_failed_and_foreign_runs() {
-    let db = Database::open_at(temp_db_path()).unwrap();
+    let db = Db::for_test().open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/repo").unwrap();
     db.conn.execute("INSERT INTO pull_requests (repo_id,number,title,author,head_sha,last_synced_at,created_at,updated_at) VALUES (1,1,'PR','author','head',1,1,1)", []).unwrap();
     let pr_id = db.conn.last_insert_rowid();
@@ -511,7 +472,7 @@ fn base_sync_coverage_snapshot_excludes_incomplete_failed_and_foreign_runs() {
     assert!(db.review_coverage_snapshot(pr_id + 1, "head").unwrap().is_none());
     assert!(db.review_coverage_snapshot(pr_id, "other").unwrap().is_none());
     db.conn
-        .execute("UPDATE review_runs SET status='failed' WHERE id=?1", params![run_id])
+        .execute("UPDATE review_runs SET status='failed' WHERE id=$1", params![run_id])
         .unwrap();
     assert!(db.review_coverage_snapshot(pr_id, "head").unwrap().is_none());
 }
@@ -536,7 +497,7 @@ fn chunk_snapshots_survive_phase_changes_and_new_snapshots_replace_old_ones() {
 
 #[test]
 fn upsert_pull_request_clears_stacked_status_on_retarget_to_default_branch() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.upsert_workspaces(&[WorkspaceInput {
         login: "acme".to_string(),
         kind: "org".to_string(),
@@ -577,8 +538,8 @@ fn upsert_pull_request_clears_stacked_status_on_retarget_to_default_branch() {
     let (base_ref, is_stacked, status_reason): (Option<String>, i64, Option<String>) = db
         .conn
         .query_row(
-            "SELECT base_ref, is_stacked, status_reason FROM pull_requests WHERE repo_id = ?1 AND number = ?2",
-            params![repo.id, 7665],
+            "SELECT base_ref, is_stacked, status_reason FROM pull_requests WHERE repo_id = $1 AND number = $2",
+            params![repo.id, 7665_i64],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .expect("query pr");
@@ -589,7 +550,7 @@ fn upsert_pull_request_clears_stacked_status_on_retarget_to_default_branch() {
 
 #[test]
 fn poll_upsert_preserves_manual_cancellation_for_the_same_head() {
-    let db = Database::open_at(temp_db_path()).unwrap();
+    let db = Db::for_test().open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/api").unwrap();
     let mut input = PullRequestInput {
         repo_id: 1,
@@ -614,7 +575,7 @@ fn poll_upsert_preserves_manual_cancellation_for_the_same_head() {
     let state: (String, Option<String>) = db
         .conn
         .query_row(
-            "SELECT review_lane, status_reason FROM pull_requests WHERE id = ?1",
+            "SELECT review_lane, status_reason FROM pull_requests WHERE id = $1",
             params![pr_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -626,7 +587,7 @@ fn poll_upsert_preserves_manual_cancellation_for_the_same_head() {
     let reason: Option<String> = db
         .conn
         .query_row(
-            "SELECT status_reason FROM pull_requests WHERE id = ?1",
+            "SELECT status_reason FROM pull_requests WHERE id = $1",
             params![pr_id],
             |row| row.get(0),
         )
@@ -636,12 +597,12 @@ fn poll_upsert_preserves_manual_cancellation_for_the_same_head() {
 
 #[test]
 fn lifecycle_candidates_paginate_past_two_hundred_open_rows() {
-    let db = Database::open_at(temp_db_path()).unwrap();
+    let db = Db::for_test().open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/api").unwrap();
-    for number in 1..=201 {
+    for number in 1..=201_i64 {
         db.conn.execute(
             "INSERT INTO pull_requests (repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at)
-             VALUES (1, ?1, 'PR', 'author', ?2, ?3, ?3, ?3)",
+             VALUES (1, $1, 'PR', 'author', $2, $3, $3, $3)",
             params![number, format!("head-{number}"), number],
         ).unwrap();
     }
@@ -657,7 +618,7 @@ fn lifecycle_candidates_paginate_past_two_hundred_open_rows() {
 
 #[test]
 fn pending_review_coverage_does_not_block_historical_backfill() {
-    let db = Database::open_at(temp_db_path()).unwrap();
+    let db = Db::for_test().open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/api").unwrap();
     let pr_id = db
         .upsert_pull_request(&PullRequestInput {
@@ -701,7 +662,7 @@ fn pending_review_coverage_does_not_block_historical_backfill() {
 
 #[test]
 fn obsolete_model_routing_is_ignored_and_not_exposed() {
-    let db = Database::open_at(temp_db_path()).unwrap();
+    let db = Db::for_test().open().unwrap();
     db.conn
         .execute(
             "INSERT INTO settings (key,value,updated_at) VALUES ('review_routing','invalid obsolete config',1)",
@@ -716,12 +677,12 @@ fn obsolete_model_routing_is_ignored_and_not_exposed() {
 
 #[test]
 fn review_stage_breakdown_tracks_cache_candidates() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.conn.execute("INSERT INTO repos (owner, name, full_name, is_private, created_at, updated_at) VALUES ('acme','api','acme/api',1,1,1)", []).expect("repo");
     let repo_id = db.conn.last_insert_rowid();
-    db.conn.execute("INSERT INTO pull_requests (repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at) VALUES (?1, 1, 'PR', 'a', 'abc', 1, 1, 1)", params![repo_id]).expect("pr");
+    db.conn.execute("INSERT INTO pull_requests (repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at) VALUES ($1, 1, 'PR', 'a', 'abc', 1, 1, 1)", params![repo_id]).expect("pr");
     let pr_id = db.conn.last_insert_rowid();
-    db.conn.execute("INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, started_at, model) VALUES (?1, 'abc', 'posted', 1, 1, 1, 'gpt-5-5-medium')", params![pr_id]).expect("run");
+    db.conn.execute("INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, started_at, model) VALUES ($1, 'abc', 'posted', 1, 1, 1, 'gpt-5-5-medium')", params![pr_id]).expect("run");
     let run_id = db.conn.last_insert_rowid();
     let stage = ReviewRunStageInput {
         run_id,
@@ -774,7 +735,7 @@ fn review_stage_breakdown_tracks_cache_candidates() {
     assert!(db.cached_review_chunk("k").unwrap().is_none());
     db.conn
         .execute(
-            "UPDATE review_chunk_cache SET comments_json = '{}', last_seen_at = ?1 WHERE cache_key = 'k'",
+            "UPDATE review_chunk_cache SET comments_json = '{}', last_seen_at = $1 WHERE cache_key = 'k'",
             params![now_millis()],
         )
         .unwrap();
@@ -813,7 +774,7 @@ fn review_stage_breakdown_tracks_cache_candidates() {
 
 #[test]
 fn skill_versions_snapshot_and_rollback() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     // v0 baseline = the built-in embedded skill; nothing stored yet.
     assert_eq!(db.active_skill_version_id(), 0);
     let baseline = db.active_skill_content();
@@ -866,7 +827,7 @@ fn skill_versions_snapshot_and_rollback() {
 
 #[test]
 fn settings_have_defaults() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     let settings = db.settings().expect("settings");
     assert_eq!(settings.theme, "system");
     assert_eq!(settings.font_size, 14);
@@ -887,7 +848,7 @@ fn settings_have_defaults() {
 
 #[test]
 fn review_max_files_setting_is_persisted_and_validated() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     assert_eq!(
         db.save_setting("review_max_files", "250").unwrap().review_max_files,
         250
@@ -903,7 +864,7 @@ fn review_max_files_setting_is_persisted_and_validated() {
 
 #[test]
 fn review_archive_retention_days_setting_is_persisted_and_validated() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     assert_eq!(db.settings().unwrap().review_archive_retention_days, 1);
     assert_eq!(
         db.save_setting("review_archive_retention_days", "30")
@@ -948,7 +909,7 @@ fn review_archive_retention_days_setting_is_persisted_and_validated() {
 
 #[test]
 fn index_strategy_setting_is_validated() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     let settings = db.save_setting("index_strategy", "graph").expect("save graph");
     assert_eq!(settings.index_strategy, "graph");
     let error = db
@@ -960,25 +921,25 @@ fn index_strategy_setting_is_validated() {
 
 #[test]
 fn save_setting_persists_across_reopen() {
-    let path = temp_db_path();
-    let db = Database::open_at(path.clone()).expect("open db");
+    let handle = Db::for_test();
+    let db = handle.open().expect("open db");
     let settings = db.save_setting("theme", "dark").expect("save theme");
     assert_eq!(settings.theme, "dark");
     drop(db);
-    let db = Database::open_at(path).expect("reopen db");
+    let db = handle.open().expect("reopen db");
     assert_eq!(db.settings().expect("settings").theme, "dark");
 }
 
 #[test]
 fn save_setting_rejects_unknown_key() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     let err = db.save_setting("poll_running", "true").unwrap_err();
     assert!(err.contains("unknown setting key"), "got: {err}");
 }
 
 #[test]
 fn save_setting_rejects_invalid_auto_post_mode() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     let err = db.save_setting("auto_post_mode", "invalid").unwrap_err();
     assert!(err.contains("must be off, comment, or request_changes"), "got: {err}");
     let settings = db.save_setting("auto_post_mode", "comment").expect("valid mode");
@@ -987,8 +948,8 @@ fn save_setting_rejects_invalid_auto_post_mode() {
 
 #[test]
 fn review_result_mode_is_validated_and_installation_id_is_stable() {
-    let path = temp_db_path();
-    let db = Database::open_at(path.clone()).expect("open db");
+    let handle = Db::for_test();
+    let db = handle.open().expect("open db");
     let installation_id = db.installation_id().expect("installation id");
     assert!(!installation_id.is_empty());
     let error = db
@@ -1000,7 +961,7 @@ fn review_result_mode_is_validated_and_installation_id_is_stable() {
         .expect("enable result comments");
     assert_eq!(settings.review_result_mode, "result_comment");
     drop(db);
-    let reopened = Database::open_at(path).expect("reopen db");
+    let reopened = handle.open().expect("reopen db");
     assert_eq!(
         reopened.installation_id().expect("reopened installation id"),
         installation_id
@@ -1009,7 +970,7 @@ fn review_result_mode_is_validated_and_installation_id_is_stable() {
 
 #[test]
 fn failed_result_preserves_a_finalized_review_decision() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.conn
         .execute(
             "INSERT INTO repos (owner, name, full_name, is_private, created_at, updated_at)
@@ -1022,14 +983,14 @@ fn failed_result_preserves_a_finalized_review_decision() {
         .execute(
             "INSERT INTO pull_requests (
                repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at
-             ) VALUES (?1, 7, 'PR', 'alice', 'head-one', 1, 1, 1)",
+             ) VALUES ($1, 7, 'PR', 'alice', 'head-one', 1, 1, 1)",
             params![repo_id],
         )
         .expect("pr");
     let pr_id = db.conn.last_insert_rowid();
     db.conn
         .execute(
-            "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, model) VALUES (?1, 'head-one', 'posting', 1, 1, 'gpt-5.5')",
+            "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, model) VALUES ($1, 'head-one', 'posting', 1, 1, 'gpt-5.5')",
             params![pr_id],
         )
         .expect("run");
@@ -1072,7 +1033,7 @@ fn failed_result_preserves_a_finalized_review_decision() {
     let state: (String, Option<String>) = db
         .conn
         .query_row(
-            "SELECT status, decision FROM review_runs WHERE id = ?1",
+            "SELECT status, decision FROM review_runs WHERE id = $1",
             params![run_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -1082,7 +1043,7 @@ fn failed_result_preserves_a_finalized_review_decision() {
 
 #[test]
 fn review_result_reservation_is_unique_and_preserves_comment_identity() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.save_setting("review_result_mode", "silent").unwrap();
     db.conn
         .execute(
@@ -1096,14 +1057,14 @@ fn review_result_reservation_is_unique_and_preserves_comment_identity() {
         .execute(
             "INSERT INTO pull_requests (
            repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at
-         ) VALUES (?1, 7, 'PR', 'alice', 'head-one', 1, 1, 1)",
+         ) VALUES ($1, 7, 'PR', 'alice', 'head-one', 1, 1, 1)",
             params![repo_id],
         )
         .expect("pr");
     let pr_id = db.conn.last_insert_rowid();
     db.conn
         .execute(
-            "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, model) VALUES (?1, 'head-one', 'preview', 1, 1, 'gpt-5.5')",
+            "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, model) VALUES ($1, 'head-one', 'preview', 1, 1, 'gpt-5.5')",
             params![pr_id],
         )
         .expect("run");
@@ -1286,7 +1247,7 @@ fn review_result_reservation_is_unique_and_preserves_comment_identity() {
 
 #[test]
 fn failed_result_does_not_hide_a_new_review_failure() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.conn
         .execute(
             "INSERT INTO repos (owner, name, full_name, is_private, created_at, updated_at)
@@ -1298,7 +1259,7 @@ fn failed_result_does_not_hide_a_new_review_failure() {
     db.conn
         .execute(
             "INSERT INTO pull_requests (repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at)
-             VALUES (?1, 7, 'PR', 'alice', 'new-head', 1, 1, 1)",
+             VALUES ($1, 7, 'PR', 'alice', 'new-head', 1, 1, 1)",
             params![repo_id],
         )
         .expect("pr");
@@ -1310,13 +1271,13 @@ fn failed_result_does_not_hide_a_new_review_failure() {
                pr_id, installation_id, marker_key, observed_head_sha, reviewed_head_sha,
                observation, effective_state, publication_status, reviewer_version, skill_version,
                created_at, updated_at
-             ) VALUES (?1, ?2, 'marker', 'new-head', 'new-head', 'clean', 'clean', 'failed', 'v1', 'v1', 1, 1)",
+             ) VALUES ($1, $2, 'marker', 'new-head', 'new-head', 'clean', 'clean', 'failed', 'v1', 'v1', 1, 1)",
             params![pr_id, installation_id],
         )
         .expect("failed result");
     db.conn
         .execute(
-            "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, model) VALUES (?1, 'new-head', 'running', 1, 1, 'gpt')",
+            "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, model) VALUES ($1, 'new-head', 'running', 1, 1, 'gpt')",
             params![pr_id],
         )
         .expect("run");
@@ -1332,7 +1293,7 @@ fn failed_result_does_not_hide_a_new_review_failure() {
 }
 
 fn settings_batch_fixture() -> (Database, i64, i64) {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.upsert_workspaces(&[WorkspaceInput {
         login: "acme".into(),
         kind: "org".into(),
@@ -1529,7 +1490,7 @@ fn settings_batch_can_clear_access_and_setting_only_updates_preserve_it() {
 
 #[test]
 fn workspaces_repos_subscriptions_and_skills_persist() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.upsert_workspaces(&[WorkspaceInput {
         login: "acme".to_string(),
         kind: "org".to_string(),
@@ -1576,7 +1537,7 @@ fn file(path: &str, package: Option<&str>) -> RepoIndexFileInput {
 
 #[test]
 fn build_review_context_plan_selects_graph_neighbours() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.upsert_workspaces(&[WorkspaceInput {
         login: "acme".to_string(),
         kind: "folder".to_string(),
@@ -1701,7 +1662,7 @@ fn build_review_context_plan_selects_graph_neighbours() {
 
 #[test]
 fn review_board_uses_github_update_time_for_recency() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.ensure_temp_repo_for_index(1, "acme/api").unwrap();
     db.save_repo_subscription(1, true, "manual", false, false).unwrap();
     let pr_id = db
@@ -1737,7 +1698,7 @@ fn review_board_uses_github_update_time_for_recency() {
 
 #[test]
 fn size_limit_lane_is_not_needs_you() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     db.save_repo_subscription(1, true, "manual", false, false).unwrap();
     let pr_id = db
@@ -1775,7 +1736,7 @@ fn size_limit_lane_is_not_needs_you() {
 
 #[test]
 fn late_file_limit_skip_does_not_reopen_terminal_pr() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     db.save_repo_subscription(1, true, "manual", false, false).unwrap();
     let pr_id = db
@@ -1805,7 +1766,7 @@ fn late_file_limit_skip_does_not_reopen_terminal_pr() {
     let lane: String = db
         .conn
         .query_row(
-            "SELECT review_lane FROM pull_requests WHERE id = ?1",
+            "SELECT review_lane FROM pull_requests WHERE id = $1",
             params![pr_id],
             |row| row.get(0),
         )
@@ -1816,7 +1777,7 @@ fn late_file_limit_skip_does_not_reopen_terminal_pr() {
 
 #[test]
 fn review_board_classifies_current_empty_audit_as_clean() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     db.save_repo_subscription(1, true, "manual", false, false).unwrap();
     let pr_id = db
@@ -1888,7 +1849,7 @@ fn review_board_classifies_current_empty_audit_as_clean() {
 
 #[test]
 fn review_board_keeps_inherited_findings_in_needs_you() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     db.save_repo_subscription(1, true, "manual", false, false).unwrap();
     let pr_id = db
@@ -1911,7 +1872,7 @@ fn review_board_keeps_inherited_findings_in_needs_you() {
         .unwrap();
     let prior_run_id = db.start_review_skeleton_with(pr_id, Some("fixture")).unwrap();
     db.conn.execute(
-        "UPDATE review_runs SET status = 'preview', review_body = '[Finding] Prior issue', comments_json = '{\"comments\":[{\"body\":\"[Finding] Prior issue\"}]}' WHERE id = ?1",
+        "UPDATE review_runs SET status = 'preview', review_body = '[Finding] Prior issue', comments_json = '{\"comments\":[{\"body\":\"[Finding] Prior issue\"}]}' WHERE id = $1",
         params![prior_run_id],
     ).unwrap();
     db.reserve_review_result(&ReviewResultInput {
@@ -1981,7 +1942,7 @@ fn review_board_keeps_inherited_findings_in_needs_you() {
 
 #[test]
 fn review_board_ignores_malformed_current_audit() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     db.save_repo_subscription(1, true, "manual", false, false).unwrap();
     let pr_id = db
@@ -2021,7 +1982,7 @@ fn review_board_ignores_malformed_current_audit() {
     db.set_pr_lane(pr_id, "ready", Some("Review ready")).unwrap();
     db.conn
         .execute(
-            "UPDATE review_finding_audits SET audit_json = 'not-json' WHERE run_id = ?1",
+            "UPDATE review_finding_audits SET audit_json = 'not-json' WHERE run_id = $1",
             params![run_id],
         )
         .unwrap();
@@ -2057,7 +2018,7 @@ fn review_board_ignores_malformed_current_audit() {
 
 #[test]
 fn terminal_pr_state_removes_needs_you_pending_actions() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     db.save_repo_subscription(1, true, "manual", false, false).unwrap();
     let pr_id = db
@@ -2094,57 +2055,8 @@ fn terminal_pr_state_removes_needs_you_pending_actions() {
 }
 
 #[test]
-fn gemini_accounts_survive_the_provider_migration() {
-    let path = temp_db_path();
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let conn = Connection::open(&path).unwrap();
-    conn.execute_batch(MIGRATIONS[0]).unwrap();
-    conn.pragma_update(None, "user_version", 1).unwrap();
-    conn.execute("INSERT INTO ai_accounts (provider, label, priority, created_at, updated_at) VALUES ('codex', 'ChatGPT', 1, 0, 0)", []).unwrap();
-    assert!(conn.execute("INSERT INTO ai_accounts (provider, label, priority, created_at, updated_at) VALUES ('gemini', 'G', 2, 0, 0)", []).is_err());
-    drop(conn);
-    let db = Database::open_at(path).unwrap();
-    let gemini = db.create_ai_account("gemini", "dev@example.com").unwrap();
-    assert!(db.create_ai_account("other", "Nope").is_err());
-    let accounts = db.list_ai_accounts().unwrap();
-    assert_eq!(
-        accounts
-            .iter()
-            .map(|account| account.provider.as_str())
-            .collect::<Vec<_>>(),
-        ["codex", "gemini"]
-    );
-    assert_eq!(accounts[1].id, gemini.id);
-}
-
-#[test]
-fn opencode_accounts_join_after_existing_gemini_accounts() {
-    let path = temp_db_path();
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let conn = Connection::open(&path).unwrap();
-    conn.execute_batch(MIGRATIONS[0]).unwrap();
-    conn.execute_batch(MIGRATIONS[1]).unwrap();
-    conn.pragma_update(None, "user_version", 2).unwrap();
-    conn.execute("INSERT INTO ai_accounts (provider, label, priority, status, created_at, updated_at) VALUES ('gemini', 'dev@example.com', 1, 'ok', 0, 0)", []).unwrap();
-    assert!(conn.execute("INSERT INTO ai_accounts (provider, label, priority, created_at, updated_at) VALUES ('opencode', 'O', 2, 0, 0)", []).is_err());
-    drop(conn);
-    let db = Database::open_at(path).unwrap();
-    let opencode = db.create_ai_account("opencode", "OpenCode Go").unwrap();
-    let accounts = db.list_ai_accounts().unwrap();
-    assert_eq!(
-        accounts
-            .iter()
-            .map(|account| account.provider.as_str())
-            .collect::<Vec<_>>(),
-        ["gemini", "opencode"]
-    );
-    assert_eq!(accounts[0].label, "dev@example.com");
-    assert_eq!(accounts[1].id, opencode.id);
-}
-
-#[test]
 fn ai_accounts_are_picked_by_priority_and_rest_after_limits() {
-    let db = Database::open_at(temp_db_path()).unwrap();
+    let db = Db::for_test().open().unwrap();
     assert!(db.pick_ai_account(&[]).unwrap().is_none());
     let first = db.create_ai_account("claude", "Work").unwrap();
     let second = db.create_ai_account("claude", "Personal").unwrap();
@@ -2169,7 +2081,7 @@ fn ai_accounts_are_picked_by_priority_and_rest_after_limits() {
 
     // A rest that has already elapsed makes the account available again.
     db.conn
-        .execute("UPDATE ai_accounts SET limited_until = 1 WHERE id = ?1", [first.id])
+        .execute("UPDATE ai_accounts SET limited_until = 1 WHERE id = $1", [first.id])
         .unwrap();
     assert_eq!(db.pick_ai_account(&[]).unwrap().unwrap().id, first.id);
     db.mark_ai_account_used(first.id).unwrap();
@@ -2191,7 +2103,7 @@ fn ai_accounts_are_picked_by_priority_and_rest_after_limits() {
 
 #[test]
 fn empty_repository_index_is_not_a_failure() {
-    let db = Database::open_at(temp_db_path()).unwrap();
+    let db = Db::for_test().open().unwrap();
     db.upsert_workspaces(&[WorkspaceInput {
         login: "acme".to_string(),
         kind: "folder".to_string(),
@@ -2218,7 +2130,7 @@ fn empty_repository_index_is_not_a_failure() {
 
 #[test]
 fn review_engines_default_per_provider_and_reject_unknown_choices() {
-    let db = Database::open_at(temp_db_path()).unwrap();
+    let db = Db::for_test().open().unwrap();
     assert_eq!(
         db.review_engine("claude").unwrap(),
         ("claude-opus-5-5".to_string(), "medium".to_string())
@@ -2234,4 +2146,62 @@ fn review_engines_default_per_provider_and_reject_unknown_choices() {
     db.save_setting_value("review_engine_gemini", r#"{"model":"gone","effort":""}"#)
         .unwrap();
     assert_eq!(db.review_engine("gemini").unwrap(), ("auto".to_string(), String::new()));
+}
+
+#[test]
+fn a_repository_leaving_the_workspace_keeps_its_review_history() {
+    let db = Db::for_test().open().expect("open db");
+    db.upsert_workspaces(&[WorkspaceInput {
+        login: "acme".into(),
+        kind: "org".into(),
+    }])
+    .unwrap();
+    let repo = |name: &str| RepoInput {
+        workspace_login: "acme".into(),
+        owner: "acme".into(),
+        name: name.into(),
+        full_name: format!("acme/{name}"),
+        description: None,
+        is_private: true,
+        default_branch: Some("main".into()),
+    };
+    let listed = db.upsert_repos(&[repo("api"), repo("web")]).unwrap();
+    let api = listed.iter().find(|repo| repo.full_name == "acme/api").unwrap().id;
+    db.conn
+        .execute(
+            "INSERT INTO pull_requests (id, repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at)
+             VALUES (1, $1, 1, 'PR', 'a', 'head', 1, 1, 1)",
+            [api],
+        )
+        .unwrap();
+    let run = db.start_review_skeleton_with(1, None).unwrap();
+    db.upsert_pending_action("manual_review_needed", api, 1, "Manual review needed", "review")
+        .unwrap();
+    // The workspace no longer lists acme/api: it leaves, its history stays.
+    let listed = db.upsert_repos(&[repo("web")]).unwrap();
+    assert!(listed.iter().all(|repo| repo.id != api));
+    assert!(db.review_run_by_id(run).unwrap().is_some());
+    let removed: Option<i64> = db
+        .conn
+        .query_row("SELECT removed_at FROM repos WHERE id = $1", [api], |row| row.get(0))
+        .unwrap();
+    assert!(removed.is_some());
+    assert!(db.queued_pr_ids().unwrap().is_empty());
+    let open_notices: i64 = db
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM pending_actions WHERE status != 'resolved'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(open_notices, 0, "a removed repository's notices cannot be acted on");
+    // Listed again, it is the same repository with the same history.
+    let listed = db.upsert_repos(&[repo("api"), repo("web")]).unwrap();
+    assert!(listed.iter().any(|repo| repo.id == api));
+    let removed: Option<i64> = db
+        .conn
+        .query_row("SELECT removed_at FROM repos WHERE id = $1", [api], |row| row.get(0))
+        .unwrap();
+    assert!(removed.is_none());
 }

@@ -150,7 +150,6 @@ pub(crate) fn health(state: &SharedState) -> Result<serde_json::Value, String> {
     let response = HealthResponse {
         ok: true,
         message: "OpenCodeReview server ready".to_string(),
-        db_path: state.config.db_path.to_string_lossy().to_string(),
         repos_dir: state.config.repos_dir.to_string_lossy().to_string(),
         github: github_status(),
         git: command_status("git", &["--version"]),
@@ -310,6 +309,16 @@ pub(crate) fn save_settings_batch_http(request: &Request, state: &SharedState) -
 }
 
 pub(crate) fn get_archive_storage_status(state: &SharedState) -> Result<serde_json::Value, String> {
+    // The last pass's status, which may have run on another instance.
+    let stored = with_db_read_raw(state, |db| {
+        db.setting(crate::review_archive::retention::STORAGE_STATUS_SETTING)
+    })
+    .ok()
+    .flatten()
+    .and_then(|raw| serde_json::from_str::<crate::review_archive::retention::ArchiveStorageStatus>(&raw).ok());
+    if let Some(status) = stored {
+        return serde_json::to_value(status).map_err(|e| e.to_string());
+    }
     let status = state
         .archive_storage_status
         .lock()

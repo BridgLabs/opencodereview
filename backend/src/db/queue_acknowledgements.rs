@@ -20,7 +20,7 @@ impl Database {
     pub(crate) fn stored_review_intent_revision(&self, pr_id: i64) -> Result<Option<i64>, String> {
         self.conn
             .query_row(
-                "SELECT review_scope_revision FROM pull_requests WHERE id = ?1 AND (force_full_next_review OR reprocess_next_review)",
+                "SELECT review_scope_revision FROM pull_requests WHERE id = $1 AND (force_full_next_review <> 0 OR reprocess_next_review <> 0)",
                 params![pr_id],
                 |row| row.get(0),
             )
@@ -41,10 +41,24 @@ impl Database {
         refresh: bool,
         carried_from: Option<i64>,
     ) -> Result<(), String> {
+        // Under the PR's lock: two concurrent calls must not both see no row and both bump the
+        // generation, which would post the comment twice.
+        let tx = self.conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        self.lock_pull_request(pr_id)?;
+        self.acknowledge_review_cycle_locked(pr_id, refresh, carried_from)?;
+        tx.commit().map_err(|e| e.to_string())
+    }
+
+    fn acknowledge_review_cycle_locked(
+        &self,
+        pr_id: i64,
+        refresh: bool,
+        carried_from: Option<i64>,
+    ) -> Result<(), String> {
         let (head_sha, scope_revision): (String, i64) = self
             .conn
             .query_row(
-                "SELECT head_sha, review_scope_revision FROM pull_requests WHERE id = ?1",
+                "SELECT head_sha, review_scope_revision FROM pull_requests WHERE id = $1",
                 params![pr_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -53,8 +67,8 @@ impl Database {
             if let Some(previous) = carried_from {
                 self.conn
                     .execute(
-                        "UPDATE queue_acknowledgements SET scope_revision = ?3
-                         WHERE pr_id = ?1 AND head_sha = ?2 AND scope_revision = ?4",
+                        "UPDATE queue_acknowledgements SET scope_revision = $3
+                         WHERE pr_id = $1 AND head_sha = $2 AND scope_revision = $4",
                         params![pr_id, head_sha, scope_revision, previous],
                     )
                     .map_err(|e| e.to_string())?;
@@ -62,7 +76,7 @@ impl Database {
             let current: bool = self
                 .conn
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM queue_acknowledgements WHERE pr_id = ?1 AND head_sha = ?2 AND scope_revision = ?3)",
+                    "SELECT EXISTS(SELECT 1 FROM queue_acknowledgements WHERE pr_id = $1 AND head_sha = $2 AND scope_revision = $3)",
                     params![pr_id, head_sha, scope_revision],
                     |row| row.get(0),
                 )
@@ -74,7 +88,7 @@ impl Database {
         self.conn
             .execute(
                 "INSERT INTO queue_acknowledgements (pr_id, generation, head_sha, scope_revision, status)
-                 VALUES (?1, 1, ?2, ?3, 'pending')
+                 VALUES ($1, 1, $2, $3, 'pending')
                  ON CONFLICT(pr_id) DO UPDATE SET
                    generation = queue_acknowledgements.generation + 1,
                    head_sha = excluded.head_sha,
@@ -104,10 +118,10 @@ impl Database {
         self.conn
             .execute(
                 "UPDATE queue_acknowledgements SET status = 'retiring', attempts = 0, next_attempt_at = 0
-                 WHERE pr_id = ?1 AND head_sha = ?2 AND status IN ('pending', 'posted')
-                 AND (?3 IS NULL OR (
-                   NOT EXISTS (SELECT 1 FROM review_runs newer WHERE newer.pr_id = ?1 AND newer.id > ?3)
-                   AND NOT EXISTS (SELECT 1 FROM pull_requests p WHERE p.id = ?1 AND (p.force_full_next_review OR p.reprocess_next_review))))",
+                 WHERE pr_id = $1 AND head_sha = $2 AND status IN ('pending', 'posted')
+                 AND ($3::BIGINT IS NULL OR (
+                   NOT EXISTS (SELECT 1 FROM review_runs newer WHERE newer.pr_id = $1 AND newer.id > $3)
+                   AND NOT EXISTS (SELECT 1 FROM pull_requests p WHERE p.id = $1 AND (p.force_full_next_review <> 0 OR p.reprocess_next_review <> 0))))",
                 params![pr_id, head_sha, run_id],
             )
             .map_err(|e| e.to_string())?;
@@ -129,7 +143,7 @@ impl Database {
                      AND r.id = (SELECT MAX(id) FROM review_runs latest WHERE latest.pr_id = r.pr_id))
                  AND NOT EXISTS (
                    SELECT 1 FROM pull_requests p WHERE p.id = queue_acknowledgements.pr_id
-                     AND (p.force_full_next_review OR p.reprocess_next_review))",
+                     AND (p.force_full_next_review <> 0 OR p.reprocess_next_review <> 0))",
                 [],
             )
             .map_err(|e| e.to_string())
@@ -145,7 +159,7 @@ impl Database {
                  FROM queue_acknowledgements a
                  JOIN pull_requests p ON p.id = a.pr_id
                  JOIN repos r ON r.id = p.repo_id
-                 WHERE a.next_attempt_at <= ?1
+                 WHERE a.next_attempt_at <= $1
                    AND ((a.status = 'pending' AND LOWER(p.state) = 'open') OR a.status = 'retiring')
                  ORDER BY a.pr_id",
             )
@@ -184,17 +198,17 @@ impl Database {
                     .execute(
                         "UPDATE queue_acknowledgements SET
                        status = CASE
-                         WHEN ?3 = 'pending' THEN 'posted'
-                         WHEN post_uncertain_at IS NULL OR post_uncertain_at <= ?5 - ?6 THEN 'retired'
+                         WHEN $3 = 'pending' THEN 'posted'
+                         WHEN post_uncertain_at IS NULL OR post_uncertain_at <= $5::BIGINT - $6::BIGINT THEN 'retired'
                          ELSE 'retiring' END,
                        comment_id = CASE
-                         WHEN ?3 = 'pending' OR post_uncertain_at IS NULL OR post_uncertain_at <= ?5 - ?6
-                         THEN COALESCE(?4, comment_id) ELSE comment_id END,
+                         WHEN $3 = 'pending' OR post_uncertain_at IS NULL OR post_uncertain_at <= $5 - $6
+                         THEN COALESCE($4, comment_id) ELSE comment_id END,
                        last_error = NULL,
                        next_attempt_at = CASE
-                         WHEN ?3 = 'pending' OR post_uncertain_at IS NULL OR post_uncertain_at <= ?5 - ?6 THEN 0
-                         ELSE post_uncertain_at + ?6 END
-                     WHERE pr_id = ?1 AND generation = ?2 AND status = ?3",
+                         WHEN $3 = 'pending' OR post_uncertain_at IS NULL OR post_uncertain_at <= $5 - $6 THEN 0
+                         ELSE post_uncertain_at + $6 END
+                     WHERE pr_id = $1 AND generation = $2 AND status = $3",
                         params![
                             pr_id,
                             generation,
@@ -209,10 +223,10 @@ impl Database {
             Err(error) => {
                 self.conn
                     .execute(
-                        "UPDATE queue_acknowledgements SET attempts = attempts + 1, last_error = ?4,
-                     post_uncertain_at = CASE WHEN ?3 = 'pending' THEN ?5 ELSE post_uncertain_at END,
-                     next_attempt_at = ?5 + MIN(3600000, 60000 * (1 << MIN(attempts, 6)))
-                     WHERE pr_id = ?1 AND generation = ?2 AND status = ?3",
+                        "UPDATE queue_acknowledgements SET attempts = attempts + 1, last_error = $4,
+                     post_uncertain_at = CASE WHEN $3 = 'pending' THEN $5 ELSE post_uncertain_at END,
+                     next_attempt_at = $5 + LEAST(3600000, 60000 * (1::BIGINT << LEAST(attempts, 6)::INT))
+                     WHERE pr_id = $1 AND generation = $2 AND status = $3",
                         params![pr_id, generation, expected_status, error, now],
                     )
                     .map_err(|e| e.to_string())?;

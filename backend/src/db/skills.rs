@@ -23,7 +23,7 @@ impl Database {
         }
         self.conn
             .query_row(
-                "SELECT content FROM skill_versions WHERE id = ?1 AND deleted_at IS NULL",
+                "SELECT content FROM skill_versions WHERE id = $1 AND deleted_at IS NULL",
                 params![id],
                 |row| row.get::<_, String>(0),
             )
@@ -40,7 +40,7 @@ impl Database {
             return crate::review::REVIEW_SKILL.to_string();
         }
         self.conn
-            .query_row("SELECT content FROM skill_versions WHERE id = ?1", params![id], |row| {
+            .query_row("SELECT content FROM skill_versions WHERE id = $1", params![id], |row| {
                 row.get::<_, String>(0)
             })
             .unwrap_or_else(|_| crate::review::REVIEW_SKILL.to_string())
@@ -108,14 +108,15 @@ impl Database {
             let id = self.active_skill_version_id();
             (id > 0).then_some(id)
         };
-        self.conn
-            .execute(
+        let id: i64 = self
+            .conn
+            .query_row(
                 "INSERT INTO skill_versions (version, content, note, parent_id, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5)",
+       VALUES ($1, $2, $3, $4, $5) RETURNING id",
                 params![next_version, content, note, parent_id, now],
+                |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
-        let id = self.conn.last_insert_rowid();
         self.save_setting_value("active_skill_version", &id.to_string())?;
         Ok(SkillVersion {
             id,
@@ -135,7 +136,7 @@ impl Database {
         let deleted = self
             .conn
             .execute(
-                "UPDATE skill_versions SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
+                "UPDATE skill_versions SET deleted_at = $2 WHERE id = $1 AND deleted_at IS NULL",
                 params![id, now_millis()],
             )
             .map_err(|error| error.to_string())?;
@@ -162,7 +163,7 @@ impl Database {
             let exists: bool = self
                 .conn
                 .query_row(
-                    "SELECT 1 FROM skill_versions WHERE id = ?1 AND deleted_at IS NULL",
+                    "SELECT 1 FROM skill_versions WHERE id = $1 AND deleted_at IS NULL",
                     params![id],
                     |_| Ok(true),
                 )

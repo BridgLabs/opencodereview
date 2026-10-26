@@ -26,7 +26,7 @@ pub fn execute(
                 return Err("PR base/head scope changed during review. Refresh the PR and run a full review.".into());
             }
         }
-        let db = Database::open_at(PathBuf::from(&inputs.db_path))?;
+        let db = inputs.open_db()?;
         let source_audit = db
             .load_finding_audit(inputs.run_id)?
             .ok_or("Finding evidence snapshot is unavailable")?;
@@ -69,18 +69,14 @@ pub fn execute(
         &run_dir,
         "cleanup pending: temp run dir will be removed after optional debug copy",
     );
-    if let Ok(db) = Database::open_at(PathBuf::from(&inputs.db_path)) {
+    if let Ok(db) = inputs.open_db() {
         if result.is_err() {
             let _ = db.sync_review_stage_usage(inputs.run_id);
         }
         let _ = db.clear_finding_evidence(inputs.run_id);
     }
-    for name in [
-        "head-context.sqlite3",
-        "head-context.sqlite3-wal",
-        "head-context.sqlite3-shm",
-    ] {
-        let _ = fs::remove_file(run_dir.join(name));
+    if let Some(db_handle) = &inputs.db_handle {
+        let _ = db_handle.open().and_then(|db| db.drop_snapshot_index(inputs.run_id));
     }
     let debug_dir = save_review_debug_artifacts(inputs, &run_dir, &result);
     if let Some(debug_dir) = &debug_dir {
@@ -173,7 +169,7 @@ pub(crate) fn run_inner(
     let full_pr_changed = changed_files_local(&inputs.repo_path, &full_pr_range, cancel)?;
     let full_pr_diff = diff_local(&inputs.repo_path, &full_pr_range, cancel)?;
     let actual_file_count = changed_file_count_local(&inputs.repo_path, &full_pr_range, cancel)?;
-    let db = Database::open_at(PathBuf::from(&inputs.db_path))?;
+    let db = inputs.open_db()?;
     db.set_pr_changed_file_count(inputs.pr_id, Some(actual_file_count as i64))?;
     let max_files = db.settings()?.review_max_files;
     if actual_file_count as i64 > max_files {
@@ -181,7 +177,7 @@ pub(crate) fn run_inner(
             "review file limit exceeded: {actual_file_count} changed files exceeds the {max_files}-file review limit"
         ));
     }
-    Database::open_at(PathBuf::from(&inputs.db_path))?.store_finding_audit(
+    inputs.open_db()?.store_finding_audit(
         inputs.run_id,
         &crate::review::findings::seed_audit(&serde_json::json!({ "comments": [] }), &head_sha, &full_pr_diff),
     )?;
@@ -235,7 +231,7 @@ pub(crate) fn run_inner(
         if should_reuse_review_coverage(inputs) && scope_reuse.is_none() && historical_prior_head.is_none() {
             crate::review::coverage::resolve(
                 &inputs.repo_path,
-                &inputs.db_path,
+                inputs.db_handle.as_ref().ok_or("Review storage unavailable")?,
                 inputs.repo_id,
                 &base_rev,
                 &head_sha,
@@ -413,8 +409,8 @@ pub(crate) fn run_inner(
     );
     let plan = {
         let (mut plan, base_sha) =
-            build_snapshot_context_plan(inputs, &changed, &head_sha, &base_rev, run_dir, cancel, progress)?;
-        let db = Database::open_at(PathBuf::from(&inputs.db_path))?;
+            build_snapshot_context_plan(inputs, &changed, &head_sha, &base_rev, cancel, progress)?;
+        let db = inputs.open_db()?;
         let _ = db.set_review_run_context_metadata(
             inputs.run_id,
             reviewed_base_sha.as_deref(),
@@ -469,16 +465,7 @@ pub(crate) fn run_inner(
     let risk_plan = if full_pr_changed == changed {
         plan.clone()
     } else {
-        build_snapshot_context_plan(
-            inputs,
-            &full_pr_changed,
-            &head_sha,
-            &base_rev,
-            run_dir,
-            cancel,
-            progress,
-        )?
-        .0
+        build_snapshot_context_plan(inputs, &full_pr_changed, &head_sha, &base_rev, cancel, progress)?.0
     };
 
     for name in [

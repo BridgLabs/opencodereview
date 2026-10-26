@@ -107,7 +107,7 @@ fn candidate_selection_preserves_ai_decisions_and_templates() {
 }
 
 fn finding_selection_fixture() -> (std::path::PathBuf, crate::db::Database, i64, i64) {
-    use crate::db::{Database, PullRequestInput};
+    use crate::db::PullRequestInput;
     let root = std::env::temp_dir().join(format!(
         "ocr-findings-{}-{}",
         std::process::id(),
@@ -116,7 +116,7 @@ fn finding_selection_fixture() -> (std::path::PathBuf, crate::db::Database, i64,
             .unwrap()
             .as_nanos()
     ));
-    let db = Database::open_at(root.join("test.sqlite")).unwrap();
+    let db = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/api").unwrap();
     let pr_id = db
         .upsert_pull_request(&PullRequestInput {
@@ -165,9 +165,9 @@ fn evidence_warnings_survive_selection_cleanup_and_database_reopen() {
         .unwrap()
         .contains("WARNING"));
     db.clear_finding_evidence(run_id).unwrap();
-    let path = db.path();
+    let handle = db.handle();
     drop(db);
-    let reopened = crate::db::Database::open_at(path.into()).unwrap();
+    let reopened = handle.open().unwrap();
     assert_eq!(reopened.review_evidence_warnings(run_id).unwrap(), warnings);
     drop(reopened);
     std::fs::remove_dir_all(root).unwrap();
@@ -213,7 +213,7 @@ fn reprocess_intent_blocks_publication_before_and_after_replacement() {
             .auto_confirm_generated_finding_selection(pr_id, run_id)
             .unwrap()
             .unwrap();
-        let publisher = crate::db::Database::open_at(root.join("test.sqlite")).unwrap();
+        let publisher = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
         let publish = || {
             publisher
                 .try_begin_review_post(run_id, pr_id, "abc", "COMMENT", "comment", "auto", Some(revision))
@@ -496,10 +496,10 @@ fn retained_auto_post_finding_selection_acquires_lock() {
     };
     let (root, db, pr_id, run_id) = finding_selection_fixture();
     db.save_setting("auto_post_mode", mode).unwrap();
-    let conn = rusqlite::Connection::open(db.path()).unwrap();
-    conn.execute("UPDATE pull_requests SET head_sha = ?1", [&audit.head_sha])
+    let conn = db.handle().open().unwrap();
+    conn.execute("UPDATE pull_requests SET head_sha = $1", [&audit.head_sha])
         .unwrap();
-    conn.execute("UPDATE review_runs SET head_sha = ?1", [&audit.head_sha])
+    conn.execute("UPDATE review_runs SET head_sha = $1", [&audit.head_sha])
         .unwrap();
     db.store_finding_audit(run_id, &audit).unwrap();
     db.finish_review_run(
@@ -510,10 +510,11 @@ fn retained_auto_post_finding_selection_acquires_lock() {
     )
     .unwrap();
     conn.execute(
-        "UPDATE review_finding_audits SET revision = ?1, selection_saved = ?2",
-        rusqlite::params![
+        "UPDATE review_finding_audits SET revision = $1, selection_saved = $2",
+        crate::pg_params![
             fixture["revision"].as_i64().unwrap(),
-            fixture["selectionSaved"].as_bool().unwrap()
+            // A BIGINT flag, as production code binds it.
+            fixture["selectionSaved"].as_bool().unwrap() as i64
         ],
     )
     .unwrap();
@@ -667,7 +668,7 @@ fn auto_post_rejects_changed_review_scope_or_state() {
                 db.start_review_skeleton_with(pr_id, None).unwrap();
             }
             "closed" | "head" | "retarget" => {
-                let conn = rusqlite::Connection::open(db.path()).unwrap();
+                let conn = db.handle().open().unwrap();
                 let sql = match case {
                     "closed" => "UPDATE pull_requests SET state = 'closed'",
                     "head" => "UPDATE pull_requests SET head_sha = 'new-head'",

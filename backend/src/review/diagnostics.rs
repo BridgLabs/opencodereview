@@ -37,7 +37,7 @@ pub(super) fn finish_audit(
     diff: &str,
     evidence_warnings: &[EvidenceWarning],
 ) -> Result<crate::review::findings::FindingAudit, String> {
-    let db = Database::open_at(inputs.db_path.clone().into())?;
+    let db = inputs.open_db()?;
     let source = db
         .load_finding_audit(inputs.run_id)?
         .ok_or("Finding audit seed unavailable")?;

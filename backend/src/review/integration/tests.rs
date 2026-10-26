@@ -358,14 +358,16 @@ fn diagnostic_restore_preserves_chunk_warnings_when_final_has_none() {
     let files = vec!["src/value.rs".to_string()];
     let mut inputs = frozen_inputs(&[(files[0].clone(), LINE.into())]);
     let (root, context, map, diff) = fixture(-1242, &inputs, &files);
-    inputs.db_path = root.join("diagnostic.sqlite").to_string_lossy().into();
-    let db = Database::open_at(inputs.db_path.clone().into()).unwrap();
+    let db_path = root.join("diagnostic.sqlite");
+    inputs.db_handle = Some(crate::db::Db::for_test_at(db_path.clone()));
+    inputs.archive_dir = root.join("review-archives");
+    let db = inputs.open_db().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
-    let ledger = rusqlite::Connection::open(&inputs.db_path).unwrap();
-    ledger.execute("INSERT INTO pull_requests(id,repo_id,number,title,author,head_sha,last_synced_at,created_at,updated_at) VALUES(1,1,1,'Fixture','fixture',?1,0,0,0)", [HEAD]).unwrap();
+    let ledger = crate::db::Db::for_test_at(&db_path).open().unwrap();
+    ledger.execute("INSERT INTO pull_requests(id,repo_id,number,title,author,head_sha,last_synced_at,created_at,updated_at) VALUES(1,1,1,'Fixture','fixture',$1,0,0,0)", [HEAD]).unwrap();
     ledger
         .execute(
-            "INSERT INTO review_runs(id,pr_id,head_sha,status,created_at,updated_at) VALUES(1,1,?1,'running',0,0)",
+            "INSERT INTO review_runs(id,pr_id,head_sha,status,created_at,updated_at) VALUES(1,1,$1,'running',0,0)",
             [HEAD],
         )
         .unwrap();

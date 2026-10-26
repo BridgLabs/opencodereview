@@ -18,6 +18,8 @@ pub type Pooled = r2d2::PooledConnection<Manager>;
 
 const DEFAULT_POOL_MAX: u32 = 32;
 const DEFAULT_READ_POOL_MAX: u32 = 16;
+/// Reviews building their head-commit index at the same time.
+const DEFAULT_SCRATCH_POOL_MAX: u32 = 8;
 const CHECKOUT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Where the database is and how to reach it. Built once at startup from the environment.
@@ -25,10 +27,15 @@ const CHECKOUT_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct DbSettings {
     pub app: postgres::Config,
     pub read: postgres::Config,
+    /// Sees only the `scratch` schema: the per-review index of a pull request's head commit.
+    pub scratch: postgres::Config,
     /// Runs migrations; owns the schema. Falls back to `app` when not configured separately.
     pub owner: postgres::Config,
     pub pool_max: u32,
     pub read_pool_max: u32,
+    pub scratch_pool_max: u32,
+    /// Connections each pool keeps open while idle.
+    pub min_idle: u32,
     tls: MakeRustlsConnect,
 }
 
@@ -67,11 +74,14 @@ impl DbSettings {
         ca_file: Option<&str>,
     ) -> Result<Self, String> {
         Ok(Self {
+            scratch: scratch_only(with_application_name(app.clone())),
             app: with_application_name(app),
             read: read_only(with_application_name(read)),
             owner: with_application_name(owner),
             pool_max,
             read_pool_max,
+            scratch_pool_max: DEFAULT_SCRATCH_POOL_MAX,
+            min_idle: 1,
             tls: tls_connector(ca_file)?,
         })
     }
@@ -84,6 +94,11 @@ impl DbSettings {
     pub fn connect_owner(&self) -> Result<postgres::Client, Error> {
         self.owner.connect(self.tls()).map_err(Error::from)
     }
+
+    /// A connection outside the pools as the application role, for session-long advisory locks.
+    pub fn connect_app(&self) -> Result<postgres::Client, Error> {
+        self.app.connect(self.tls()).map_err(Error::from)
+    }
 }
 
 /// Both pools; cheap to clone, shared by every thread.
@@ -91,16 +106,20 @@ impl DbSettings {
 pub struct DbPool {
     app: r2d2::Pool<Manager>,
     read: r2d2::Pool<Manager>,
+    scratch: r2d2::Pool<Manager>,
     settings: Arc<DbSettings>,
 }
 
 impl DbPool {
     pub fn connect(settings: DbSettings) -> Result<Self, String> {
-        let app = build_pool(&settings.app, settings.pool_max, settings.tls())?;
-        let read = build_pool(&settings.read, settings.read_pool_max, settings.tls())?;
+        let pool = |config, max| build_pool(config, max, settings.min_idle, settings.tls());
+        let app = pool(&settings.app, settings.pool_max)?;
+        let read = pool(&settings.read, settings.read_pool_max)?;
+        let scratch = pool(&settings.scratch, settings.scratch_pool_max)?;
         Ok(Self {
             app,
             read,
+            scratch,
             settings: Arc::new(settings),
         })
     }
@@ -122,8 +141,24 @@ impl DbPool {
             .map_err(|error| Error::Pool(error.to_string()))
     }
 
+    /// A connection to the per-review index tables and nothing else.
+    pub fn get_scratch(&self) -> Result<Conn, Error> {
+        self.scratch
+            .get()
+            .map(Conn::new)
+            .map_err(|error| Error::Pool(error.to_string()))
+    }
+
     pub fn settings(&self) -> &DbSettings {
         &self.settings
+    }
+
+    /// No connection was ever opened through these pools.
+    #[cfg(test)]
+    pub fn never_used(&self) -> bool {
+        [&self.app, &self.read, &self.scratch]
+            .iter()
+            .all(|pool| pool.state().connections == 0)
     }
 }
 
@@ -143,11 +178,16 @@ fn maintenance_threads() -> Arc<ScheduledThreadPool> {
         .clone()
 }
 
-fn build_pool(config: &postgres::Config, max: u32, tls: MakeRustlsConnect) -> Result<r2d2::Pool<Manager>, String> {
+fn build_pool(
+    config: &postgres::Config,
+    max: u32,
+    min_idle: u32,
+    tls: MakeRustlsConnect,
+) -> Result<r2d2::Pool<Manager>, String> {
     r2d2::Pool::builder()
         .thread_pool(maintenance_threads())
         .max_size(max.max(1))
-        .min_idle(Some(1))
+        .min_idle(Some(min_idle.min(max)))
         .connection_timeout(CHECKOUT_TIMEOUT)
         .build(PostgresConnectionManager::new(config.clone(), tls))
         .map_err(|error| format!("Could not connect to Postgres: {error}"))
@@ -184,10 +224,19 @@ fn with_application_name(mut config: postgres::Config) -> postgres::Config {
     config
 }
 
-fn read_only(mut config: postgres::Config) -> postgres::Config {
+fn read_only(config: postgres::Config) -> postgres::Config {
+    with_option(config, "-c default_transaction_read_only=on")
+}
+
+/// Without `public` on the path, a query naming an operational table fails instead of reaching it.
+fn scratch_only(config: postgres::Config) -> postgres::Config {
+    with_option(config, "-c search_path=scratch")
+}
+
+fn with_option(mut config: postgres::Config, option: &str) -> postgres::Config {
     let options = match config.get_options() {
-        Some(existing) => format!("{existing} -c default_transaction_read_only=on"),
-        None => "-c default_transaction_read_only=on".to_string(),
+        Some(existing) => format!("{existing} {option}"),
+        None => option.to_string(),
     };
     config.options(&options);
     config
@@ -212,7 +261,20 @@ fn require_tls_off_host(config: &postgres::Config, insecure: bool) -> Result<(),
     }
 }
 
+/// Loading the system's root certificates is slow, so the connector built from them is shared.
 fn tls_connector(ca_file: Option<&str>) -> Result<MakeRustlsConnect, String> {
+    static SYSTEM_ROOTS: OnceLock<MakeRustlsConnect> = OnceLock::new();
+    if ca_file.is_some() {
+        return build_tls_connector(ca_file);
+    }
+    if let Some(connector) = SYSTEM_ROOTS.get() {
+        return Ok(connector.clone());
+    }
+    let connector = build_tls_connector(None)?;
+    Ok(SYSTEM_ROOTS.get_or_init(|| connector).clone())
+}
+
+fn build_tls_connector(ca_file: Option<&str>) -> Result<MakeRustlsConnect, String> {
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::CertificateDer;
 
