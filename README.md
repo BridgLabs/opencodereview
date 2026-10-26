@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/mascot.svg" alt="OpenCodeReview mascot" width="128" height="128">
+</p>
+
 # OpenCodeReview
 
 [![License](https://img.shields.io/badge/license-PolyForm_Small_Business_1.0.0-blue.svg)](LICENSE)
