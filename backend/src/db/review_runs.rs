@@ -680,7 +680,7 @@ impl Database {
         }
         let changed = self.conn.execute(
             "UPDATE review_runs
-             SET status = 'posting', event = $5, decision = $6, outcome = $7, updated_at = $1
+             SET status = 'posting', event = $5, decision = $6, outcome = $7, updated_at = $1, owner_instance = $9
              WHERE id = $2 AND pr_id = $3 AND head_sha = $4 AND status = 'preview'
                AND EXISTS (SELECT 1 FROM pull_requests pr WHERE pr.id = $3 AND pr.force_full_next_review = 0 AND pr.reprocess_next_review = 0 AND pr.review_scope_revision = review_runs.review_scope_revision AND (review_runs.stacked_base_ref IS NULL OR review_runs.stacked_base_ref IS NOT DISTINCT FROM pr.base_ref))
                AND (human_selection_required = 0 OR (
@@ -706,6 +706,7 @@ impl Database {
                 decision,
                 format!("Posting ({actor})"),
                 selection_revision,
+                self.db.instance_id(),
             ],
         ).map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;

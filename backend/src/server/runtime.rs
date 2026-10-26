@@ -48,15 +48,19 @@ pub(crate) fn start_instance_heartbeat(db_handle: Db, instance: Instance) {
     });
 }
 
-/// Interrupts reviews and indexing whose instance stopped (its heartbeat ran out), and drops
-/// their per-review indexes. One instance does it at a time.
-pub(crate) fn start_orphan_reaper(db_handle: Db) {
+/// Interrupts reviews and indexing whose instance stopped (its heartbeat ran out), drops their
+/// per-review indexes and settles their half-done posts. One instance does it at a time.
+pub(crate) fn start_orphan_reaper(db_handle: Db, repos_dir: PathBuf) {
     thread::spawn(move || loop {
         thread::sleep(Duration::from_millis(crate::db::INSTANCE_TIMEOUT_MS as u64 / 2));
         let _ = db_handle.run_exclusive(exclusive::ORPHAN_REAPER, || {
             let db = db_handle.open()?;
             db.reclaim_orphaned_work()?;
-            db.reap_snapshot_indexes()
+            db.reap_snapshot_indexes()?;
+            drop(db);
+            // Posts and result publications a stopped instance left half done.
+            reconcile_review_results(&db_handle, &repos_dir);
+            Ok::<_, String>(())
         });
     });
 }
