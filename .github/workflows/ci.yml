@@ -182,8 +182,9 @@ jobs:
     if: needs.changes.outputs.backend == 'true'
     container:
       image: rust:1.98.1-bookworm@sha256:9a73a5088750b4c95158ab26629c854c3d6fc4b173cb7bc8079ad252d8ed7bfa
-      # All four CPUs of the hosted runner: compiling and the tests run in parallel.
-      options: --cpus 4 --memory 8g --memory-swap 8g --pids-limit 1024
+      # Both CPUs of the private-repository hosted runner (Docker refuses more than the host has),
+      # leaving memory for the Postgres service.
+      options: --cpus 2 --memory 6g --memory-swap 6g --pids-limit 1024
     # Database tests clone a migrated template database per test on this server.
     services:
       postgres:
