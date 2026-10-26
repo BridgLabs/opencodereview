@@ -22,8 +22,8 @@ name = "opencodereview_server"
 
 [dependencies]
 base64 = "=0.22.1"
-libc = "=0.2.186"
-pulldown-cmark = { version = "=0.13.4", default-features = false }
+libc = "=0.2.191"
+pulldown-cmark = { version = "=0.13.5", default-features = false }
 reqwest = { version = "0.13.4", features = ["blocking", "form", "json"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
