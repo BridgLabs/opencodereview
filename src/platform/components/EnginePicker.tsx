@@ -19,6 +19,13 @@ const effortLabel: Record<string, string> = {
 };
 const labelEffort = (effort: string) => effortLabel[effort] ?? effort;
 
+/** Spaced evenly on both sides, so the trigger's parts read as one line. */
+const Separator = () => (
+  <span aria-hidden="true" className="flex-none text-fg-subtle">
+    ·
+  </span>
+);
+
 /** The account, model and effort the next reviews run on, switchable from the top bar. */
 export function EnginePicker() {
   const queryClient = useQueryClient();
@@ -76,14 +83,24 @@ export function EnginePicker() {
         aria-haspopup="dialog"
         aria-expanded={open}
         title="The account, model and effort new reviews run on"
-        className="flex h-8 max-w-[min(26rem,60vw)] cursor-pointer items-center gap-2 rounded-lg bg-surface-muted px-3 text-small text-fg-muted transition-colors hover:text-fg"
+        className="flex h-8 max-w-[min(26rem,60vw)] cursor-pointer items-center gap-1.5 rounded-lg bg-surface-muted pr-2 pl-2.5 text-small text-fg-muted transition-colors hover:text-fg"
         onClick={() => setOpen((value) => !value)}
       >
         <ProviderGlyph provider={engine.provider} />
-        <span className="truncate font-medium text-fg">{model?.label ?? engine.model}</span>
-        {engine.effort && <span className="flex-none">· {labelEffort(engine.effort)}</span>}
-        <span className="truncate max-sm:hidden">· {next.label}</span>
-        <ChevronDown className={cx("size-3.5 flex-none transition-transform", open && "rotate-180")} />
+        <span className="ml-0.5 truncate font-medium text-fg">{model?.label ?? engine.model}</span>
+        {engine.effort && (
+          <>
+            <Separator />
+            <span className="flex-none">{labelEffort(engine.effort)}</span>
+          </>
+        )}
+        <span className="flex min-w-0 items-center gap-1.5 max-sm:hidden">
+          <Separator />
+          <span className="truncate">{next.label}</span>
+        </span>
+        <ChevronDown
+          className={cx("ml-0.5 size-3.5 flex-none text-fg-subtle transition-transform", open && "rotate-180")}
+        />
       </button>
       {open && (
         <div
