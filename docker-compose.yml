@@ -45,7 +45,54 @@ x-review-runner: &review-runner
       max-size: 10m
       max-file: "2"
 
+x-postgres-image: &postgres-image postgres:17@sha256:ae69c452f483507a6b99fb654cf93aad7fe156ffd2c56247707eef4e36d3c12b
+
 services:
+  # Creates the database passwords on the first start and keeps them on a volume only the database
+  # and the server mount. Nothing has a default password.
+  database-secret:
+    image: *postgres-image
+    network_mode: none
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        cd /secret
+        for name in password app-password ro-password; do
+          [ -s "$$name" ] || (umask 077; tr -dc A-Za-z0-9 < /dev/urandom | head -c 40 > "$$name")
+        done
+        url() { printf 'postgres://%s:%s@postgres:5432/opencodereview?sslmode=disable' "$$1" "$$(cat "$$2")"; }
+        url ocr password > owner-url
+        url ocr_app app-password > app-url
+        url ocr_ro ro-password > ro-url
+        chmod 0444 password app-password ro-password owner-url app-url ro-url
+    volumes:
+      - database-secret:/secret
+
+  postgres:
+    image: *postgres-image
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ocr
+      POSTGRES_DB: opencodereview
+      POSTGRES_PASSWORD_FILE: /secret/password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - database-secret:/secret:ro
+      - ./docker/postgres/init-roles.sh:/docker-entrypoint-initdb.d/init-roles.sh:ro
+    depends_on:
+      database-secret:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U ocr -d opencodereview"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    # Reachable from the server only: never from runners, the egress proxy or the web container.
+    networks: [db]
+
   server:
     restart: unless-stopped
     init: true
@@ -60,7 +107,10 @@ services:
       OCR_GH_HOST: ${OCR_GH_HOST:-}
       OCR_BIND: 0.0.0.0:8787
       OCR_DATA_DIR: /data
-      OCR_DB_PATH: /data/opencodereview.sqlite
+      # Read once at startup and removed from the environment, so no CLI the server runs sees them.
+      OCR_DATABASE_URL_FILE: /run/ocr-db/app-url
+      OCR_DATABASE_RO_URL_FILE: /run/ocr-db/ro-url
+      OCR_DATABASE_OWNER_URL_FILE: /run/ocr-db/owner-url
       OCR_REPOS_DIR: /data/repos
       OCR_AUTO_REINDEX: "true"
       OCR_POLL_INTERVAL_SECONDS: "300"
@@ -79,7 +129,11 @@ services:
       - ocr-data:/data
       - review-claude-auth:/review-claude-auth
       - review-ipc:/review-ipc
-    networks: [default]
+      - database-secret:/run/ocr-db:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [default, db]
 
   # One isolated container per review stage at a time. Idle runners use almost no memory; set
   # OCR_REVIEW_RUNNERS to match how many reviews you want running at once.
@@ -124,11 +178,15 @@ services:
 
 networks:
   default:
+  db:
+    internal: true
   review-provider-egress:
   review-runner-egress:
     internal: true
 
 volumes:
+  database-secret:
+  postgres-data:
   review-claude-auth:
   review-ipc:
   ocr-data:
