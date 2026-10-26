@@ -87,15 +87,19 @@ pub fn point_counts(comments_json: Option<&str>) -> (i64, i64) {
         })
 }
 
-/// (findings, questions) among the candidates a finding audit kept: neither discarded by the AI
-/// nor inherited from an earlier run. `None` when the audit is not readable.
+/// (findings, questions) among the candidates a complete finding audit kept, leaving out ones
+/// inherited from an earlier run. `None` when the audit is unreadable or incomplete: a seeded audit
+/// holds undecided (`pending`) chunk candidates, and `unmapped` ones were neither kept nor discarded.
 pub fn candidate_counts(audit_json: &str) -> Option<(i64, i64)> {
     let audit = serde_json::from_str::<Value>(audit_json).ok()?;
+    if audit["complete"] != true {
+        return None;
+    }
     let candidates = audit.get("candidates")?.as_array()?;
     Some(
         candidates
             .iter()
-            .filter(|candidate| candidate["origin"] != "inherited" && candidate["aiDecision"] != "discarded")
+            .filter(|candidate| candidate["origin"] != "inherited" && candidate["aiDecision"] == "kept")
             .fold((0, 0), |(findings, questions), candidate| {
                 let kind = match candidate["kind"].as_str() {
                     Some(kind) if !kind.is_empty() => kind,

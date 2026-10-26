@@ -203,18 +203,19 @@ fn usage_report_totals_reconcile_across_every_breakdown() {
         (200, 20, 0, 0),
         (day(2), day(2) + 30_000),
     );
-    // Its audit kept a finding and a question (kind read from the body); a discarded candidate
-    // and one inherited from an earlier run do not count.
+    // Its audit kept a finding and a question (kind read from the body); discarded, unmapped and
+    // inherited candidates do not count.
     db.conn
         .execute(
             "INSERT INTO review_finding_audits (run_id, audit_json, updated_at) VALUES ($1, $2, 1)",
             params![
                 superseded,
-                r#"{"candidates":[
+                r#"{"complete":true,"candidates":[
                   {"kind":"finding","origin":"chunk","aiDecision":"kept","body":"[Finding] C"},
                   {"kind":"","origin":"final","aiDecision":"kept","body":"**[Question] E**"},
                   {"kind":"finding","origin":"chunk","aiDecision":"discarded","body":"[Finding] F"},
-                  {"kind":"finding","origin":"inherited","aiDecision":"kept","body":"[Finding] G"}]}"#
+                  {"kind":"finding","origin":"inherited","aiDecision":"kept","body":"[Finding] G"},
+                  {"kind":"finding","origin":"final","aiDecision":"unmapped","body":"[Finding] H"}]}"#
             ],
         )
         .expect("audit");
@@ -225,6 +226,16 @@ fn usage_report_totals_reconcile_across_every_breakdown() {
 
     let lost = seed.run(pr2, "failed", day(1), Some("not json"), (0, 0));
     seed.stage(lost, pr2, "single", None, false, (0, 0, 0, 0), (day(1), day(1) + 5_000));
+    // A seeded audit from before the final pass decided anything counts nothing as found.
+    db.conn
+        .execute(
+            "INSERT INTO review_finding_audits (run_id, audit_json, updated_at) VALUES ($1, $2, 1)",
+            params![
+                lost,
+                r#"{"complete":false,"candidates":[{"kind":"finding","origin":"chunk","aiDecision":"pending","body":"[Finding] P"}]}"#
+            ],
+        )
+        .expect("seeded audit");
 
     seed.run(pr2, "posted", day(40), None, (5_000, 500));
 
