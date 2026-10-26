@@ -97,4 +97,36 @@ impl Database {
         tx.commit().map_err(|error| error.to_string())?;
         Ok(interrupted)
     }
+
+    /// Cancels the reviews this instance owns but no longer runs (`running_prs` are the PRs it
+    /// does run): a start or a finish that failed to record its outcome left them pending or
+    /// running, and they would refuse every later review of their PR while this instance lives.
+    /// Returns how many were cancelled.
+    pub fn cancel_untracked_review_runs(&self, running_prs: &[i64]) -> Result<usize, String> {
+        let Some(instance) = self.db.instance_id() else {
+            return Ok(0);
+        };
+        const UNTRACKED: &str = "status IN ('pending', 'running') AND owner_instance = $1 AND NOT (pr_id = ANY($2))";
+        let now = now_millis();
+        let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        tx.execute(
+            &format!(
+                "UPDATE pull_requests SET review_lane = 'manual_required', status_reason = 'Review stopped without finishing', updated_at = $3
+                 WHERE id IN (SELECT pr_id FROM review_runs WHERE {UNTRACKED})"
+            ),
+            params![instance, running_prs, now],
+        )
+        .map_err(|error| error.to_string())?;
+        let cancelled = tx
+            .execute(
+                &format!(
+                    "UPDATE review_runs SET status = 'cancelled', error_message = 'Stopped without finishing.', finished_at = $3, updated_at = $3
+                     WHERE {UNTRACKED}"
+                ),
+                params![instance, running_prs, now],
+            )
+            .map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(cancelled as usize)
+    }
 }

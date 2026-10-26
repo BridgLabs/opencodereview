@@ -268,6 +268,7 @@ pub fn run(mut config: ServerConfig) -> Result<(), String> {
     start_instance_heartbeat(config.db.clone(), instance);
     start_orphan_reaper(config.db.clone(), config.repos_dir.clone());
     start_review_queue_drain(state.clone());
+    start_untracked_run_sweeper(state.clone());
     start_review_result_reconciliation(config.db.clone(), config.repos_dir.clone());
     start_review_request_restoration(config.db.clone());
     start_poll_scheduler(state.clone());
