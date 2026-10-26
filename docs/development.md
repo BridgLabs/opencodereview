@@ -111,3 +111,7 @@ The [Provider CLI canary](../.github/workflows/provider-cli-canary.yml) builds t
 ## Releases
 
 `pnpm changelog:release <version>` moves the notes in `changelog.d/` into a new `CHANGELOG.md` section. Commit that, then push the tag `v<version>`: the [Release workflow](../.github/workflows/release.yml) publishes the `server`, `runner` and `web` images for `amd64` and `arm64` to `ghcr.io/bridglabs/opencodereview-*`.
+
+## Landing page
+
+`site/` is a static page with no build step. The [Site workflow](../.github/workflows/site.yml) publishes it to the Cloudflare Pages project `opencodereview`, served at <https://opencodereview.run>, whenever a push to `main` changes `site/`; it can also be run by hand. It needs the `CLOUDFLARE_API_TOKEN` (with Cloudflare Pages edit access) and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
