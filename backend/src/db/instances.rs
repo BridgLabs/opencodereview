@@ -5,22 +5,35 @@ use super::*;
 pub const INSTANCE_TIMEOUT_MS: i64 = 60_000;
 pub const INSTANCE_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Heartbeats are stamped and judged by the database's clock: instances on hosts whose clocks
+/// disagree would otherwise take each other for stopped.
+const DATABASE_NOW_MS: &str = "(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint";
+
 /// Work no live instance owns: its instance stopped, or it predates instance tracking.
 const ORPHANED: &str =
     "(owner_instance IS NULL OR owner_instance NOT IN (SELECT id FROM server_instances WHERE heartbeat_at > $1))";
 
 impl Database {
+    /// The heartbeat time after which an instance still counts as live.
+    pub(crate) fn instance_live_after(&self) -> Result<i64, String> {
+        self.conn
+            .query_row(&format!("SELECT {DATABASE_NOW_MS}"), [], |row| row.get::<_, i64>(0))
+            .map(|now| now - INSTANCE_TIMEOUT_MS)
+            .map_err(|error| error.to_string())
+    }
+
     /// Records this server instance. Earlier rows for the same host are its previous runs (one
     /// server per host, and Compose gives each container its own host name); their work stopped
     /// with them, so they are removed and that work becomes reclaimable at once.
     pub fn register_instance(&self, id: &str, host: &str) -> Result<(), String> {
-        let now = now_millis();
         let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
         tx.execute("DELETE FROM server_instances WHERE host = $1", [host])
             .map_err(|error| error.to_string())?;
         tx.execute(
-            "INSERT INTO server_instances (id, host, started_at, heartbeat_at) VALUES ($1, $2, $3, $3)",
-            params![id, host, now],
+            &format!(
+                "INSERT INTO server_instances (id, host, started_at, heartbeat_at) VALUES ($1, $2, {DATABASE_NOW_MS}, {DATABASE_NOW_MS})"
+            ),
+            params![id, host],
         )
         .map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())
@@ -29,12 +42,13 @@ impl Database {
     /// Refreshes this instance's heartbeat; registers it again if another instance reclaimed it
     /// after a long pause (its reviews then find their runs cancelled and stop).
     pub fn heartbeat_instance(&self, id: &str, host: &str) -> Result<(), String> {
-        let now = now_millis();
         self.conn
             .execute(
-                "INSERT INTO server_instances (id, host, started_at, heartbeat_at) VALUES ($1, $2, $3, $3)
-                 ON CONFLICT (id) DO UPDATE SET heartbeat_at = excluded.heartbeat_at",
-                params![id, host, now],
+                &format!(
+                    "INSERT INTO server_instances (id, host, started_at, heartbeat_at) VALUES ($1, $2, {DATABASE_NOW_MS}, {DATABASE_NOW_MS})
+                     ON CONFLICT (id) DO UPDATE SET heartbeat_at = excluded.heartbeat_at"
+                ),
+                params![id, host],
             )
             .map(|_| ())
             .map_err(|error| error.to_string())
@@ -45,8 +59,8 @@ impl Database {
     /// forgotten. Returns how many reviews were interrupted.
     pub fn reclaim_orphaned_work(&self) -> Result<usize, String> {
         let now = now_millis();
-        let live_after = now - INSTANCE_TIMEOUT_MS;
         let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        let live_after = self.instance_live_after()?;
         tx.execute(
             &format!(
                 "UPDATE pull_requests SET review_lane = 'manual_required', status_reason = 'Review interrupted by a server restart', updated_at = $2
