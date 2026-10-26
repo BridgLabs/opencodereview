@@ -218,3 +218,67 @@ fn work_requested_during_another_run_waits_for_it() {
         "the request ran during the other run instead of after it"
     );
 }
+
+#[test]
+fn only_result_publications_of_stopped_instances_are_taken_over() {
+    let shared = Db::for_test();
+    shared
+        .open()
+        .unwrap()
+        .ensure_temp_repo_for_index(1, "acme/api")
+        .unwrap();
+    let live = shared.clone().with_instance("live");
+    live.open().unwrap().register_instance("live", "host-a").unwrap();
+    let reaper = shared.clone().with_instance("reaper");
+    reaper.open().unwrap().register_instance("reaper", "host-b").unwrap();
+    let db = shared.open().unwrap();
+    let run_id = pr_with_run(&live.open().unwrap(), 1);
+    // The run's instance is live, yet only who publishes each result decides.
+    for (marker, owner) in [("live", Some("live")), ("gone", Some("gone")), ("untracked", None)] {
+        db.conn
+            .execute(
+                "INSERT INTO review_results (pr_id, installation_id, marker_key, run_id, observed_head_sha, reviewed_head_sha,
+                     observation, effective_state, publication_status, reviewer_version, skill_version, created_at, updated_at, owner_instance)
+                 VALUES (1, $1, $1, $2, 'head', 'head', 'o', 'clean', 'posting', 'v', 's', 1, 1, $3)",
+                params![marker, run_id, owner],
+            )
+            .unwrap();
+    }
+    let markers = |results: Vec<ReviewResult>| -> Vec<String> {
+        let mut markers: Vec<String> = results.into_iter().map(|result| result.marker_key).collect();
+        markers.sort();
+        markers
+    };
+    let claimed = reaper.open().unwrap().claim_abandoned_review_results().unwrap();
+    assert_eq!(markers(claimed), ["gone", "untracked"]);
+    assert!(
+        live.open()
+            .unwrap()
+            .claim_abandoned_review_results()
+            .unwrap()
+            .is_empty(),
+        "publications another live instance took over are left to it"
+    );
+}
+
+#[test]
+fn reviews_an_instance_owns_but_does_not_run_are_cancelled() {
+    let shared = Db::for_test();
+    shared
+        .open()
+        .unwrap()
+        .ensure_temp_repo_for_index(1, "acme/api")
+        .unwrap();
+    let this = shared.clone().with_instance("this");
+    let other = shared.clone().with_instance("other");
+    let running = pr_with_run(&this.open().unwrap(), 1);
+    let stuck = pr_with_run(&this.open().unwrap(), 2);
+    let elsewhere = pr_with_run(&other.open().unwrap(), 3);
+    assert_eq!(this.open().unwrap().cancel_untracked_review_runs(&[1]).unwrap(), 1);
+    let db = shared.open().unwrap();
+    assert_eq!(run_status(&db, running), "pending");
+    assert_eq!(run_status(&db, stuck), "cancelled");
+    assert_eq!(run_status(&db, elsewhere), "pending");
+    // Its PR can be reviewed again.
+    assert!(this.open().unwrap().start_review_skeleton_with(2, None).is_ok());
+}

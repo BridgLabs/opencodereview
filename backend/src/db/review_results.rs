@@ -170,11 +170,17 @@ impl Database {
             .conn
             .execute(
                 "UPDATE review_results SET publication_status = 'posting', error_message = NULL,
-                    updated_at = $1
+                    updated_at = $1, owner_instance = $5
              WHERE id = $2 AND observed_head_sha = $3
                AND body_hash IS NOT DISTINCT FROM $4
                AND publication_status IN ('pending', 'failed')",
-                params![now_millis(), result_id, observed_head_sha, body_hash],
+                params![
+                    now_millis(),
+                    result_id,
+                    observed_head_sha,
+                    body_hash,
+                    self.db.instance_id()
+                ],
             )
             .map_err(|error| error.to_string())?;
         Ok(changed == 1)
@@ -278,25 +284,32 @@ impl Database {
         Ok(())
     }
 
-    pub fn posting_review_results(&self) -> Result<Vec<ReviewResult>, String> {
+    /// Takes over the publications left `posting` by an instance that has stopped (or predates
+    /// instance tracking), so the caller posts them again and no other instance does meanwhile.
+    pub fn claim_abandoned_review_results(&self) -> Result<Vec<ReviewResult>, String> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, pr_id, installation_id, marker_key, github_comment_id, run_id, actionable_run_id,
+                "UPDATE review_results SET owner_instance = $2
+             WHERE publication_status = 'posting'
+               AND (owner_instance IS NULL
+                    OR owner_instance NOT IN (SELECT id FROM server_instances WHERE heartbeat_at > $1))
+             RETURNING id, pr_id, installation_id, marker_key, github_comment_id, run_id, actionable_run_id,
                     observed_head_sha, reviewed_head_sha, prior_result_state,
                     prior_result_head_sha, observation, effective_state, publication_status,
                     body, body_hash, github_review_id, github_review_url, reviewer_version,
-                    skill_version, error_message, created_at, updated_at, posted_at
-             FROM review_results WHERE publication_status = 'posting'
-               AND NOT EXISTS (SELECT 1 FROM review_runs rr WHERE rr.id = review_results.run_id
-                 AND rr.owner_instance IN (SELECT id FROM server_instances WHERE heartbeat_at > $1))
-             ORDER BY updated_at",
+                    skill_version, error_message, created_at, updated_at, posted_at",
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map([self.instance_live_after()?], review_result_from_row)
+            .query_map(
+                params![self.instance_live_after()?, self.db.instance_id()],
+                review_result_from_row,
+            )
             .map_err(|error| error.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+        let mut results = rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+        results.sort_by_key(|result| result.updated_at);
+        Ok(results)
     }
 
     /// Clean-result publications that failed at least `failed_before` millis

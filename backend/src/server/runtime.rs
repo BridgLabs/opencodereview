@@ -58,10 +58,34 @@ pub(crate) fn start_orphan_reaper(db_handle: Db, repos_dir: PathBuf) {
             db.reclaim_orphaned_work()?;
             db.reap_snapshot_indexes()?;
             drop(db);
-            // Posts and result publications a stopped instance left half done.
-            reconcile_review_results(&db_handle, &repos_dir);
+            // Posts and result publications a stopped instance left half done; under the startup
+            // reconciliation's key, so the two never post the same thing at once.
+            db_handle.run_exclusive(exclusive::RESULT_RECONCILIATION, || {
+                reconcile_review_results(&db_handle, &repos_dir)
+            })?;
             Ok::<_, String>(())
         });
+    });
+}
+
+/// Cancels reviews this instance owns in the database but has no job for, so a run whose start or
+/// finish failed to record its outcome does not block its PR until this instance restarts.
+pub(crate) fn start_untracked_run_sweeper(state: SharedState) {
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(60));
+        // Held while sweeping: a review start records its run and its job under this lock.
+        let Ok(jobs) = state.review_jobs.lock() else {
+            continue;
+        };
+        let running: Vec<i64> = jobs.keys().copied().collect();
+        if let Err(error) = state
+            .config
+            .db
+            .open()
+            .and_then(|db| db.cancel_untracked_review_runs(&running))
+        {
+            eprintln!("untracked review sweep failed: {error}");
+        }
     });
 }
 
@@ -109,13 +133,13 @@ fn reconcile_review_results(db_handle: &Db, repos_dir: &Path) {
     reconcile_interrupted_review_posts(&db, repos_dir);
     // A "reviewing" comment left behind by a review that has since finished.
     if db.retire_finished_queue_acknowledgements().unwrap_or(0) > 0 {
-        reconcile_queue_acknowledgements(&db);
+        spawn_queue_acknowledgements(db_handle.clone());
     }
     let enabled = db
         .settings()
         .map(|settings| settings.review_result_mode == "result_comment")
         .unwrap_or(false);
-    let results = db.posting_review_results().unwrap_or_default();
+    let results = db.claim_abandoned_review_results().unwrap_or_default();
     for result in results {
         let Ok((repo_id, full_name, number, _head)) = db.pr_review_coords(result.pr_id) else {
             continue;
@@ -275,7 +299,8 @@ pub(crate) fn reconcile_interrupted_review_posts(db: &Database, repos_dir: &Path
         };
         let _ = db.accept_review_request_restoration(post.run_id, review_id);
         let _ = db.retire_queue_acknowledgement(post.pr_id, &post.head_sha, Some(post.run_id));
-        reconcile_queue_acknowledgements(db);
+        // Under the acknowledgements' own lock, which another instance's pass may hold.
+        spawn_queue_acknowledgements(db.handle());
         if db
             .review_run_by_id(post.run_id)
             .ok()
