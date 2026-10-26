@@ -74,7 +74,7 @@ The law of the country where the Maintainer lives governs this agreement, withou
 1. On your first pull request, a bot asks you to sign. Add a comment to the pull request with this line:
 
    ```text
-   I have read the OpenCodeReview Contributor Assignment Agreement 1.0 and I agree to it.
+   I have read the OpenCodeReview Contributor Assignment Agreement 1.1 and I agree to it.
    ```
 
 2. Each author of a commit in the pull request signs with the same comment, from their own GitHub account.
