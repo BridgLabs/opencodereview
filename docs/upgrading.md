@@ -6,14 +6,14 @@ OpenCodeReview stored its data in a SQLite file (`/data/opencodereview.sqlite`) 
 
 Until the import has run, the server refuses to open the review archives. Their new index is still empty then, and opening it would treat every archive as unreferenced.
 
-1. Stop OpenCodeReview and keep a copy of the SQLite file. SQLite ran in WAL mode, so the most recent changes may still be in `opencodereview.sqlite-wal`; the copy takes it along when it exists:
+1. Stop OpenCodeReview and keep a copy of the SQLite files: the database and the review archive index. SQLite ran in WAL mode, so the most recent changes may still be in the `-wal` files; the copy takes them along when they exist:
 
    ```bash
    docker compose stop
-   docker compose run --rm --no-deps -T --entrypoint tar server -C /data --ignore-failed-read -cf - opencodereview.sqlite opencodereview.sqlite-wal opencodereview.sqlite-shm > opencodereview-backup.tar
+   docker compose run --rm --no-deps -T --entrypoint tar server -C /data --ignore-failed-read -cf - opencodereview.sqlite opencodereview.sqlite-wal opencodereview.sqlite-shm review-archives/index.sqlite review-archives/index.sqlite-wal review-archives/index.sqlite-shm > opencodereview-backup.tar
    ```
 
-   To go back to the previous release, put these files back in `/data` together.
+   To go back to the previous release, restore every file in the copy to `/data` before starting it. The archive index matters as much as the database: without it, the previous release treats every stored archive as unreferenced and deletes it.
 
 2. Update to this release and start only the database. The first start generates the database passwords:
 
@@ -50,7 +50,7 @@ Until the import has run, the server refuses to open the review archives. Their 
 Once the reviews, settings and accounts show up in the UI, the old files can go:
 
 ```bash
-docker compose run --rm --no-deps --entrypoint rm server -f /data/opencodereview.sqlite /data/opencodereview.sqlite-wal /data/opencodereview.sqlite-shm /data/review-archives/index.sqlite.imported
+docker compose run --rm --no-deps --entrypoint rm server -f /data/opencodereview.sqlite /data/opencodereview.sqlite-wal /data/opencodereview.sqlite-shm /data/review-archives/index.sqlite.imported /data/review-archives/index.sqlite-wal.imported /data/review-archives/index.sqlite-shm.imported
 rm opencodereview-backup.tar
 ```
 
