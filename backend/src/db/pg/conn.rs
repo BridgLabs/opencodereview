@@ -56,7 +56,9 @@ impl fmt::Display for Error {
             Error::Postgres(error) => match error.as_db_error() {
                 Some(db) => write!(f, "database error {}: {}", db.code().code(), db.message()),
                 None if error.is_closed() => f.write_str("database connection closed"),
-                None => f.write_str("database error"),
+                // Client-side failures (a Rust type that does not fit the column, a lost connection)
+                // describe types and transport, never row values.
+                None => write!(f, "database error: {error}"),
             },
         }
     }
