@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, ListFilter, PanelLeftClose, PanelLeftOpen, RefreshCw, Search } from "lucide-react";
+import { ListFilter, PanelLeftClose, PanelLeftOpen, RefreshCw, Search } from "lucide-react";
 import {
   type ComponentProps,
   type Dispatch,
@@ -650,14 +650,14 @@ export function ReviewsPage() {
               </div>
               {monitoring?.url && (
                 <a
-                  className="review-workspace-github-link inline-flex h-8 shrink-0 items-center gap-2 rounded-full bg-fg px-3.5 text-small font-semibold text-canvas no-underline transition-colors hover:bg-white"
+                  className="review-workspace-github-link grid size-8 shrink-0 place-items-center rounded-lg text-fg-muted no-underline transition-colors hover:bg-surface-muted hover:text-fg"
                   href={monitoring.url}
                   target="_blank"
                   rel="noreferrer"
+                  aria-label="Open on GitHub"
+                  title="Open on GitHub"
                 >
                   <GitHubMark className="size-4" />
-                  Open on GitHub
-                  <ExternalLink className="size-3.5 opacity-60" />
                 </a>
               )}
             </header>
