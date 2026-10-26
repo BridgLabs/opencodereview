@@ -287,11 +287,14 @@ impl Database {
                     prior_result_head_sha, observation, effective_state, publication_status,
                     body, body_hash, github_review_id, github_review_url, reviewer_version,
                     skill_version, error_message, created_at, updated_at, posted_at
-             FROM review_results WHERE publication_status = 'posting' ORDER BY updated_at",
+             FROM review_results WHERE publication_status = 'posting'
+               AND NOT EXISTS (SELECT 1 FROM review_runs rr WHERE rr.id = review_results.run_id
+                 AND rr.owner_instance IN (SELECT id FROM server_instances WHERE heartbeat_at > $1))
+             ORDER BY updated_at",
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map([], review_result_from_row)
+            .query_map([now_millis() - super::INSTANCE_TIMEOUT_MS], review_result_from_row)
             .map_err(|error| error.to_string())?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
     }
@@ -391,11 +394,14 @@ impl Database {
              JOIN pull_requests pr ON pr.id = rr.pr_id
              JOIN repos r ON r.id = pr.repo_id
              WHERE rr.status = 'posting'
+               AND (rr.owner_instance IS NULL
+                    OR rr.owner_instance NOT IN (SELECT id FROM server_instances WHERE heartbeat_at > $1))
              ORDER BY rr.updated_at",
             )
             .map_err(|error| error.to_string())?;
+        let live_after = now_millis() - super::INSTANCE_TIMEOUT_MS;
         let rows = stmt
-            .query_map([], |row| {
+            .query_map([live_after], |row| {
                 let outcome: String = row.get(7)?;
                 Ok(InterruptedReviewPost {
                     run_id: row.get(0)?,

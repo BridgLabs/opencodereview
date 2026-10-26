@@ -618,3 +618,14 @@ fn settings_notification_is_consumed_before_the_next_wait() {
     wait_for_maintenance(&notify, Duration::from_secs(5)).unwrap();
     assert!(!*notify.0.lock().unwrap());
 }
+
+#[test]
+fn every_instance_reports_the_storage_status_of_the_last_pass() {
+    let dir = Directory::new();
+    let (db, _store, coordinator) = setup_env(&dir);
+    coordinator.perform_maintenance(&AtomicBool::new(false)).unwrap();
+    // Another instance reads what this one's pass recorded.
+    let stored = db.setting(STORAGE_STATUS_SETTING).unwrap().expect("status recorded");
+    let status: ArchiveStorageStatus = serde_json::from_str(&stored).unwrap();
+    assert!(status.last_cleanup_at.is_some());
+}

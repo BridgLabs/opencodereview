@@ -8,6 +8,8 @@ use std::sync::{atomic::AtomicBool, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 pub const MS_PER_DAY: i64 = 86_400_000;
+/// Where the last maintenance pass leaves the storage status, for whichever instance is asked.
+pub const STORAGE_STATUS_SETTING: &str = "archive_storage_status";
 pub const MAX_RETENTION_DAYS: i64 = 365;
 pub const MIN_RETENTION_DAYS: i64 = 1;
 pub const DEFAULT_RETENTION_DAYS: i64 = 1;
@@ -128,7 +130,19 @@ impl RetentionCoordinator {
                 );
             }
         }
+        self.publish_status();
         result
+    }
+
+    /// Records the status in the database: the pass runs on one instance, and every instance
+    /// answers the status endpoint.
+    fn publish_status(&self) {
+        let Ok(status) = self.status.lock().map(|status| status.clone()) else {
+            return;
+        };
+        if let (Ok(json), Ok(db)) = (serde_json::to_string(&status), self.db.open()) {
+            let _ = db.save_setting_value(STORAGE_STATUS_SETTING, &json);
+        }
     }
 
     fn maintenance_pass(
@@ -498,12 +512,20 @@ pub(crate) fn start_archive_retention_worker(state: SharedState) {
         .spawn(move || {
             let cancel = AtomicBool::new(false);
             loop {
-                // Several instances may share the archive; one maintains it at a time.
-                let _ = coordinator.db.run_exclusive(crate::server::exclusive::RETENTION, || {
+                // Several instances may share the archive; one maintains it at a time. When another
+                // instance is mid-pass (or the lock is unreachable), try again soon rather than in an
+                // hour, so a requested pass (a retention change) still happens.
+                let ran = match coordinator.db.run_exclusive(crate::server::exclusive::RETENTION, || {
                     coordinator.perform_maintenance(&cancel)
-                });
-
-                if wait_for_maintenance(&coordinator.notify, Duration::from_secs(3600)).is_err() {
+                }) {
+                    Ok(ran) => ran.is_some(),
+                    Err(error) => {
+                        eprintln!("Archive retention could not take its turn: {error}");
+                        false
+                    }
+                };
+                let interval = Duration::from_secs(if ran { 3600 } else { 60 });
+                if wait_for_maintenance(&coordinator.notify, interval).is_err() {
                     break;
                 }
             }

@@ -134,7 +134,10 @@ pub(crate) fn start_index(state: &SharedState, repo_id: i64) -> Result<serde_jso
             .map_err(|error| error.to_string());
     }
     let repo = with_db_raw(state, |db| db.repo_by_id(repo_id))?;
-    let status = with_db_raw(state, |db| db.begin_repo_index(repo_id, repo.default_branch.as_deref()))?;
+    let Some(status) = with_db_raw(state, |db| db.claim_repo_index(repo_id, repo.default_branch.as_deref()))? else {
+        // Another instance is indexing it.
+        return with_db_read(state, |db| db.repo_index_status(repo_id));
+    };
     let cancel = Arc::new(AtomicBool::new(false));
     jobs.insert(repo_id, cancel.clone());
     drop(jobs);

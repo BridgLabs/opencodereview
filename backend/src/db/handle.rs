@@ -73,6 +73,18 @@ impl Db {
         Ok(Some(result))
     }
 
+    /// `run_exclusive`, but waits for another instance's run to finish instead of skipping: for
+    /// work requested after the other run had already read what it works on.
+    pub fn run_exclusive_after<T>(&self, key: i64, work: impl FnOnce() -> T) -> Result<T, String> {
+        let mut client = self.pool.settings().connect_app().map_err(|error| error.to_string())?;
+        client
+            .execute("SELECT pg_advisory_lock($1)", &[&key])
+            .map_err(|error| pg::Error::from(error).to_string())?;
+        let result = work();
+        let _ = client.execute("SELECT pg_advisory_unlock($1)", &[&key]);
+        Ok(result)
+    }
+
     pub fn open(&self) -> Result<Database, String> {
         let conn = self.pool.get().map_err(|error| error.to_string())?;
         let db = Database { conn, db: self.clone() };

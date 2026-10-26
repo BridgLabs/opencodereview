@@ -266,7 +266,7 @@ pub fn run(mut config: ServerConfig) -> Result<(), String> {
         start_reindex_worker(state.clone());
     }
     start_instance_heartbeat(config.db.clone(), instance);
-    start_orphan_reaper(config.db.clone());
+    start_orphan_reaper(config.db.clone(), config.repos_dir.clone());
     start_review_queue_drain(state.clone());
     start_review_result_reconciliation(config.db.clone(), config.repos_dir.clone());
     start_review_request_restoration(config.db.clone());
