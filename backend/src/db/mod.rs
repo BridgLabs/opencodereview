@@ -13,6 +13,7 @@ mod findings;
 mod indexing;
 mod lifecycle;
 mod migrations;
+pub(crate) mod pg;
 mod queue_acknowledgements;
 mod repositories;
 mod review_board;
