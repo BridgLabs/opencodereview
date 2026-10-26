@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { BrandLoading } from "../../../components/BrandLoading";
 import { cx, DSBadge, DSError } from "../../../components/DesignSystem";
+import { Tip } from "../../../components/Tip";
 import { setupApi } from "../../../services/setupApi";
 import type { UsageOutcome, UsageRange, UsageRun } from "../../../types";
 import { formatFlowDuration } from "../../lib/reviewFlow";
@@ -69,7 +70,6 @@ export function PrRunsTimeline({ prId, days, tz }: { prId: number; days: UsageRa
                 "grid grid-cols-[minmax(0,1fr)_auto_5rem] items-center gap-x-3 rounded-md py-1.5 text-caption md:grid-cols-[7.5rem_5.5rem_7rem_minmax(0,1fr)_4.5rem_8rem_7rem]",
                 !run.usageReported && "opacity-50",
               )}
-              title={run.usageReported ? undefined : "This run finished without reporting token usage."}
             >
               <span className="text-fg-muted tabular-nums max-md:hidden">{runTime(run.startedAt)}</span>
               <span className="font-mono text-fg-muted">{shortSha(run.headSha)}</span>
@@ -83,7 +83,11 @@ export function PrRunsTimeline({ prId, days, tz }: { prId: number; days: UsageRa
                 {formatFlowDuration(run.durationMs)}
               </span>
               <span className="flex items-center justify-end gap-2 font-mono text-fg tabular-nums">
-                {run.usageReported ? compactTokens(run.tokens) : "—"}
+                {run.usageReported ? (
+                  compactTokens(run.tokens)
+                ) : (
+                  <Tip content="This run finished without the AI CLI reporting token usage.">—</Tip>
+                )}
                 <span className="h-1.5 w-12 overflow-hidden rounded-full bg-surface-sunken max-md:hidden">
                   {run.usageReported && (
                     <span

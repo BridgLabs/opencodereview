@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cx } from "../../../components/DesignSystem";
+import { Hint } from "../../../components/Tip";
 import type { UsageTotals as Totals } from "../../../types";
 import { formatFlowDuration } from "../../lib/reviewFlow";
 import { compactTokens, pct } from "./format";
@@ -18,8 +19,11 @@ function Total({
   className?: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-col gap-0.5" title={hint}>
-      <dt className="text-small text-fg-subtle">{label}</dt>
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <dt className="inline-flex items-center gap-1.5 text-small text-fg-subtle">
+        {label}
+        {hint && <Hint text={hint} />}
+      </dt>
       <dd className={cx("text-title tabular-nums", className ?? "text-fg")}>{value}</dd>
       {note && <dd className="text-caption text-fg-subtle tabular-nums">{note}</dd>}
     </div>

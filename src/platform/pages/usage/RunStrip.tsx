@@ -1,4 +1,5 @@
 import { cx } from "../../../components/DesignSystem";
+import { Tip } from "../../../components/Tip";
 import type { UsageStripRun } from "../../../types";
 import { compactTokens, outcomeMeta } from "./format";
 
@@ -14,20 +15,38 @@ export function RunStrip({ runs, className }: { runs: UsageStripRun[]; className
       return all;
     }, {}),
   ).map(([label, count]) => `${count} ${label}`);
-  return (
+  const strip = (
     <span
       role="img"
       aria-label={`${runs.length} ${runs.length === 1 ? "run" : "runs"}: ${counts.join(", ")}`}
-      className={cx("flex h-2 gap-px overflow-hidden rounded-sm", className)}
+      className="flex h-2 w-full gap-px overflow-hidden rounded-sm"
     >
       {runs.map((run) => (
         <span
           key={run.runId}
           className={cx("min-w-0.5", outcomeMeta[run.outcome].segment)}
           style={{ flexGrow: Math.max(run.tokens, floor), flexBasis: 0 }}
-          title={`${outcomeMeta[run.outcome].label} · ${compactTokens(run.tokens)}`}
         />
       ))}
     </span>
+  );
+  return (
+    <Tip
+      className={cx("block", className)}
+      content={
+        <ol className="flex flex-col gap-0.5">
+          {runs.map((run, index) => (
+            <li key={run.runId} className="flex justify-between gap-4 tabular-nums">
+              <span>
+                Run {index + 1} · {outcomeMeta[run.outcome].label}
+              </span>
+              <span className="font-mono text-fg-muted">{compactTokens(run.tokens)}</span>
+            </li>
+          ))}
+        </ol>
+      }
+    >
+      {strip}
+    </Tip>
   );
 }

@@ -167,7 +167,8 @@ describe("Usage page", () => {
     expect(host.querySelector("[data-usage-hero]")?.textContent).toBe("12.42M");
     expect(host.textContent).toContain("tokens · 142 runs on 58 PRs");
     expect(host.textContent).toContain("2 runs without reported usage");
-    expect(host.textContent).toContain("+ 24.84M read from cache");
+    expect(host.textContent).toContain("Read from cache");
+    expect(host.textContent).toContain("+ 24.84M");
     // Findings lead with what the reviews kept; posted is the published part.
     expect(host.textContent).toContain("350");
     expect(host.textContent).toContain("311 posted · 44 questions");
@@ -208,7 +209,15 @@ describe("Usage page", () => {
     const panel = host.querySelector('[role="tabpanel"]')!;
     expect(panel.textContent).toContain("claude-opus");
     expect(panel.textContent).toContain("Unattributed");
-    expect(panel.querySelector('[title*="before OpenCodeReview tracked usage"]')).not.toBeNull();
+    const hint = panel.querySelector<HTMLButtonElement>('button[aria-label*="before OpenCodeReview tracked usage"]');
+    expect(hint).not.toBeNull();
+    // The explanation shows on focus, not only on a slow native hover title.
+    await act(async () => hint?.focus());
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain(
+      "before OpenCodeReview tracked usage",
+    );
+    await act(async () => hint?.blur());
+    expect(document.body.querySelector('[role="tooltip"]')).toBeNull();
   });
 
   it("shows the Accounts tab once two accounts used tokens", async () => {

@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { BrandLoading } from "../../../components/BrandLoading";
 import { cx, DSButton, DSEmptyState, DSError } from "../../../components/DesignSystem";
+import { Tip } from "../../../components/Tip";
 import { setupApi } from "../../../services/setupApi";
 import type { UsageQuery } from "../../../types";
 import { formatFlowDuration } from "../../lib/reviewFlow";
@@ -19,10 +20,10 @@ const columns =
 export function FindingsCell({ found, posted }: { found: number; posted: number }) {
   if (found === 0 && posted === 0) return <span className="text-fg-subtle">–</span>;
   return (
-    <span title={`${found} found by the review · ${posted} posted to GitHub`}>
+    <Tip content={`${found} found by the review · ${posted} posted to GitHub`} className="justify-end">
       <span className="text-fg">{found.toLocaleString()}</span>
-      {posted !== found && <span className="text-fg-subtle"> · {posted.toLocaleString()} posted</span>}
-    </span>
+      {posted !== found && <span className="whitespace-pre text-fg-subtle"> · {posted.toLocaleString()} posted</span>}
+    </Tip>
   );
 }
 

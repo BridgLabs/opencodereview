@@ -124,7 +124,7 @@ export function UsagePage() {
         ) : (
           <>
             {report.isError && <DSError>{usageError(report.error)}</DSError>}
-            <div className="grid gap-8 lg:grid-cols-[minmax(18rem,1fr)_minmax(0,3fr)] lg:items-end">
+            <div className="grid gap-8 lg:grid-cols-[minmax(22rem,1fr)_minmax(0,2.6fr)] lg:items-stretch">
               <UsageHero report={data} />
               <UsageChart days={data.days} byDay={data.byDay} action={<ShareUsage report={data} />} />
             </div>

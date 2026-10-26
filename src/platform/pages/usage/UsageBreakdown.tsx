@@ -1,6 +1,6 @@
-import { Info } from "lucide-react";
 import { useState } from "react";
 import { DSEmptyState } from "../../../components/DesignSystem";
+import { Hint } from "../../../components/Tip";
 import type { UsageGroupRow, UsageQuery, UsageReport } from "../../../types";
 import { ProviderGlyph } from "../../components/AccountsPanel";
 import { ArrowTabs } from "../../components/ArrowTabs";
@@ -16,10 +16,9 @@ const num = "px-2 py-2.5 text-right font-mono text-fg-muted";
 function RowName({ row }: { row: UsageGroupRow }) {
   if (row.key === "unattributed")
     return (
-      <span className="inline-flex items-center gap-1.5 text-fg-muted" title={UNATTRIBUTED_HINT}>
+      <span className="inline-flex items-center gap-1.5 text-fg-muted">
         Unattributed
-        <Info className="size-3.5" aria-hidden="true" />
-        <span className="sr-only">{UNATTRIBUTED_HINT}</span>
+        <Hint text={UNATTRIBUTED_HINT} />
       </span>
     );
   return (
