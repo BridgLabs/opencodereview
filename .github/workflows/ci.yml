@@ -216,7 +216,7 @@ jobs:
         run: python3 -B docker/test_diagnostics.py
 
   backend-test:
-    name: Backend test (${{ matrix.shard }}/4)
+    name: Backend test (${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: changes
@@ -227,7 +227,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     # Database tests clone a migrated template database per test on this server.
     services:
       postgres:
@@ -247,7 +247,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       OCR_TEST_DATABASE_URL: postgres://ocr_test:ci-only@localhost:5432/postgres
       SHARD: ${{ matrix.shard }}
-      SHARDS: 4
+      SHARDS: 8
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
