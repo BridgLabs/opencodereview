@@ -147,6 +147,14 @@ impl DbPool {
     pub fn settings(&self) -> &DbSettings {
         &self.settings
     }
+
+    /// No connection was ever opened through these pools.
+    #[cfg(test)]
+    pub fn never_used(&self) -> bool {
+        [&self.app, &self.read, &self.scratch]
+            .iter()
+            .all(|pool| pool.state().connections == 0)
+    }
 }
 
 /// r2d2 gives every pool three threads of its own for opening and reaping connections; the pools
@@ -248,7 +256,20 @@ fn require_tls_off_host(config: &postgres::Config, insecure: bool) -> Result<(),
     }
 }
 
+/// Loading the system's root certificates is slow, so the connector built from them is shared.
 fn tls_connector(ca_file: Option<&str>) -> Result<MakeRustlsConnect, String> {
+    static SYSTEM_ROOTS: OnceLock<MakeRustlsConnect> = OnceLock::new();
+    if ca_file.is_some() {
+        return build_tls_connector(ca_file);
+    }
+    if let Some(connector) = SYSTEM_ROOTS.get() {
+        return Ok(connector.clone());
+    }
+    let connector = build_tls_connector(None)?;
+    Ok(SYSTEM_ROOTS.get_or_init(|| connector).clone())
+}
+
+fn build_tls_connector(ca_file: Option<&str>) -> Result<MakeRustlsConnect, String> {
     use rustls::pki_types::pem::PemObject;
     use rustls::pki_types::CertificateDer;
 
