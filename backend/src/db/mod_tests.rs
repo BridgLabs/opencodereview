@@ -2147,3 +2147,50 @@ fn review_engines_default_per_provider_and_reject_unknown_choices() {
         .unwrap();
     assert_eq!(db.review_engine("gemini").unwrap(), ("auto".to_string(), String::new()));
 }
+
+#[test]
+fn a_repository_leaving_the_workspace_keeps_its_review_history() {
+    let db = Db::for_test().open().expect("open db");
+    db.upsert_workspaces(&[WorkspaceInput {
+        login: "acme".into(),
+        kind: "org".into(),
+    }])
+    .unwrap();
+    let repo = |name: &str| RepoInput {
+        workspace_login: "acme".into(),
+        owner: "acme".into(),
+        name: name.into(),
+        full_name: format!("acme/{name}"),
+        description: None,
+        is_private: true,
+        default_branch: Some("main".into()),
+    };
+    let listed = db.upsert_repos(&[repo("api"), repo("web")]).unwrap();
+    let api = listed.iter().find(|repo| repo.full_name == "acme/api").unwrap().id;
+    db.conn
+        .execute(
+            "INSERT INTO pull_requests (id, repo_id, number, title, author, head_sha, last_synced_at, created_at, updated_at)
+             VALUES (1, $1, 1, 'PR', 'a', 'head', 1, 1, 1)",
+            [api],
+        )
+        .unwrap();
+    let run = db.start_review_skeleton_with(1, None).unwrap();
+    // The workspace no longer lists acme/api: it leaves, its history stays.
+    let listed = db.upsert_repos(&[repo("web")]).unwrap();
+    assert!(listed.iter().all(|repo| repo.id != api));
+    assert!(db.review_run_by_id(run).unwrap().is_some());
+    let removed: Option<i64> = db
+        .conn
+        .query_row("SELECT removed_at FROM repos WHERE id = $1", [api], |row| row.get(0))
+        .unwrap();
+    assert!(removed.is_some());
+    assert!(db.queued_pr_ids().unwrap().is_empty());
+    // Listed again, it is the same repository with the same history.
+    let listed = db.upsert_repos(&[repo("api"), repo("web")]).unwrap();
+    assert!(listed.iter().any(|repo| repo.id == api));
+    let removed: Option<i64> = db
+        .conn
+        .query_row("SELECT removed_at FROM repos WHERE id = $1", [api], |row| row.get(0))
+        .unwrap();
+    assert!(removed.is_none());
+}
