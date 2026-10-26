@@ -95,7 +95,7 @@ fn archive_retention_preview_is_read_only_and_apply_preserves_review_history() {
     let fixture = Fixture::new();
     let archive = fixture.add(1);
     let before = std::fs::read(fixture.path(&archive)).unwrap();
-    let preview = run(&fixture.database, false, NOW).unwrap();
+    let preview = run(&fixture.database, &fixture.root.join("review-archives"), false, NOW).unwrap();
     assert_eq!(preview.candidates.len(), 1);
     assert!(preview.candidate_bytes > 0);
     assert!(!preview.applied);
@@ -111,7 +111,7 @@ fn archive_retention_preview_is_read_only_and_apply_preserves_review_history() {
             .unwrap(),
         0
     );
-    let applied = run(&fixture.database, true, NOW).unwrap();
+    let applied = run(&fixture.database, &fixture.root.join("review-archives"), true, NOW).unwrap();
     assert_eq!(applied.deleted_archives, 1);
     assert_eq!(applied.deleted_bytes, preview.candidate_bytes);
     assert_eq!(applied.pending_deletions, 0);
@@ -147,7 +147,12 @@ fn archive_retention_preview_is_read_only_and_apply_preserves_review_history() {
             .unwrap(),
         1
     );
-    assert_eq!(run(&fixture.database, true, NOW).unwrap().deleted_archives, 0);
+    assert_eq!(
+        run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+            .unwrap()
+            .deleted_archives,
+        0
+    );
 }
 
 #[test]
@@ -173,7 +178,10 @@ fn archive_retention_protects_open_closed_recent_pending_and_unknown_reviews() {
         let archive = fixture.add(1);
         fixture.db.execute_batch(sql).unwrap();
         assert!(
-            run(&fixture.database, true, NOW).unwrap().candidates.is_empty(),
+            run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+                .unwrap()
+                .candidates
+                .is_empty(),
             "{sql}"
         );
         assert!(fixture.path(&archive).exists(), "{sql}");
@@ -184,9 +192,20 @@ fn archive_retention_protects_open_closed_recent_pending_and_unknown_reviews() {
 fn archive_retention_rechecks_live_state_after_preview() {
     let fixture = Fixture::new();
     let archive = fixture.add(1);
-    assert_eq!(run(&fixture.database, false, NOW).unwrap().candidates.len(), 1);
+    assert_eq!(
+        run(&fixture.database, &fixture.root.join("review-archives"), false, NOW)
+            .unwrap()
+            .candidates
+            .len(),
+        1
+    );
     fixture.db.execute("UPDATE pull_requests SET state='open'", []).unwrap();
-    assert_eq!(run(&fixture.database, true, NOW).unwrap().deleted_archives, 0);
+    assert_eq!(
+        run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+            .unwrap()
+            .deleted_archives,
+        0
+    );
     assert!(fixture.path(&archive).exists());
 }
 
@@ -199,7 +218,7 @@ fn archive_retention_waits_for_any_active_execution() {
             .db
             .execute("INSERT INTO review_runs(id,pr_id,status) VALUES(2,2,?1)", [status])
             .unwrap();
-        let report = run(&fixture.database, true, NOW).unwrap();
+        let report = run(&fixture.database, &fixture.root.join("review-archives"), true, NOW).unwrap();
         assert_eq!(report.active_jobs, 1);
         assert!(report.candidates.is_empty());
         assert!(fixture.path(&archive).exists());
@@ -223,12 +242,20 @@ fn archive_retention_requires_every_shared_reference_to_be_eligible() {
         .unwrap();
     let store = ArchiveStore::open(&fixture.root.join("review-archives")).unwrap();
     store.link("review:2", &archive.descriptor()).unwrap();
-    assert!(run(&fixture.database, true, NOW).unwrap().candidates.is_empty());
+    assert!(run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+        .unwrap()
+        .candidates
+        .is_empty());
     fixture
         .db
         .execute("UPDATE pull_requests SET state='merged' WHERE id=2", [])
         .unwrap();
-    assert_eq!(run(&fixture.database, true, NOW).unwrap().deleted_archives, 1);
+    assert_eq!(
+        run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+            .unwrap()
+            .deleted_archives,
+        1
+    );
     assert_eq!(
         fixture
             .index()
@@ -246,7 +273,10 @@ fn archive_retention_protects_unknown_owners_and_uploads() {
         let archive = fixture.add(1);
         let store = ArchiveStore::open(&fixture.root.join("review-archives")).unwrap();
         store.link(owner, &archive.descriptor()).unwrap();
-        assert!(run(&fixture.database, true, NOW).unwrap().candidates.is_empty());
+        assert!(run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+            .unwrap()
+            .candidates
+            .is_empty());
     }
     let fixture = Fixture::new();
     let archive = fixture.add(1);
@@ -257,14 +287,25 @@ fn archive_retention_protects_unknown_owners_and_uploads() {
             params![archive.descriptor().id, NOW + RETENTION_MS],
         )
         .unwrap();
-    assert!(run(&fixture.database, true, NOW).unwrap().candidates.is_empty());
+    assert!(run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+        .unwrap()
+        .candidates
+        .is_empty());
 }
 
 #[test]
 fn archive_retention_does_not_create_a_missing_store() {
     let fixture = Fixture::new();
-    assert!(run(&fixture.database, false, NOW).unwrap().candidates.is_empty());
-    assert!(run(&fixture.database, true, NOW).unwrap().candidates.is_empty());
+    assert!(
+        run(&fixture.database, &fixture.root.join("review-archives"), false, NOW)
+            .unwrap()
+            .candidates
+            .is_empty()
+    );
+    assert!(run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+        .unwrap()
+        .candidates
+        .is_empty());
     assert!(!fixture.root.join("review-archives").exists());
 }
 
@@ -290,7 +331,7 @@ fn archive_retention_recovers_interrupted_deletion_and_protects_reused_archives(
         if missing {
             std::fs::remove_file(fixture.path(&archive)).unwrap();
         }
-        let report = run(&fixture.database, true, NOW).unwrap();
+        let report = run(&fixture.database, &fixture.root.join("review-archives"), true, NOW).unwrap();
         assert_eq!(report.deleted_archives, usize::from(detached));
         assert_eq!(report.pending_deletions, 0);
         assert_eq!(fixture.path(&archive).exists(), !detached);
@@ -306,7 +347,7 @@ fn archive_retention_refuses_symlinked_artifacts_without_detaching_references() 
     std::fs::write(&target, "untouched").unwrap();
     std::fs::remove_file(fixture.path(&archive)).unwrap();
     std::os::unix::fs::symlink(&target, fixture.path(&archive)).unwrap();
-    assert!(run(&fixture.database, true, NOW).is_err());
+    assert!(run(&fixture.database, &fixture.root.join("review-archives"), true, NOW).is_err());
     assert_eq!(std::fs::read_to_string(target).unwrap(), "untouched");
     assert_eq!(
         fixture
@@ -324,11 +365,24 @@ fn archive_retention_limits_each_pass_and_continues_on_the_next() {
         fixture.add(id as i64);
     }
     assert_eq!(
-        run(&fixture.database, false, NOW).unwrap().candidates.len(),
+        run(&fixture.database, &fixture.root.join("review-archives"), false, NOW)
+            .unwrap()
+            .candidates
+            .len(),
         BATCH_LIMIT
     );
-    assert_eq!(run(&fixture.database, true, NOW).unwrap().deleted_archives, BATCH_LIMIT);
-    assert_eq!(run(&fixture.database, true, NOW).unwrap().deleted_archives, 1);
+    assert_eq!(
+        run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+            .unwrap()
+            .deleted_archives,
+        BATCH_LIMIT
+    );
+    assert_eq!(
+        run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+            .unwrap()
+            .deleted_archives,
+        1
+    );
     assert_eq!(
         fixture
             .db
@@ -344,5 +398,8 @@ fn archive_retention_accepts_the_real_operational_schema() {
     let database = fixture.root.join("production.sqlite");
     drop(crate::db::Database::open_at(database.clone()).unwrap());
     ArchiveStore::open(&fixture.root.join("review-archives")).unwrap();
-    assert!(run(&database, false, NOW).unwrap().candidates.is_empty());
+    assert!(run(&database, &fixture.root.join("review-archives"), false, NOW)
+        .unwrap()
+        .candidates
+        .is_empty());
 }

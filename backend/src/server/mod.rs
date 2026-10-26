@@ -83,7 +83,7 @@ pub struct ServerConfig {
 
 impl ServerConfig {
     pub fn archive_dir(&self) -> PathBuf {
-        self.data_dir.join("review-archives")
+        crate::review_archive::archive_dir(&self.data_dir)
     }
 
     pub fn from_env() -> Self {

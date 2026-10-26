@@ -112,7 +112,7 @@ fn drain(conn: &mut Connection, root: &Path, report: &mut Report) -> RetentionRe
     Ok(())
 }
 
-fn run_inner(database: &Path, apply: bool, now: i64) -> RetentionResult<Report> {
+fn run_inner(database: &Path, root: &Path, apply: bool, now: i64) -> RetentionResult<Report> {
     if now <= 0 {
         return Err("Archive retention requires a valid current timestamp".into());
     }
@@ -120,11 +120,7 @@ fn run_inner(database: &Path, apply: bool, now: i64) -> RetentionResult<Report> 
         applied: apply,
         ..Report::default()
     };
-    let root = database
-        .parent()
-        .ok_or("Operational database directory unavailable")?
-        .join("review-archives");
-    match fs::symlink_metadata(&root) {
+    match fs::symlink_metadata(root) {
         Ok(metadata) if metadata.is_dir() => {}
         Ok(_) => return Err("Archive retention refuses a nonregular store directory".into()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(report),
@@ -178,7 +174,7 @@ fn run_inner(database: &Path, apply: bool, now: i64) -> RetentionResult<Report> 
         })?
         .collect::<Result<Vec<_>, _>>()?;
     for candidate in &report.candidates {
-        if !fs::symlink_metadata(archive_path(&root, &candidate.id)?)?.is_file() {
+        if !fs::symlink_metadata(archive_path(root, &candidate.id)?)?.is_file() {
             return Err("Archive retention refuses nonregular evidence files".into());
         }
         report.candidate_bytes = report
@@ -204,24 +200,26 @@ fn run_inner(database: &Path, apply: bool, now: i64) -> RetentionResult<Report> 
         tx.execute("DELETE FROM artifacts WHERE id=?1", [&candidate.id])?;
     }
     tx.commit()?;
-    drain(&mut conn, &root, &mut report)?;
+    drain(&mut conn, root, &mut report)?;
     report.pending_deletions = pending_deletions(&conn)?;
     report.used_bytes = used_bytes(&conn)?;
     Ok(report)
 }
 
-pub fn run(database: &Path, apply: bool, now: i64) -> Result<Report, String> {
-    run_inner(database, apply, now).map_err(|error| format!("Archive retention failed: {error}"))
+pub fn run(database: &Path, root: &Path, apply: bool, now: i64) -> Result<Report, String> {
+    run_inner(database, root, apply, now).map_err(|error| format!("Archive retention failed: {error}"))
 }
 
 pub fn run_from_env(apply: bool) -> Result<(), String> {
-    let database = std::env::var_os("OCR_DB_PATH").map(PathBuf::from).unwrap_or_else(|| {
-        std::env::var_os("OCR_DATA_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("data"))
-            .join("opencodereview.sqlite")
-    });
-    let report = run(&database, apply, crate::db::now_millis())?;
+    let data_dir = std::env::var_os("OCR_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("data"));
+    let database = std::env::var_os("OCR_DB_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| data_dir.join("opencodereview.sqlite"));
+    // The same store the server writes to, wherever the database file is.
+    let root = crate::review_archive::archive_dir(&data_dir);
+    let report = run(&database, &root, apply, crate::db::now_millis())?;
     println!("{}", serde_json::to_string(&report).map_err(|error| error.to_string())?);
     Ok(())
 }
