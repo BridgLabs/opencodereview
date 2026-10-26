@@ -342,6 +342,15 @@ impl Database {
                             params![repo_id, now_millis()],
                         )
                         .map_err(|error| error.to_string())?;
+                    // Nothing can be done about its open notices anymore (its subscription is gone).
+                    self.conn
+                        .execute(
+                            "UPDATE pending_actions SET status = 'resolved', resolved_at = $2
+                             WHERE status != 'resolved'
+                               AND (repo_id = $1 OR pr_id IN (SELECT id FROM pull_requests WHERE repo_id = $1))",
+                            params![repo_id, now_millis()],
+                        )
+                        .map_err(|error| error.to_string())?;
                 }
             }
             self.refresh_workspace_counts(&workspace_login)?;

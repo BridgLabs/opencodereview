@@ -221,6 +221,10 @@ impl Database {
         message: &str,
     ) -> Result<(), String> {
         let now = now_millis();
+        // The NOT EXISTS below dedupes only when one writer at a time checks it; the PR's lock
+        // makes concurrent calls (overlapping requests) take turns.
+        let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        self.lock_pull_request(pr_id)?;
         self.conn
             .execute(
                 "INSERT INTO pending_actions (type, repo_id, pr_id, status, title, message, created_at)
@@ -239,7 +243,7 @@ impl Database {
                 params![kind, pr_id, title, message],
             )
             .map_err(|error| error.to_string())?;
-        Ok(())
+        tx.commit().map_err(|error| error.to_string())
     }
 
     /// Whether an unresolved pending of this kind already exists for the PR.
@@ -272,6 +276,14 @@ impl Database {
         message: &str,
     ) -> Result<(), String> {
         let now = now_millis();
+        // Repository-level actions have no PR row to lock; a lock keyed by kind and repository
+        // makes concurrent calls take turns over the NOT EXISTS check.
+        let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        tx.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended('pending:' || $1 || ':' || $2, 0))",
+            params![kind, repo_id.to_string()],
+        )
+        .map_err(|error| error.to_string())?;
         self.conn
             .execute(
                 "INSERT INTO pending_actions (type, repo_id, pr_id, status, title, message, created_at)
@@ -289,7 +301,7 @@ impl Database {
                 params![kind, repo_id, title, message],
             )
             .map_err(|error| error.to_string())?;
-        Ok(())
+        tx.commit().map_err(|error| error.to_string())
     }
 
     pub fn resolve_repo_pending(&self, kind: &str, repo_id: i64) -> Result<(), String> {
@@ -522,6 +534,8 @@ impl Database {
         message: &str,
     ) -> Result<(), String> {
         let now = now_millis();
+        let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        self.lock_pull_request(pr_id)?;
         let repo_id: i64 = self
             .conn
             .query_row(
@@ -540,6 +554,6 @@ impl Database {
                 params![kind, repo_id, pr_id, run_id, title, message, now],
             )
             .map_err(|error| error.to_string())?;
-        Ok(())
+        tx.commit().map_err(|error| error.to_string())
     }
 }

@@ -113,3 +113,52 @@ fn concurrent_acknowledgements_of_one_cycle_start_one_generation() {
         assert_eq!(generation, 1, "a second generation would post the comment twice");
     }
 }
+
+#[test]
+fn concurrent_attention_syncs_leave_one_notice_per_pr() {
+    for _ in 0..10 {
+        let handle = Db::for_test();
+        two_preview_runs(&handle);
+        race(&handle, |db, _| {
+            db.upsert_pending_action("review_ready", 1, 1, "Review ready", "ready")
+                .unwrap()
+        });
+        let notices: i64 = handle
+            .open()
+            .unwrap()
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pending_actions WHERE pr_id = 1 AND status != 'resolved'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(notices, 1);
+    }
+}
+
+#[test]
+fn a_rerun_request_waiting_on_a_post_claim_is_refused() {
+    let handle = Db::for_test();
+    let (_, first, _) = two_preview_runs(&handle);
+    let barrier = Arc::new(Barrier::new(2));
+    let claim = {
+        let (handle, barrier) = (handle.clone(), barrier.clone());
+        thread::spawn(move || {
+            // A post claim: holds the PR's lock and marks a run posting, without touching the PR.
+            let db = handle.open().unwrap();
+            let tx = db.conn.unchecked_transaction().unwrap();
+            db.lock_pull_request(1).unwrap();
+            db.conn
+                .execute("UPDATE review_runs SET status = 'posting' WHERE id = $1", [first])
+                .unwrap();
+            barrier.wait();
+            thread::sleep(std::time::Duration::from_millis(300));
+            tx.commit().unwrap();
+        })
+    };
+    barrier.wait();
+    let intent = handle.open().unwrap().register_review_intent(1, true, false);
+    claim.join().unwrap();
+    assert!(intent.is_err(), "a rerun accepted during publication: {intent:?}");
+}
