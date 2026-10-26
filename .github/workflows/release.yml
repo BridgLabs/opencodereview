@@ -194,16 +194,22 @@ jobs:
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
       # Fast-forward only: if main moved during the build, the push fails and nothing is released.
-      # A re-run after this step finds the tag already pushed and goes on to publish.
+      # main and the tag move together (--atomic). A re-run finds the tag already pushed, checks
+      # that main holds the release commit, and goes on to publish.
       - name: Move main forward and tag the release
         run: |
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
             echo "$TAG is already tagged."
+            git fetch -q origin main
+            if ! git merge-base --is-ancestor HEAD origin/main; then
+              echo "::error::$TAG exists but main does not contain it. Fix main or delete the tag, then run the release again."
+              exit 1
+            fi
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git tag -a "$TAG" -m "OpenCodeReview $TAG"
-            git push origin "HEAD:refs/heads/main" "$TAG"
+            git push --atomic origin "HEAD:refs/heads/main" "$TAG"
           fi
           git push origin --delete "release/$TAG" || true
 
