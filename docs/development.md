@@ -114,4 +114,4 @@ The [Provider CLI canary](../.github/workflows/provider-cli-canary.yml) builds t
 
 ## Landing page
 
-`site/` is a static page with no build step. The [Site workflow](../.github/workflows/site.yml) publishes it to the Cloudflare Pages project `opencodereview`, served at <https://opencodereview.run>, whenever a push to `main` changes `site/`; it can also be run by hand. It needs the `CLOUDFLARE_API_TOKEN` (with Cloudflare Pages edit access) and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
+`site/` is a static page with no build step, served at <https://opencodereview.run> as Cloudflare Workers static assets (`site/wrangler.jsonc`). The [Site workflow](../.github/workflows/site.yml) deploys it whenever a push to `main` changes `site/`, and can also be run by hand. It needs the `CLOUDFLARE_API_TOKEN` (from the "Edit Cloudflare Workers" token template) and `CLOUDFLARE_ACCOUNT_ID` repository secrets. To deploy from your machine: `npx wrangler deploy --config site/wrangler.jsonc`.
