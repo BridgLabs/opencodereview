@@ -7,6 +7,7 @@
 //! create databases, e.g. `postgres://ocr:dev@127.0.0.1:55432/postgres`.
 
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use sha2::{Digest, Sha256};
@@ -22,6 +23,8 @@ static FREE: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
 
 pub(crate) struct TestDb {
     name: String,
+    /// Written through a connection of its own (`client`, a migration), which the pools cannot see.
+    touched: AtomicBool,
     admin: postgres::Config,
     settings: DbSettings,
     pool: DbPool,
@@ -39,7 +42,7 @@ impl TestDb {
             }
         });
         let name = reused.map(|(name, _)| name).unwrap_or_else(|| {
-            let name = format!("{}_{}_{}", template.prefix, std::process::id(), random_suffix());
+            let name = database_name(&template.prefix);
             connect(&admin)
                 .batch_execute(&format!("CREATE DATABASE {name} TEMPLATE {}", template.name))
                 .expect("create test database");
@@ -56,6 +59,7 @@ impl TestDb {
         let pool = DbPool::connect(settings.clone()).expect("test pool");
         Self {
             name,
+            touched: AtomicBool::new(false),
             admin,
             settings,
             pool,
@@ -67,11 +71,13 @@ impl TestDb {
     }
 
     pub(crate) fn settings(&self) -> &DbSettings {
+        self.touched.store(true, Ordering::Relaxed);
         &self.settings
     }
 
     /// A plain client on the test database, for fixtures and assertions written in raw SQL.
     pub(crate) fn client(&self) -> postgres::Client {
+        self.touched.store(true, Ordering::Relaxed);
         self.settings.connect_owner().expect("connect to test database")
     }
 }
@@ -79,7 +85,7 @@ impl TestDb {
 impl Drop for TestDb {
     fn drop(&mut self) {
         // A test that built a handle but never queried left the database as it was cloned.
-        if self.pool.never_used() {
+        if !self.touched.load(Ordering::Relaxed) && self.pool.never_used() {
             FREE.lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .push((self.name.clone(), false));
@@ -212,37 +218,70 @@ fn template(admin: &postgres::Config) -> &'static Template {
 }
 
 /// Takes over the databases of test processes that have exited: test databases a process still
-/// holds when it ends (its free list, `Db::for_test_at` registrations) are never dropped. Those
-/// built from this template are renamed and reused (emptied by the test that takes them); any
-/// other is dropped.
+/// holds when it ends (its free list, `Db::for_test_at` registrations) are never dropped. Only
+/// databases created on this host (process ids mean nothing elsewhere: a shared server may serve
+/// other machines and containers) whose process is gone and that no session is using qualify.
+/// Those built from this template are renamed and reused (emptied by the test that takes them);
+/// those built from other migrations are dropped.
 fn adopt_abandoned(client: &mut postgres::Client, template: &Template) {
     let Ok(rows) = client.query(
-        "SELECT datname FROM pg_database WHERE datname ~ '^ocr_test_[0-9a-f]{12}_[0-9]+_' AND NOT datistemplate",
+        "SELECT d.datname FROM pg_database d
+         WHERE d.datname ~ '^ocr_test_[0-9a-f]{12}_[0-9a-f]{8}_[0-9]+_' AND NOT d.datistemplate
+           AND NOT EXISTS (SELECT 1 FROM pg_stat_activity a WHERE a.datname = d.datname)",
         &[],
     ) else {
         return;
     };
+    let host = host_tag();
     for row in rows {
         let name: String = row.get(0);
-        let mut parts = name.splitn(5, '_');
-        let (hash, pid) = (parts.nth(2), parts.next());
-        if pid.and_then(|pid| pid.parse::<i32>().ok()).is_some_and(process_exists) {
+        let mut parts = name.splitn(6, '_');
+        let (hash, owner_host, pid) = (parts.nth(2), parts.next(), parts.next());
+        if owner_host != Some(host.as_str()) || pid.and_then(|pid| pid.parse::<i32>().ok()).is_none_or(process_exists) {
             continue;
         }
-        let adopted = format!("{}_{}_{}", template.prefix, std::process::id(), random_suffix());
-        let same_template = hash.is_some_and(|hash| template.prefix.ends_with(hash));
-        let renamed = same_template
-            && client
+        if hash.is_some_and(|hash| template.prefix.ends_with(hash)) {
+            let adopted = database_name(&template.prefix);
+            if client
                 .batch_execute(&format!("ALTER DATABASE {name} RENAME TO {adopted}"))
-                .is_ok();
-        if renamed {
-            FREE.lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .push((adopted, true));
+                .is_ok()
+            {
+                FREE.lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .push((adopted, true));
+            }
         } else {
-            let _ = client.batch_execute(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"));
+            let _ = client.batch_execute(&format!("DROP DATABASE IF EXISTS {name}"));
         }
     }
+}
+
+/// `<prefix>_<host>_<pid>_<random>`: who created it, so only that host adopts it later.
+fn database_name(prefix: &str) -> String {
+    format!(
+        "{prefix}_{}_{}_{}",
+        host_tag(),
+        std::process::id(),
+        &random_suffix()[..16]
+    )
+}
+
+/// A short, stable tag for this host (and container: Docker gives each its own host name).
+fn host_tag() -> String {
+    static TAG: OnceLock<String> = OnceLock::new();
+    TAG.get_or_init(|| {
+        let mut name = [0u8; 256];
+        let length = if unsafe { libc::gethostname(name.as_mut_ptr().cast(), name.len()) } == 0 {
+            name.iter().position(|byte| *byte == 0).unwrap_or(name.len())
+        } else {
+            0
+        };
+        Sha256::digest(&name[..length])[..4]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    })
+    .clone()
 }
 
 fn client_config(name: &str) -> postgres::Config {

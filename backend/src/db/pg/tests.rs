@@ -295,3 +295,23 @@ fn json_functions_keep_sqlite_semantics() {
         .unwrap();
     assert_eq!(kind.as_deref(), Some("array"));
 }
+
+#[test]
+fn a_test_database_written_outside_the_pools_is_emptied_before_reuse() {
+    for _ in 0..5 {
+        let db = TestDb::new();
+        db.client()
+            .execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES ('leftover', 'x', 0)",
+                &[],
+            )
+            .unwrap();
+        drop(db);
+        let next = TestDb::new();
+        let leftover = next
+            .client()
+            .query_opt("SELECT 1 FROM settings WHERE key = 'leftover'", &[])
+            .unwrap();
+        assert!(leftover.is_none(), "a reused test database kept another test's rows");
+    }
+}
