@@ -1,10 +1,11 @@
 name: CI
 
+# Only pull requests are checked. The main ruleset requires branches up to date with main before
+# they merge, so what lands on main is exactly what was checked; a second run on main would repeat
+# it. Draft pull requests wait until they are marked ready for review.
 on:
   pull_request:
-  push:
-    branches:
-      - main
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -18,8 +19,8 @@ concurrency:
 jobs:
   changes:
     name: Detect changed areas
-    # Dependabot pull requests skip CI to save Actions minutes.
-    if: github.actor != 'dependabot[bot]'
+    # Dependabot and draft pull requests skip CI to save Actions minutes.
+    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -38,25 +39,10 @@ jobs:
         id: filter
         shell: bash
         env:
-          EVENT: ${{ github.event_name }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE: ${{ github.event.before }}
-          PUSH_SHA: ${{ github.sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [[ "$EVENT" == "pull_request" ]]; then
-            base="$PR_BASE"
-            head="$PR_HEAD"
-          else
-            base="$PUSH_BEFORE"
-            head="$PUSH_SHA"
-          fi
-
-          if [[ "$base" =~ ^0+$ ]]; then
-            git ls-tree -r --name-only "$head" > changed-files.txt
-          else
-            git diff --name-only "$base" "$head" > changed-files.txt
-          fi
+          git diff --name-only "$BASE" "$HEAD" > changed-files.txt
 
           frontend=false
           backend=false
@@ -96,8 +82,8 @@ jobs:
 
   file-size:
     name: Source file-size guard
-    # Dependabot pull requests skip CI to save Actions minutes.
-    if: github.actor != 'dependabot[bot]'
+    # Dependabot and draft pull requests skip CI to save Actions minutes.
+    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -114,8 +100,8 @@ jobs:
 
   docs:
     name: Documentation links
-    # Dependabot pull requests skip CI to save Actions minutes.
-    if: github.actor != 'dependabot[bot]'
+    # Dependabot and draft pull requests skip CI to save Actions minutes.
+    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -285,7 +271,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [changes, file-size, docs, frontend, backend, dependencies, docker]
-    if: always() && github.actor != 'dependabot[bot]'
+    if: always() && github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
     steps:
       - name: Require every job to succeed or be skipped
         env:
