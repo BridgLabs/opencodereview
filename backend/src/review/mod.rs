@@ -149,10 +149,6 @@ pub(crate) struct ChunkResult {
 /// OpenCodeReview's built-in, default review skill. Embedded at build time.
 pub const REVIEW_SKILL: &str = include_str!("../assets/review-skill.md");
 
-/// A second built-in: a minimal, repository-agnostic review skill offered as a
-/// selectable alternative for reviewing other codebases. The default
-/// (`REVIEW_SKILL`) stays active unless a user selects this in the Skills page.
-
 #[derive(Clone)]
 pub struct ReviewInputs {
     pub frozen: Option<std::sync::Arc<frozen::FrozenContext>>,
