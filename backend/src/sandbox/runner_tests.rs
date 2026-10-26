@@ -379,6 +379,47 @@ fn final_response_reads_only_the_terminal_answer_and_preserves_objects() {
 }
 
 #[test]
+fn final_response_of_other_clis_accepts_stringified_objects_and_bare_or_empty_decisions() {
+    let report = json!({"reviewedFiles":["a.ts"],"missingEvidence":[],"findings":[]});
+    let decision = json!({"candidateId":"candidate-1","decision":"keep","commentIndex":0,"reason":"Verified"});
+    let decode = |raw: Option<String>| raw.map(|raw| serde_json::from_str::<serde_json::Value>(&raw).unwrap());
+    for (output, decisions) in [
+        (json!({"report":report.to_string()}), None),
+        (json!({"report":report,"findingDecisions":[]}), None),
+        (json!({"report":report,"findingDecisions":null}), None),
+        (
+            json!({"report":report,"findingDecisions":[decision]}),
+            Some(json!({"decisions":[decision]})),
+        ),
+        (
+            json!({"report":report,"findingDecisions":json!({"decisions":[decision]}).to_string()}),
+            Some(json!({"decisions":[decision]})),
+        ),
+    ] {
+        let (actual, actual_decisions) = parse_final_response(&output.to_string(), true).unwrap();
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&actual).unwrap(), report);
+        assert_eq!(decode(actual_decisions), decisions);
+        // Claude's output stays strict.
+        if output["findingDecisions"] != json!(null) || output["report"].is_string() {
+            assert!(parse_final_response(&output.to_string(), false).is_err(), "{output}");
+        }
+    }
+}
+
+#[test]
+fn final_response_of_other_clis_gives_a_bare_decisions_list_the_report_identity() {
+    let report =
+        json!({"contractVersion":2,"snapshotId":"snapshot","reviewedFiles":[],"missingEvidence":[],"findings":[]});
+    let decision = json!({"candidateId":"candidate-1","decision":"discard","reason":"Guard"});
+    let output = json!({"report":report,"findingDecisions":[decision]}).to_string();
+    let (_, decisions) = parse_final_response(&output, true).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&decisions.unwrap()).unwrap(),
+        json!({"contractVersion":2,"snapshotId":"snapshot","decisions":[decision]})
+    );
+}
+
+#[test]
 fn final_response_escapes_stray_backslashes_in_quoted_code() {
     let raw = r#"{"report":{"findings":[{"quote":"value.match(/\d+\s/) and \"done\" \\ \n"}]}}"#;
     let (report, _) = final_response(Some(&final_transcript(json!(raw)))).unwrap();
