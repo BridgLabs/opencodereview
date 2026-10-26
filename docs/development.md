@@ -110,14 +110,15 @@ The [Provider CLI canary](../.github/workflows/provider-cli-canary.yml) builds t
 
 ## Releases
 
-Releases are automatic. After each merge to `main`, the [Release workflow](../.github/workflows/release.yml) reads the Conventional Commits since the last `v*` tag with `scripts/release-version.mjs`:
+A release is one button: Actions → **Release** → **Run workflow**. Everything merged since the last tag ships as one version, so several pull requests make one release. The [Release workflow](../.github/workflows/release.yml) reads the Conventional Commits since the last `v*` tag with `scripts/release-version.mjs`:
 
 - `feat` releases a minor version; `fix`, `perf` and `revert` a patch version; a breaking change (`!` or `BREAKING CHANGE:`) a major version, or a minor one before 1.0.
 - `build`, `chore`, `ci`, `docs`, `refactor`, `style` and `test` release nothing on their own, unless the pull request left notes in `changelog.d/`.
+- The **bump** input (`patch`, `minor` or `major`) raises the version to at least that level; `auto`, the default, uses only the commits.
 
-When there is something to release, the workflow moves the `changelog.d/` notes into a new `CHANGELOG.md` section (or, when no pull request wrote notes, writes them from the commit subjects), sets `package.json` to the version, pushes a `release: vX.Y.Z` commit and the `vX.Y.Z` tag to `main`, builds the `server`, `runner` and `web` images for `amd64` and `arm64`, publishes them to `ghcr.io/bridglabs/opencodereview-*` as `X.Y.Z` and `latest`, and creates the GitHub release from the `CHANGELOG.md` section.
+When there is something to release, the workflow moves the `changelog.d/` notes into a new `CHANGELOG.md` section (or, when no pull request wrote notes, writes them from the commit subjects), sets `package.json` to the version and pushes a `release: vX.Y.Z` commit to a `release/vX.Y.Z` branch. It builds the `server`, `runner` and `web` images for `amd64` and `arm64` from that commit; only when every image builds does it fast-forward `main` to the commit, push the `vX.Y.Z` tag, publish the images to `ghcr.io/bridglabs/opencodereview-*` as `X.Y.Z` and `latest`, and create the GitHub release from the `CHANGELOG.md` section. A failed build leaves `main` and the tags untouched.
 
-The push uses the `RELEASE_DEPLOY_KEY` deploy key, which the `main` ruleset lets bypass the pull request rule. Automatic releases start once the repository is public; until then, or to preview, run the workflow by hand from the Actions tab. With **dry-run** on (the default), it shows the next version and its notes and builds the server and web images without publishing anything. `node scripts/release-version.mjs` prints the next version locally.
+The push uses the `RELEASE_DEPLOY_KEY` deploy key, which the `main` ruleset lets bypass the pull request rule. With **dry-run** on, the workflow shows the next version and its notes and builds the server and web images without publishing anything. `node scripts/release-version.mjs` prints the next version locally.
 
 GHCR creates packages private, even for a public repository. After the first release, open each package (`opencodereview-server`, `-runner`, `-web`), set its visibility to **Public** and check it is linked to the repository; the workflow's last step fails until users can pull the images without a login.
 

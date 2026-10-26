@@ -5,7 +5,7 @@ name: Changelog
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -17,8 +17,8 @@ concurrency:
 jobs:
   notes:
     name: Release notes
-    # Dependabot pull requests skip CI to save Actions minutes.
-    if: github.actor != 'dependabot[bot]'
+    # Dependabot and draft pull requests skip CI to save Actions minutes.
+    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

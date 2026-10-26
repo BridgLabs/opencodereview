@@ -1,10 +1,11 @@
 name: CI
 
+# Only pull requests are checked. The main ruleset requires branches up to date with main before
+# they merge, so what lands on main is exactly what was checked; a second run on main would repeat
+# it. Draft pull requests wait until they are marked ready for review.
 on:
   pull_request:
-  push:
-    branches:
-      - main
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -18,8 +19,8 @@ concurrency:
 jobs:
   changes:
     name: Detect changed areas
-    # Dependabot pull requests skip CI to save Actions minutes.
-    if: github.actor != 'dependabot[bot]'
+    # Dependabot and draft pull requests skip CI to save Actions minutes.
+    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -38,25 +39,10 @@ jobs:
         id: filter
         shell: bash
         env:
-          EVENT: ${{ github.event_name }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          PUSH_BEFORE: ${{ github.event.before }}
-          PUSH_SHA: ${{ github.sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [[ "$EVENT" == "pull_request" ]]; then
-            base="$PR_BASE"
-            head="$PR_HEAD"
-          else
-            base="$PUSH_BEFORE"
-            head="$PUSH_SHA"
-          fi
-
-          if [[ "$base" =~ ^0+$ ]]; then
-            git ls-tree -r --name-only "$head" > changed-files.txt
-          else
-            git diff --name-only "$base" "$head" > changed-files.txt
-          fi
+          git diff --name-only "$BASE" "$HEAD" > changed-files.txt
 
           frontend=false
           backend=false
@@ -73,9 +59,11 @@ jobs:
                 backend=true
                 ;;
             esac
-            # Every file that a Dockerfile copies, plus the files that build and run the images.
+            # The image build and sandbox smoke cost several minutes, so they run only when the
+            # images or the sandbox change. Other code is covered by the frontend and backend jobs,
+            # and the Release workflow builds the images again before publishing.
             case "$file" in
-              docker/*|docker-compose.yml|.dockerignore|backend/*|assets/*|Cargo.toml|Cargo.lock|src/*|index.html|package.json|pnpm-lock.yaml|tsconfig.json|vite.config.ts|.github/workflows/ci.yml)
+              docker/*|docker-compose.yml|.dockerignore|backend/src/sandbox/*|Cargo.lock|.github/workflows/ci.yml)
                 docker=true
                 ;;
             esac
@@ -96,8 +84,8 @@ jobs:
 
   file-size:
     name: Source file-size guard
-    # Dependabot pull requests skip CI to save Actions minutes.
-    if: github.actor != 'dependabot[bot]'
+    # Dependabot and draft pull requests skip CI to save Actions minutes.
+    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -114,8 +102,8 @@ jobs:
 
   docs:
     name: Documentation links
-    # Dependabot pull requests skip CI to save Actions minutes.
-    if: github.actor != 'dependabot[bot]'
+    # Dependabot and draft pull requests skip CI to save Actions minutes.
+    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -194,7 +182,8 @@ jobs:
     if: needs.changes.outputs.backend == 'true'
     container:
       image: rust:1.98.1-bookworm@sha256:9a73a5088750b4c95158ab26629c854c3d6fc4b173cb7bc8079ad252d8ed7bfa
-      options: --cpus 2 --memory 4g --memory-swap 4g --pids-limit 512
+      # All four CPUs of the hosted runner: compiling and the tests run in parallel.
+      options: --cpus 4 --memory 8g --memory-swap 8g --pids-limit 1024
     defaults:
       run:
         shell: bash
@@ -285,7 +274,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [changes, file-size, docs, frontend, backend, dependencies, docker]
-    if: always() && github.actor != 'dependabot[bot]'
+    if: always() && github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
     steps:
       - name: Require every job to succeed or be skipped
         env:
