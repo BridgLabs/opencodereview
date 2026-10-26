@@ -4,7 +4,7 @@ Version: 1.0
 
 Date: 2026-10-25
 
-This agreement is between you and Bruno Silva, the maintainer of OpenCodeReview ("the Maintainer", "we", "us"). It applies to each Contribution that you give to the Project. Read all of it before you sign. If you do not agree, do not send a Contribution.
+This agreement is between you and BRIDG LABS LTDA, the company that maintains OpenCodeReview ("the Maintainer", "we", "us"). It applies to each Contribution that you give to the Project. Read all of it before you sign. If you do not agree, do not send a Contribution.
 
 OpenCodeReview is free under the PolyForm Small Business License 1.0.0 and sold under commercial licenses to larger companies. To offer both, the Maintainer must own the copyright in all of the code, so this agreement assigns it.
 
