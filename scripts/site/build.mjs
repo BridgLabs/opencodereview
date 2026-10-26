@@ -95,14 +95,18 @@ function withStructuredData(html) {
   );
 }
 
-/** Rewrites relative links in a repository Markdown file to absolute GitHub URLs. */
-function absoluteLinks(markdown, file) {
+/** Rewrites relative links in a repository Markdown file to absolute GitHub URLs: images to raw files, the rest to pages. */
+export function absoluteLinks(markdown, file) {
   const dir = path.posix.dirname(file);
-  return markdown.replace(/(!?)\]\((?!https?:|#|mailto:)([^)\s]+)\)/g, (_, bang, target) => {
-    const resolved = path.posix.normalize(path.posix.join(dir, target));
-    const base = bang ? `${repo}/raw/main` : `${repo}/blob/main`;
-    return `${bang}](${base}/${resolved})`;
-  });
+  const relative = /(?!https?:|#|mailto:)([^)\s]+)/.source;
+  const absolute = (base, target) => `${repo}/${base}/main/${path.posix.normalize(path.posix.join(dir, target))}`;
+  // Images first, so the link pass below sees them as absolute already.
+  return markdown
+    .replace(
+      new RegExp(`(!\\[[^\\]]*\\])\\(${relative}\\)`, "g"),
+      (_, alt, target) => `${alt}(${absolute("raw", target)})`,
+    )
+    .replace(new RegExp(`\\]\\(${relative}\\)`, "g"), (_, target) => `](${absolute("blob", target)})`);
 }
 
 async function llmsFull() {

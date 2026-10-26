@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 // @ts-expect-error -- plain ESM script without type declarations
-import { faqEntries } from "./build.mjs";
+import { absoluteLinks, faqEntries } from "./build.mjs";
 
 const site = (file: string) => resolve("site", file);
 const html = readFileSync(site("index.html"), "utf8");
@@ -61,5 +61,13 @@ describe("landing page SEO", () => {
     expect(llms).toMatch(/^# OpenCodeReview\n\n> /);
     for (const [, url] of llms.matchAll(/\]\(([^)]+)\)/g)) expect(url).toMatch(/^https:\/\//);
     expect(llms).toContain(`${origin}/llms-full.txt`);
+  });
+
+  it("points llms-full.txt images at raw files and links at GitHub pages", () => {
+    const repo = "https://github.com/BridgLabs/opencodereview";
+    const markdown = "![Queue](../site/a.png) [![Badge](https://x.test/b.svg)](../LICENSE) [Reviews](reviews.md#scope)";
+    expect(absoluteLinks(markdown, "docs/x.md")).toBe(
+      `![Queue](${repo}/raw/main/site/a.png) [![Badge](https://x.test/b.svg)](${repo}/blob/main/LICENSE) [Reviews](${repo}/blob/main/docs/reviews.md#scope)`,
+    );
   });
 });
