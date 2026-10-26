@@ -419,7 +419,6 @@ function formatSkillDate(value: number) {
 
 function skillLabel(version: SkillVersion): string {
   if (version.id === 0) return "Default";
-  if (version.id < 0) return "Generic";
   return `v${version.version}`;
 }
 

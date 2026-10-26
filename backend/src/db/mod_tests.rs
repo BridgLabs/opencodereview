@@ -790,14 +790,10 @@ fn skill_versions_snapshot_and_rollback() {
     assert_eq!(db.active_skill_content(), "SKILL TEXT v1");
 
     let list = db.list_skill_versions().expect("list");
-    assert_eq!(list.len(), 3, "default + generic built-ins + v1");
+    assert_eq!(list.len(), 2, "default built-in + v1");
     assert!(
         list.iter().any(|v| v.id == 0 && !v.active),
         "default baseline present, not active"
-    );
-    assert!(
-        list.iter().any(|v| v.id == GENERIC_SKILL_ID && !v.active),
-        "generic built-in present, not active"
     );
     let stored = list.iter().find(|v| v.id == v1.id).expect("v1 row");
     assert!(stored.active);
@@ -807,22 +803,22 @@ fn skill_versions_snapshot_and_rollback() {
     assert_eq!(db.active_skill_content(), baseline);
     assert_eq!(
         db.list_skill_versions().expect("list2").len(),
-        3,
-        "v1 still kept alongside both built-ins"
+        2,
+        "v1 still kept alongside the built-in"
     );
 
-    // Selecting the generic built-in switches the active skill without a DB version.
-    db.set_active_skill_version(GENERIC_SKILL_ID).expect("select generic");
-    assert_eq!(db.active_skill_content(), crate::review::REVIEW_SKILL_GENERIC);
+    // An install that had the removed generic built-in (-1) active reviews with the default.
+    db.save_setting_value("active_skill_version", "-1")
+        .expect("old generic pointer");
+    assert_eq!(db.active_skill_content(), baseline);
     let list3 = db.list_skill_versions().expect("list3");
+    assert_eq!(list3.len(), 2, "no generic built-in listed");
     assert!(
-        list3.iter().any(|v| v.id == GENERIC_SKILL_ID && v.active),
-        "generic built-in active after selection"
+        list3.iter().any(|v| v.id == 0 && v.active),
+        "default built-in active in place of the removed generic"
     );
-    assert!(
-        list3.iter().any(|v| v.id == 0 && !v.active),
-        "default built-in inactive when generic selected"
-    );
+    db.set_active_skill_version(-1).expect("negative id");
+    assert_eq!(db.active_skill_version_id(), 0);
 }
 
 #[test]
