@@ -8,6 +8,7 @@ mod accounts;
 mod comment_activation;
 mod findings;
 mod handle;
+pub mod import_sqlite;
 mod indexing;
 mod instances;
 mod lifecycle;
