@@ -3,11 +3,12 @@
 //! even by mistake.
 
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use postgres::config::{Host, SslMode};
 use r2d2_postgres::PostgresConnectionManager;
+use scheduled_thread_pool::ScheduledThreadPool;
 use tokio_postgres_rustls::MakeRustlsConnect;
 
 use super::conn::{Conn, Error};
@@ -126,8 +127,25 @@ impl DbPool {
     }
 }
 
+/// r2d2 gives every pool three threads of its own for opening and reaping connections; the pools
+/// share four instead, so the thread count stays flat however many pools a process has.
+fn maintenance_threads() -> Arc<ScheduledThreadPool> {
+    static THREADS: OnceLock<Arc<ScheduledThreadPool>> = OnceLock::new();
+    THREADS
+        .get_or_init(|| {
+            Arc::new(
+                ScheduledThreadPool::builder()
+                    .num_threads(4)
+                    .thread_name_pattern("ocr-db-pool-{}")
+                    .build(),
+            )
+        })
+        .clone()
+}
+
 fn build_pool(config: &postgres::Config, max: u32, tls: MakeRustlsConnect) -> Result<r2d2::Pool<Manager>, String> {
     r2d2::Pool::builder()
+        .thread_pool(maintenance_threads())
         .max_size(max.max(1))
         .min_idle(Some(1))
         .connection_timeout(CHECKOUT_TIMEOUT)
