@@ -13,7 +13,18 @@ import { RunStrip } from "./RunStrip";
 
 const PAGE_SIZE = 25;
 const columns =
-  "grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-x-4 md:grid-cols-[minmax(0,1fr)_8rem_5rem_8rem_4rem_5rem]";
+  "grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-x-4 md:grid-cols-[minmax(0,1fr)_10rem_5rem_12rem_8rem_6rem]";
+
+/** Findings the review kept, with how many were published when that differs. */
+export function FindingsCell({ found, posted }: { found: number; posted: number }) {
+  if (found === 0 && posted === 0) return <span className="text-fg-subtle">–</span>;
+  return (
+    <span title={`${found} found by the review · ${posted} posted to GitHub`}>
+      <span className="text-fg">{found.toLocaleString()}</span>
+      {posted !== found && <span className="text-fg-subtle"> · {posted.toLocaleString()} posted</span>}
+    </span>
+  );
+}
 
 /** Share of the period's tokens, as a bar and a percentage. */
 export function ShareBar({ tokens, total }: { tokens: number; total: number }) {
@@ -89,7 +100,9 @@ export function PrUsageList({ query, totalTokens, live }: { query: UsageQuery; t
                 <span className="max-md:hidden">
                   <ShareBar tokens={pr.tokens} total={totalTokens} />
                 </span>
-                <span className="text-right font-mono text-fg-muted max-md:hidden">{pr.findings}</span>
+                <span className="text-right font-mono text-caption max-md:hidden">
+                  <FindingsCell found={pr.findingsFound} posted={pr.findings} />
+                </span>
                 <span className="text-right font-mono text-fg-muted max-md:hidden">
                   {formatFlowDuration(pr.medianDurationMs)}
                 </span>

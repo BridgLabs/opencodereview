@@ -1,4 +1,5 @@
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import type { ReactNode } from "react";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { UsageDay, UsageRange } from "../../../types";
 import { compactTokens, dayAxisLabel, dayLabel } from "./format";
 
@@ -20,8 +21,8 @@ function ChartTooltip({ active, payload }: { active?: boolean; payload?: Readonl
   );
 }
 
-/** Tokens per local day: bars for a week, an area for longer ranges. */
-export function UsageChart({ days, byDay }: { days: UsageRange; byDay: UsageDay[] }) {
+/** Tokens per local day, one bar each, so quiet days read as gaps rather than a slope. */
+export function UsageChart({ days, byDay, action }: { days: UsageRange; byDay: UsageDay[]; action?: ReactNode }) {
   const peak = byDay.reduce<UsageDay | null>((best, day) => (!best || day.tokens > best.tokens ? day : best), null);
   const axes = [
     <CartesianGrid key="grid" vertical={false} stroke="var(--color-line)" />,
@@ -45,12 +46,7 @@ export function UsageChart({ days, byDay }: { days: UsageRange; byDay: UsageDay[
       tickCount={4}
       allowDecimals={false}
     />,
-    <Tooltip
-      key="tooltip"
-      content={ChartTooltip}
-      cursor={days === 7 ? { fill: "var(--color-line)" } : { stroke: "var(--color-line-strong)" }}
-      isAnimationActive={false}
-    />,
+    <Tooltip key="tooltip" content={ChartTooltip} cursor={{ fill: "var(--color-line)" }} isAnimationActive={false} />,
   ];
   return (
     <figure
@@ -59,28 +55,16 @@ export function UsageChart({ days, byDay }: { days: UsageRange; byDay: UsageDay[
         peak ? `Tokens per day, peaking at ${compactTokens(peak.tokens)} on ${dayLabel(peak.day)}` : "Tokens per day"
       }
     >
-      <figcaption className="text-caption text-fg-subtle">tokens/day</figcaption>
-      <div className="h-48 w-full min-w-0">
+      <figcaption className="flex items-center justify-between gap-3 text-caption text-fg-subtle">
+        <span>tokens/day</span>
+        {action}
+      </figcaption>
+      <div className="h-64 w-full min-w-0">
         <ResponsiveContainer width="100%" height="100%">
-          {days === 7 ? (
-            <BarChart data={byDay} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-              {axes}
-              <Bar dataKey="tokens" fill="var(--color-brand)" radius={[4, 4, 0, 0]} maxBarSize={40} />
-            </BarChart>
-          ) : (
-            <AreaChart data={byDay} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-              {axes}
-              <Area
-                dataKey="tokens"
-                type="monotone"
-                stroke="var(--color-brand)"
-                strokeWidth={2}
-                fill="var(--color-brand)"
-                fillOpacity={0.14}
-                activeDot={{ r: 3, fill: "var(--color-brand)", stroke: "var(--color-canvas)" }}
-              />
-            </AreaChart>
-          )}
+          <BarChart data={byDay} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+            {axes}
+            <Bar dataKey="tokens" fill="var(--color-brand)" radius={[3, 3, 0, 0]} maxBarSize={days === 7 ? 48 : 18} />
+          </BarChart>
         </ResponsiveContainer>
       </div>
     </figure>

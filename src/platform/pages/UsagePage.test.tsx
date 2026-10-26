@@ -6,13 +6,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setupApi } from "../../services/setupApi";
 import type { UsageGroupRow, UsagePrRow, UsageReport, UsageRun } from "../../types";
 import { UsagePage } from "./UsagePage";
+import { shareCardData } from "./usage/shareCard";
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, to, search }: { children: ReactNode; to: string; search?: Record<string, unknown> }) => (
     <a href={`${to}${search ? `?${new URLSearchParams(search as Record<string, string>)}` : ""}`}>{children}</a>
   ),
 }));
-vi.mock("./usage/UsageChart", () => ({ UsageChart: () => <div data-usage-chart /> }));
+vi.mock("./usage/UsageChart", () => ({
+  UsageChart: ({ action }: { action?: ReactNode }) => <div data-usage-chart>{action}</div>,
+}));
 vi.mock("../../services/setupApi", () => ({
   setupApi: { usageReport: vi.fn(), usagePrs: vi.fn(), usagePrRuns: vi.fn() },
 }));
@@ -31,6 +34,7 @@ const group = (key: string, label: string, total: number, provider: string | nul
   provider,
   runs: 3,
   findings: 2,
+  findingsFound: 4,
   medianDurationMs: 90_000,
 });
 const report = (overrides: Partial<UsageReport> = {}): UsageReport => ({
@@ -43,6 +47,8 @@ const report = (overrides: Partial<UsageReport> = {}): UsageReport => ({
     prs: 58,
     findings: 311,
     questions: 40,
+    findingsFound: 350,
+    questionsFound: 44,
     medianDurationMs: 252_000,
     reusedChunks: 38,
     chunks: 100,
@@ -70,6 +76,7 @@ const pr: UsagePrRow = {
   url: null,
   runs: 2,
   findings: 9,
+  findingsFound: 11,
   medianDurationMs: 120_000,
   lastRunAt: 0,
   strip: [
@@ -87,6 +94,8 @@ const run = (id: number, overrides: Partial<UsageRun>): UsageRun => ({
   durationMs: 190_000,
   findings: 3,
   questions: 0,
+  findingsFound: 3,
+  questionsFound: 0,
   models: ["claude-opus"],
   accounts: ["work@example.com"],
   reusedChunks: 0,
@@ -159,8 +168,9 @@ describe("Usage page", () => {
     expect(host.textContent).toContain("tokens · 142 runs on 58 PRs");
     expect(host.textContent).toContain("2 runs without reported usage");
     expect(host.textContent).toContain("+ 24.84M read from cache");
-    expect(host.textContent).toContain("311");
-    expect(host.textContent).toContain("40 questions");
+    // Findings lead with what the reviews kept; posted is the published part.
+    expect(host.textContent).toContain("350");
+    expect(host.textContent).toContain("311 posted · 44 questions");
     expect(host.textContent).toContain("4m 12s");
     expect(host.textContent).toContain("38%");
     // 4M of 12.42M is above the 25% overhead threshold.
@@ -249,6 +259,18 @@ describe("Usage page", () => {
     expect(onUrlUpdate.mock.lastCall?.[0].searchParams.has("repo")).toBe(false);
     await click(button("Show 90 days"));
     expect(onUrlUpdate.mock.lastCall?.[0].searchParams.get("days")).toBe("90");
+  });
+
+  it("shares an image built from totals only, without names", async () => {
+    const data = JSON.stringify(shareCardData(report()));
+    for (const name of ["acme", "work@example.com", "claude-opus", "Refactor auth"]) expect(data).not.toContain(name);
+    expect(shareCardData(report()).tokens).toBe("12.42M");
+    await render();
+    await click(button("Share"));
+    const dialog = document.body.querySelector('[role="dialog"][aria-label="Share usage image"]');
+    expect(dialog?.textContent).toContain("no repository, pull request, account or model names");
+    await click(button("Close", dialog ?? document.body));
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it("points an old server at a Docker rebuild", async () => {

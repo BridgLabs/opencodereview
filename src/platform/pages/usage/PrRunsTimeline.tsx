@@ -7,6 +7,7 @@ import type { UsageOutcome, UsageRange, UsageRun } from "../../../types";
 import { formatFlowDuration } from "../../lib/reviewFlow";
 import { shortSha } from "../reviews/reviewHelpers";
 import { compactTokens, outcomeMeta, pct, usageError } from "./format";
+import { FindingsCell } from "./PrUsageList";
 
 const SUMMARY_ORDER: UsageOutcome[] = ["superseded", "failed", "cancelled", "skipped", "running", "preview"];
 const runTime = (ms: number) =>
@@ -65,7 +66,7 @@ export function PrRunsTimeline({ prId, days, tz }: { prId: number; days: UsageRa
               key={run.id}
               data-usage-reported={run.usageReported}
               className={cx(
-                "grid grid-cols-[minmax(0,1fr)_auto_5rem] items-center gap-x-3 rounded-md py-1.5 text-caption md:grid-cols-[7.5rem_5.5rem_7rem_minmax(0,1fr)_4.5rem_8rem_3rem]",
+                "grid grid-cols-[minmax(0,1fr)_auto_5rem] items-center gap-x-3 rounded-md py-1.5 text-caption md:grid-cols-[7.5rem_5.5rem_7rem_minmax(0,1fr)_4.5rem_8rem_7rem]",
                 !run.usageReported && "opacity-50",
               )}
               title={run.usageReported ? undefined : "This run finished without reporting token usage."}
@@ -92,8 +93,8 @@ export function PrRunsTimeline({ prId, days, tz }: { prId: number; days: UsageRa
                   )}
                 </span>
               </span>
-              <span className="text-right font-mono text-fg-muted max-md:hidden" title="Findings posted">
-                {run.findings > 0 ? run.findings : "–"}
+              <span className="text-right font-mono max-md:hidden">
+                <FindingsCell found={run.findingsFound} posted={run.findings} />
               </span>
             </li>
           );

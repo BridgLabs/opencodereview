@@ -114,11 +114,13 @@ The **Usage** page shows token usage over the last 7, 30 or 90 days, for every r
 
 - **Tokens** are input + output + cache creation, the same figure as a run's usage in Reviews. **Read from cache** (context the provider re-read from its prompt cache) is shown apart and not counted in Tokens.
 - **Reused chunks** are chunks whose earlier review result was reused because their code did not change; no model call was made for them. This is OpenCodeReview's own cache, not the provider's.
-- **Findings posted** count findings and questions in reviews that were published.
+- **Findings** count the findings and questions reviews kept, published or not; **posted** is the part published to GitHub.
 - **Median time** is a run's execution, from its first stage starting to its last stage finishing; time the run waited before its first stage is not counted.
 - **Re-review overhead** is the tokens of runs that failed, were cancelled, or were superseded by a newer commit before being published.
 
 The breakdown lists pull requests, repositories, models and accounts. A pull request opens into its runs in the window, newest first, with each run's commit, outcome, account, model, time, tokens and findings, and a link to the review.
+
+**Share** draws an image of the period's totals (tokens, reviews, pull requests, findings, median time and the daily chart) to download or copy. It has no repository, pull request, account or model names.
 
 Each execution of a review stage records the account and model it ran on, including executions abandoned when an account hit its usage limit. Usage from before this was recorded appears as **Unattributed** in the model, provider and account breakdowns, so each breakdown still adds up to the total.
 

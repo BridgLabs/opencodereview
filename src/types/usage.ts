@@ -23,6 +23,9 @@ export interface UsageTotals extends UsageTokens {
   findings: number;
   /** Questions in published reviews. */
   questions: number;
+  /** Findings and questions the reviews kept, published or not. */
+  findingsFound: number;
+  questionsFound: number;
   /** Median execution time of finished runs (first stage start to last stage end). */
   medianDurationMs: number | null;
   /** Chunks whose earlier result was reused, and all chunks reviewed. */
@@ -50,8 +53,9 @@ export interface UsageGroupRow extends UsageTokens {
   /** Provider id (`claude`, `codex`, `gemini`, `opencode`) for model and account rows. */
   provider: string | null;
   runs: number;
-  /** Repositories only. */
+  /** Repositories only: findings published, and kept whether published or not. */
   findings: number | null;
+  findingsFound: number | null;
   medianDurationMs: number | null;
 }
 
@@ -91,6 +95,7 @@ export interface UsagePrRow extends UsageTokens {
   url: string | null;
   runs: number;
   findings: number;
+  findingsFound: number;
   medianDurationMs: number | null;
   lastRunAt: number;
   /** The PR's runs in the window, oldest first. */
@@ -112,6 +117,8 @@ export interface UsageRun extends UsageTokens {
   durationMs: number | null;
   findings: number;
   questions: number;
+  findingsFound: number;
+  questionsFound: number;
   models: string[];
   accounts: string[];
   /** Chunks reused from an earlier run, of all chunks. */

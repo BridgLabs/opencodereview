@@ -9,6 +9,7 @@ import { setupApi } from "../../services/setupApi";
 import type { UsageQuery, UsageRange, UsageReport } from "../../types";
 import { PlatformPage } from "../components/PlatformHeader";
 import { timezoneOffset, usageError } from "./usage/format";
+import { ShareUsage } from "./usage/ShareUsage";
 import { UsageBreakdown } from "./usage/UsageBreakdown";
 import { UsageChart } from "./usage/UsageChart";
 import { UsageHero } from "./usage/UsageHero";
@@ -108,7 +109,7 @@ export function UsagePage() {
         </>
       }
     >
-      <div className="flex w-full max-w-6xl flex-col gap-10 px-6 pt-2">
+      <div className="flex w-full flex-col gap-10 px-6 pt-2 pb-8">
         {report.isError && !data ? (
           <DSError>{usageError(report.error)}</DSError>
         ) : !data ? (
@@ -123,9 +124,9 @@ export function UsagePage() {
         ) : (
           <>
             {report.isError && <DSError>{usageError(report.error)}</DSError>}
-            <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-end">
+            <div className="grid gap-8 lg:grid-cols-[minmax(18rem,1fr)_minmax(0,3fr)] lg:items-end">
               <UsageHero report={data} />
-              <UsageChart days={data.days} byDay={data.byDay} />
+              <UsageChart days={data.days} byDay={data.byDay} action={<ShareUsage report={data} />} />
             </div>
             <UsageTotals totals={data.totals} />
             <UsageBreakdown report={data} query={query} />

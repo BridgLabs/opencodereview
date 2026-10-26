@@ -6,7 +6,7 @@ import { ProviderGlyph } from "../../components/AccountsPanel";
 import { ArrowTabs } from "../../components/ArrowTabs";
 import { formatFlowDuration } from "../../lib/reviewFlow";
 import { attributedRows, compactTokens, isProvider, UNATTRIBUTED_HINT } from "./format";
-import { PrUsageList, ShareBar } from "./PrUsageList";
+import { FindingsCell, PrUsageList, ShareBar } from "./PrUsageList";
 
 type TabId = "prs" | "repos" | "models" | "accounts";
 const PANEL_ID = "usage-breakdown";
@@ -47,10 +47,10 @@ function GroupTable({
         <tr className="border-b border-line text-left">
           <th className={th}>{repos ? "Repository" : kind === "models" ? "Model" : "Account"}</th>
           <th className={`${th} w-24 text-right`}>Tokens</th>
-          <th className={`${th} w-40 max-md:hidden`}>Share</th>
+          <th className={`${th} w-56 max-md:hidden`}>Share</th>
           {!repos && <th className={`${th} w-28 text-right max-md:hidden`}>Cache reads</th>}
           <th className={`${th} w-16 text-right max-md:hidden`}>Runs</th>
-          {repos && <th className={`${th} w-20 text-right max-md:hidden`}>Findings</th>}
+          {repos && <th className={`${th} w-32 text-right max-md:hidden`}>Findings</th>}
           {repos && <th className={`${th} w-28 text-right max-md:hidden`}>Median time</th>}
         </tr>
       </thead>
@@ -66,7 +66,11 @@ function GroupTable({
             </td>
             {!repos && <td className={`${num} max-md:hidden`}>{compactTokens(row.cacheReadTokens)}</td>}
             <td className={`${num} max-md:hidden`}>{row.runs.toLocaleString()}</td>
-            {repos && <td className={`${num} max-md:hidden`}>{(row.findings ?? 0).toLocaleString()}</td>}
+            {repos && (
+              <td className={`${num} text-caption max-md:hidden`}>
+                <FindingsCell found={row.findingsFound ?? 0} posted={row.findings ?? 0} />
+              </td>
+            )}
             {repos && <td className={`${num} max-md:hidden`}>{formatFlowDuration(row.medianDurationMs)}</td>}
           </tr>
         ))}
