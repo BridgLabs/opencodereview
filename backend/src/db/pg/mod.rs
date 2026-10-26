@@ -13,9 +13,6 @@ pub(crate) mod test_support;
 mod tests;
 
 pub(crate) use crate::pg_params as params;
-pub use conn::{
-    params_from_iter, Conn, Error, MappedRows, OptionalExtension, Param, Params, Row, Rows, Statement, Transaction,
-};
+pub use conn::{Conn, Error, OptionalExtension, Row};
 pub use migrate::migrate;
-pub(crate) use migrate::MIGRATIONS;
 pub use pool::{DbPool, DbSettings};

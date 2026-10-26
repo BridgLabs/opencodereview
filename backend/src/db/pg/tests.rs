@@ -18,7 +18,7 @@ fn baseline_seeds_settings_and_runs_once() {
     let versions: i64 = conn
         .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(versions, MIGRATIONS.len() as i64);
+    assert_eq!(versions, super::migrate::MIGRATIONS.len() as i64);
 }
 
 #[test]
@@ -57,14 +57,17 @@ fn binds_every_parameter_form() {
     assert_eq!(conn.changes(), 1);
     let keys = ["a".to_string(), "b".to_string()];
     let mut stmt = conn
-        .prepare("SELECT key FROM settings WHERE key IN ($1, $2) ORDER BY key")
+        .prepare("SELECT key FROM settings WHERE key = ANY($1) ORDER BY key")
         .unwrap();
     let found: Vec<String> = stmt
-        .query_map(params_from_iter(keys.iter()), |row| row.get(0))
+        .query_map(params![&keys[..]], |row| row.get(0))
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
     assert_eq!(found, keys);
+    let mut stmt = conn
+        .prepare("SELECT key FROM settings WHERE key IN ($1, $2) ORDER BY key")
+        .unwrap();
     let mut rows = stmt.query(&keys).unwrap();
     assert_eq!(rows.next().unwrap().unwrap().get::<_, String>(0).unwrap(), "a");
 }
@@ -232,4 +235,100 @@ fn transaction_with_retry_reruns_the_loser_of_a_deadlock() {
     let b = run("font_size", "theme");
     let attempts = a.join().unwrap() + b.join().unwrap();
     assert_eq!(attempts, 3, "exactly one side retries");
+}
+
+#[test]
+fn columns_read_as_leniently_as_sqlite_did() {
+    let db = TestDb::new();
+    let conn = db.pool().get().unwrap();
+    let (literal, exists, flag, small): (i64, i64, bool, usize) = conn
+        .query_row(
+            "SELECT CASE WHEN true THEN 1 ELSE 0 END, EXISTS(SELECT 1), 2::BIGINT, 3::INT",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!((literal, exists, flag, small), (1, 1, true, 3));
+    let missing: Option<i64> = conn.query_row("SELECT NULL::INT", [], |row| row.get(0)).unwrap();
+    assert_eq!(missing, None);
+    assert!(conn
+        .query_row("SELECT NULL::INT", [], |row| row.get::<_, i64>(0))
+        .is_err());
+    let sum = conn
+        .query_row("SELECT SUM(1::BIGINT)", [], |row| row.get::<_, i64>(0))
+        .unwrap_err();
+    assert!(sum.to_string().contains("cast it to bigint"), "{sum}");
+    let by_name: String = conn
+        .query_row("SELECT 'x' AS label", [], |row| row.get("label"))
+        .unwrap();
+    assert_eq!(by_name, "x");
+}
+
+#[test]
+fn the_scratch_pool_sees_only_the_per_review_index() {
+    let db = TestDb::new();
+    let scratch = db.pool().get_scratch().unwrap();
+    for run_id in [7_i64, 8] {
+        scratch
+            .execute(
+                "INSERT INTO repos (id, owner, name, full_name, created_at, updated_at) VALUES ($1, 'o', 'n', 'o/n', 1, 1)",
+                [run_id],
+            )
+            .unwrap();
+    }
+    let error = scratch
+        .query_row("SELECT COUNT(*) FROM pull_requests", [], |row| row.get::<_, i64>(0))
+        .unwrap_err();
+    assert_eq!(error.code(), Some(&postgres::error::SqlState::UNDEFINED_TABLE));
+    let app = db.pool().get().unwrap();
+    let public_repos: i64 = app
+        .query_row("SELECT COUNT(*) FROM repos", [], |row| row.get(0))
+        .unwrap();
+    let scratch_repos: i64 = app
+        .query_row("SELECT COUNT(*) FROM scratch.repos", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!((public_repos, scratch_repos), (0, 2));
+    let persistence: String = app
+        .query_row(
+            "SELECT relpersistence::TEXT FROM pg_class WHERE oid = 'scratch.repo_index_files'::regclass",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(persistence, "u", "scratch tables skip the WAL");
+}
+
+#[test]
+fn json_functions_keep_sqlite_semantics() {
+    let db = TestDb::new();
+    let conn = db.pool().get().unwrap();
+    let length = |json: &str| -> Option<i64> {
+        conn.query_row("SELECT json_member_array_length($1, 'items')", [json], |row| row.get(0))
+            .unwrap()
+    };
+    assert_eq!(length(r#"{"items":[1,2,3]}"#), Some(3));
+    assert_eq!(
+        length(r#"{"items":{"a":1}}"#),
+        Some(0),
+        "non-arrays count as 0, as in SQLite"
+    );
+    assert_eq!(length(r#"{"items":null}"#), Some(0));
+    assert_eq!(length(r#"{"other":[]}"#), None);
+    assert_eq!(length("not json"), None);
+    let is_true = |json: &str| -> bool {
+        conn.query_row("SELECT json_member_is_true($1, 'complete')", [json], |row| row.get(0))
+            .unwrap()
+    };
+    assert!(is_true(r#"{"complete":true}"#) && is_true(r#"{"complete":1}"#));
+    assert!(!is_true(r#"{"complete":false}"#) && !is_true(r#"{"complete":"true"}"#) && !is_true("{"));
+    let without = |json: &str| -> String {
+        conn.query_row("SELECT json_without_member($1, 'diff')", [json], |row| row.get(0))
+            .unwrap()
+    };
+    assert_eq!(without(r#"{"diff":"x","keep":1}"#), r#"{"keep": 1}"#);
+    assert_eq!(without("not json"), "not json");
+    let kind: Option<String> = conn
+        .query_row("SELECT json_member_type('{\"a\":[]}', 'a')", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(kind.as_deref(), Some("array"));
 }

@@ -18,6 +18,8 @@ pub type Pooled = r2d2::PooledConnection<Manager>;
 
 const DEFAULT_POOL_MAX: u32 = 32;
 const DEFAULT_READ_POOL_MAX: u32 = 16;
+/// Reviews building their head-commit index at the same time.
+const DEFAULT_SCRATCH_POOL_MAX: u32 = 8;
 const CHECKOUT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Where the database is and how to reach it. Built once at startup from the environment.
@@ -25,10 +27,15 @@ const CHECKOUT_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct DbSettings {
     pub app: postgres::Config,
     pub read: postgres::Config,
+    /// Sees only the `scratch` schema: the per-review index of a pull request's head commit.
+    pub scratch: postgres::Config,
     /// Runs migrations; owns the schema. Falls back to `app` when not configured separately.
     pub owner: postgres::Config,
     pub pool_max: u32,
     pub read_pool_max: u32,
+    pub scratch_pool_max: u32,
+    /// Connections each pool keeps open while idle.
+    pub min_idle: u32,
     tls: MakeRustlsConnect,
 }
 
@@ -67,11 +74,14 @@ impl DbSettings {
         ca_file: Option<&str>,
     ) -> Result<Self, String> {
         Ok(Self {
+            scratch: scratch_only(with_application_name(app.clone())),
             app: with_application_name(app),
             read: read_only(with_application_name(read)),
             owner: with_application_name(owner),
             pool_max,
             read_pool_max,
+            scratch_pool_max: DEFAULT_SCRATCH_POOL_MAX,
+            min_idle: 1,
             tls: tls_connector(ca_file)?,
         })
     }
@@ -91,16 +101,20 @@ impl DbSettings {
 pub struct DbPool {
     app: r2d2::Pool<Manager>,
     read: r2d2::Pool<Manager>,
+    scratch: r2d2::Pool<Manager>,
     settings: Arc<DbSettings>,
 }
 
 impl DbPool {
     pub fn connect(settings: DbSettings) -> Result<Self, String> {
-        let app = build_pool(&settings.app, settings.pool_max, settings.tls())?;
-        let read = build_pool(&settings.read, settings.read_pool_max, settings.tls())?;
+        let pool = |config, max| build_pool(config, max, settings.min_idle, settings.tls());
+        let app = pool(&settings.app, settings.pool_max)?;
+        let read = pool(&settings.read, settings.read_pool_max)?;
+        let scratch = pool(&settings.scratch, settings.scratch_pool_max)?;
         Ok(Self {
             app,
             read,
+            scratch,
             settings: Arc::new(settings),
         })
     }
@@ -117,6 +131,14 @@ impl DbPool {
     /// A connection whose transactions are read-only; any write fails.
     pub fn get_read(&self) -> Result<Conn, Error> {
         self.read
+            .get()
+            .map(Conn::new)
+            .map_err(|error| Error::Pool(error.to_string()))
+    }
+
+    /// A connection to the per-review index tables and nothing else.
+    pub fn get_scratch(&self) -> Result<Conn, Error> {
+        self.scratch
             .get()
             .map(Conn::new)
             .map_err(|error| Error::Pool(error.to_string()))
@@ -143,11 +165,16 @@ fn maintenance_threads() -> Arc<ScheduledThreadPool> {
         .clone()
 }
 
-fn build_pool(config: &postgres::Config, max: u32, tls: MakeRustlsConnect) -> Result<r2d2::Pool<Manager>, String> {
+fn build_pool(
+    config: &postgres::Config,
+    max: u32,
+    min_idle: u32,
+    tls: MakeRustlsConnect,
+) -> Result<r2d2::Pool<Manager>, String> {
     r2d2::Pool::builder()
         .thread_pool(maintenance_threads())
         .max_size(max.max(1))
-        .min_idle(Some(1))
+        .min_idle(Some(min_idle.min(max)))
         .connection_timeout(CHECKOUT_TIMEOUT)
         .build(PostgresConnectionManager::new(config.clone(), tls))
         .map_err(|error| format!("Could not connect to Postgres: {error}"))
@@ -184,10 +211,19 @@ fn with_application_name(mut config: postgres::Config) -> postgres::Config {
     config
 }
 
-fn read_only(mut config: postgres::Config) -> postgres::Config {
+fn read_only(config: postgres::Config) -> postgres::Config {
+    with_option(config, "-c default_transaction_read_only=on")
+}
+
+/// Without `public` on the path, a query naming an operational table fails instead of reaching it.
+fn scratch_only(config: postgres::Config) -> postgres::Config {
+    with_option(config, "-c search_path=scratch")
+}
+
+fn with_option(mut config: postgres::Config, option: &str) -> postgres::Config {
     let options = match config.get_options() {
-        Some(existing) => format!("{existing} -c default_transaction_read_only=on"),
-        None => "-c default_transaction_read_only=on".to_string(),
+        Some(existing) => format!("{existing} {option}"),
+        None => option.to_string(),
     };
     config.options(&options);
     config

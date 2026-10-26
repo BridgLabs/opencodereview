@@ -24,14 +24,17 @@ impl TestDb {
     pub(crate) fn new() -> Self {
         let admin = admin_config();
         let template = template(&admin);
-        let name = format!("ocr_test_{}", random_suffix());
+        let name = format!("ocr_test_{}_{}", std::process::id(), random_suffix());
         let mut client = connect(&admin);
         client
             .batch_execute(&format!("CREATE DATABASE {name} TEMPLATE {template}"))
             .expect("create test database");
         let mut config = admin.clone();
         config.dbname(&name);
-        let settings = DbSettings::new(config.clone(), config.clone(), config, 4, 2, None).expect("test settings");
+        let mut settings = DbSettings::new(config.clone(), config.clone(), config, 4, 2, None).expect("test settings");
+        // Many test databases exist at once; open connections only when a test uses them.
+        settings.min_idle = 0;
+        settings.scratch_pool_max = 2;
         let pool = DbPool::connect(settings.clone()).expect("test pool");
         Self {
             name,
@@ -99,6 +102,7 @@ fn template(admin: &postgres::Config) -> &'static str {
             .query_opt("SELECT 1 FROM pg_database WHERE datname = $1", &[&name])
             .expect("look up template")
             .is_some();
+        sweep_abandoned(&mut client);
         if !exists {
             let building = format!("{name}_building");
             // Separate statements: DROP and CREATE DATABASE refuse to run inside a transaction.
@@ -133,4 +137,33 @@ fn random_suffix() -> String {
     crate::db::lifecycle::generate_installation_id()
         .expect("random id")
         .replace('-', "")
+}
+
+/// Drops test databases left by test processes that have exited. Databases registered with
+/// `Db::for_test_at` live until their process ends, and a process never runs destructors for
+/// them, so the next test run cleans them up instead.
+fn sweep_abandoned(client: &mut postgres::Client) {
+    let Ok(rows) = client.query(
+        "SELECT datname FROM pg_database WHERE datname ~ '^ocr_test_[0-9]+_' AND NOT datistemplate",
+        &[],
+    ) else {
+        return;
+    };
+    for row in rows {
+        let name: String = row.get(0);
+        let alive = name
+            .split('_')
+            .nth(2)
+            .and_then(|pid| pid.parse::<i32>().ok())
+            .is_some_and(process_exists);
+        if !alive {
+            let _ = client.batch_execute(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"));
+        }
+    }
+}
+
+fn process_exists(pid: i32) -> bool {
+    // Signal 0 checks for the process without signalling it; EPERM means it exists as another user.
+    let signalled = unsafe { libc::kill(pid, 0) } == 0;
+    signalled || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
