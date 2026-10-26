@@ -294,7 +294,7 @@ impl Database {
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map([now_millis() - super::INSTANCE_TIMEOUT_MS], review_result_from_row)
+            .query_map([self.instance_live_after()?], review_result_from_row)
             .map_err(|error| error.to_string())?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
     }
@@ -399,7 +399,7 @@ impl Database {
              ORDER BY rr.updated_at",
             )
             .map_err(|error| error.to_string())?;
-        let live_after = now_millis() - super::INSTANCE_TIMEOUT_MS;
+        let live_after = self.instance_live_after()?;
         let rows = stmt
             .query_map([live_after], |row| {
                 let outcome: String = row.get(7)?;

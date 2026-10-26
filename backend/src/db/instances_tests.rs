@@ -42,8 +42,8 @@ fn only_work_of_stopped_instances_is_reclaimed() {
     let db = shared.open().unwrap();
     db.conn
         .execute(
-            "UPDATE server_instances SET heartbeat_at = $1 WHERE id = 'stopped'",
-            [now_millis() - INSTANCE_TIMEOUT_MS - 1],
+            "UPDATE server_instances SET heartbeat_at = heartbeat_at - $1 WHERE id = 'stopped'",
+            [INSTANCE_TIMEOUT_MS + 1_000],
         )
         .unwrap();
     assert_eq!(db.reclaim_orphaned_work().unwrap(), 2);
@@ -157,8 +157,8 @@ fn a_repository_indexing_on_a_live_instance_is_not_indexed_again() {
     let db = shared.open().unwrap();
     db.conn
         .execute(
-            "UPDATE server_instances SET heartbeat_at = $1 WHERE id = 'a'",
-            [now_millis() - INSTANCE_TIMEOUT_MS - 1],
+            "UPDATE server_instances SET heartbeat_at = heartbeat_at - $1 WHERE id = 'a'",
+            [INSTANCE_TIMEOUT_MS + 1_000],
         )
         .unwrap();
     assert!(b.open().unwrap().claim_repo_index(1, Some("main")).unwrap().is_some());

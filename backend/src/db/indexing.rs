@@ -306,7 +306,7 @@ impl Database {
             .query_row(
                 "SELECT EXISTS (SELECT 1 FROM repo_index_state WHERE repo_id = $1 AND status = 'indexing'
                    AND owner_instance IN (SELECT id FROM server_instances WHERE heartbeat_at > $2))",
-                params![repo_id, now_millis() - super::INSTANCE_TIMEOUT_MS],
+                params![repo_id, self.instance_live_after()?],
                 |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
