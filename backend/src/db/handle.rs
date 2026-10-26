@@ -196,7 +196,11 @@ impl Db {
     /// A plain client on this database, for test fixtures and assertions written in SQL.
     #[cfg(test)]
     pub fn test_client(&self) -> postgres::Client {
-        self.pool.settings().connect_owner().expect("connect to test database")
+        // Through the test database, so it knows it was written to and is emptied before reuse.
+        match &self._test {
+            Some(test) => test.client(),
+            None => self.pool.settings().connect_owner().expect("connect to test database"),
+        }
     }
 }
 
