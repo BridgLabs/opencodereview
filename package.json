@@ -30,7 +30,9 @@
     "check:staged": "biome check --write --staged --files-ignore-unknown=true --no-errors-on-unmatched",
     "knip": "knip",
     "changelog:check": "node scripts/changelog.mjs check",
-    "changelog:release": "node scripts/changelog.mjs release"
+    "changelog:release": "node scripts/changelog.mjs release",
+    "site:build": "node scripts/site/build.mjs",
+    "site:images": "node scripts/og/render.mjs && node scripts/site/build.mjs"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",
@@ -64,6 +66,7 @@
     "@vitejs/plugin-react": "^5.2.0",
     "jsdom": "26.1.0",
     "knip": "^5.88.1",
+    "playwright": "^1.64.1",
     "tailwindcss": "^4.3.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.7",

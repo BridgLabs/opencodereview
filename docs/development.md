@@ -132,3 +132,15 @@ GHCR creates packages private, even for a public repository. After the first rel
 ## Landing page
 
 `site/` is a static page with no build step, served at <https://opencodereview.run> as Cloudflare Workers static assets (`site/wrangler.jsonc`). The [Site workflow](../.github/workflows/site.yml) deploys it whenever a push to `main` changes `site/`, and can also be run by hand. It needs the `CLOUDFLARE_API_TOKEN` (from the "Edit Cloudflare Workers" token template) and `CLOUDFLARE_ACCOUNT_ID` repository secrets. To deploy from your machine: `npx wrangler deploy --config site/wrangler.jsonc`.
+
+### Search, AI assistants and link previews
+
+The page is written to be found by search engines and cited by AI assistants:
+
+- `site/index.html` carries the Open Graph and Twitter tags and one JSON-LD block (Organization, WebSite, SoftwareApplication and FAQPage). `pnpm site:build` writes the JSON-LD; its FAQPage is copied from the page's FAQ section, so edit the FAQ and rerun it. CI fails when the block is out of date (`scripts/site/seo.test.ts`).
+- `site/robots.txt` allows every crawler, names the AI ones, and sets Cloudflare's `Content-Signal` to allow search, AI answers and training. `site/sitemap.xml` lists the page and its images.
+- `site/llms.txt` is a hand-written summary for language models ([llmstxt.org](https://llmstxt.org)). `site/llms-full.txt` joins the README and `docs/` into one file; it is not committed, because the Site workflow builds it (and the sitemap's `lastmod`) before each deploy and also runs when the README or `docs/` change.
+- `site/_headers` sets content types and caching for those files.
+- The share image `site/og.png` (1200×630) and the PNG icons are rendered from `scripts/og/` with Playwright: `pnpm exec playwright install chromium-headless-shell` once, then `pnpm site:images`. When the image changes, bump `?v=` in its two meta tags so previews refetch it.
+
+The Cloudflare zone for `opencodereview.run` must not undo this. Keep **AI Crawl Control → Block AI bots** off, and **Manage robots.txt** off, since it would prepend its own rules to ours. Keep **Bot Fight Mode** off; it challenges crawlers that are not on Cloudflare's verified list. Keep **Crawler Hints** on, which tells Bing and other IndexNow search engines when the page changes. To check from outside: `curl -A GPTBot -I https://opencodereview.run/` should answer 200, and `https://opencodereview.run/robots.txt` should match `site/robots.txt`.

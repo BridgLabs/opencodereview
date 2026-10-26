@@ -54,3 +54,4 @@ desktop.ini
 *.swo
 *~
 .claude/settings.local.json
+site/llms-full.txt

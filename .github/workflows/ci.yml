@@ -50,7 +50,7 @@ jobs:
           dependencies=false
           while IFS= read -r file; do
             case "$file" in
-              src/*|assets/*|index.html|package.json|pnpm-lock.yaml|knip.json|biome.json|tsconfig*.json|vite.config.*|.github/workflows/ci.yml)
+              src/*|assets/*|site/*|scripts/*|index.html|package.json|pnpm-lock.yaml|knip.json|biome.json|tsconfig*.json|vite.config.*|.github/workflows/ci.yml)
                 frontend=true
                 ;;
             esac

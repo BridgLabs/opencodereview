@@ -1,0 +1,56 @@
+<!doctype html>
+<!-- The share image: headline on the left, a drawn pull request diff with the mascot's review comment on the right. -->
+<html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="og.css">
+<style>
+  .glow.a { width: 560px; height: 460px; right: 0; top: 80px; background: #3b82f6; opacity: .32; }
+  .copy { position: absolute; left: 72px; top: 64px; width: 540px; display: flex; flex-direction: column; gap: 28px; }
+  .title { font-size: 70px; }
+  .chips { gap: 8px; }
+  .chips .chip { font-size: 16px; padding: 8px 13px 8px 10px; gap: 7px; }
+  .chips .chip svg { width: 18px; height: 18px; }
+  .card { position: absolute; right: 64px; top: 72px; width: 530px; border-radius: 22px; border: 1px solid var(--line-strong); background: var(--surface); box-shadow: 0 40px 100px -20px #000d; overflow: hidden; }
+  .file { display: flex; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--line); font: 500 17px "JetBrains Mono", monospace; color: var(--fg-muted); background: var(--surface-2); }
+  .file b { color: var(--success); font-weight: 600; }
+  .diff { font: 400 17px/1.75 "JetBrains Mono", monospace; padding: 10px 0; }
+  .diff div { padding: 0 20px; white-space: pre; color: var(--fg-muted); }
+  .diff .del { background: #f8717118; color: #fca5a5; }
+  .diff .add { background: #4ade8018; color: #86efac; }
+  .note { margin: 4px 16px 18px; padding: 18px 20px; border-radius: 16px; background: var(--surface-2); border: 1px solid var(--line-strong); display: grid; grid-template-columns: 44px 1fr; gap: 14px; }
+  .note svg { width: 44px; height: 44px; color: var(--mascot); }
+  .note h3 { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .sev { font-size: 14px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 3px 10px; border-radius: 999px; background: #f8717122; color: var(--danger); }
+  .note p { font-size: 18px; line-height: 1.4; color: var(--fg-muted); }
+  .status { position: absolute; right: 64px; top: 506px; display: flex; gap: 10px; }
+  .pill { font-size: 16px; font-weight: 700; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); }
+  .pill.w { color: var(--warning); } .pill.s { color: var(--success); }
+  .foot { position: absolute; right: 64px; bottom: 36px; }
+</style></head>
+<body>
+  <div class="grid"></div><div class="glow a"></div>
+  <div class="copy">
+    <div class="brand"><svg><use href="#bubble" /></svg>OpenCodeReview</div>
+    <h1 class="title">Every pull request,<span>reviewed.</span></h1>
+    <p class="sub">By the AI plan you already have, or free models. Self-hosted.</p>
+    <div class="chips">
+      <span class="chip"><svg style="color:var(--claude)"><use href="#claude" /></svg>Claude Code</span>
+      <span class="chip"><svg><use href="#codex" /></svg>Codex</span>
+      <span class="chip"><svg style="color:var(--gemini)"><use href="#gemini" /></svg>Gemini</span>
+      <span class="chip"><svg><use href="#opencode" /></svg>OpenCode</span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="file"><span>src/billing/refund.ts</span><b>+3 −1</b></div>
+    <div class="diff">
+      <div>  const order = await getOrder(id);</div>
+      <div class="del">- if (order.paid) refund(order);</div>
+      <div class="add">+ if (order.paid &amp;&amp; !order.refunded) {</div>
+      <div class="add">+   await refund(order);</div>
+      <div class="add">+ }</div>
+    </div>
+    <div class="note">
+      <svg><use href="#bubble" /></svg>
+      <div><h3>Refund can run twice <span class="sev">High</span></h3><p>Two webhook retries both pass the check before <code>refunded</code> is saved. Lock the order first.</p></div>
+    </div>
+  </div>
+  <p class="url foot">opencodereview.run</p>
+</body></html>

@@ -1,0 +1,112 @@
+/* Shared look for the 1200x630 share images: the landing page's tokens and fonts, loaded locally. */
+@font-face {
+  font-family: "DM Sans";
+  font-weight: 100 1000;
+  src: url("../../node_modules/@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-weight: 100 800;
+  src: url("../../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2")
+    format("woff2");
+}
+:root {
+  --canvas: #111111;
+  --surface: #1b1b1b;
+  --surface-2: #232323;
+  --line: #2a2a2a;
+  --line-strong: #3a3a3a;
+  --fg: #ededed;
+  --fg-muted: #a3a3a3;
+  --fg-subtle: #7c7c7c;
+  --mascot: #8fb3ff;
+  --brand: #3b82f6;
+  --success: #4ade80;
+  --warning: #f5a524;
+  --danger: #f87171;
+  --claude: #d97757;
+  --gemini: #8b8cf8;
+}
+* {
+  box-sizing: border-box;
+  margin: 0;
+}
+html,
+body {
+  width: 1200px;
+  height: 630px;
+  overflow: hidden;
+}
+body {
+  position: relative;
+  background: var(--canvas);
+  color: var(--fg);
+  font-family: "DM Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 48px 48px;
+  opacity: 0.35;
+  mask-image: radial-gradient(ellipse 70% 80% at 50% 40%, #000 20%, transparent 75%);
+}
+.glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-weight: 700;
+  font-size: 30px;
+  letter-spacing: -0.01em;
+}
+.brand svg {
+  width: 52px;
+  height: 52px;
+  color: var(--mascot);
+}
+.title {
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.02;
+}
+.title span {
+  display: block;
+  color: var(--mascot);
+}
+.sub {
+  color: var(--fg-muted);
+  font-size: 26px;
+  line-height: 1.35;
+}
+.chips {
+  display: flex;
+  gap: 10px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 16px 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--fg);
+}
+.chip svg {
+  width: 22px;
+  height: 22px;
+}
+.url {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 20px;
+  color: var(--fg-subtle);
+}
