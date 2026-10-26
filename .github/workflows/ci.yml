@@ -59,9 +59,11 @@ jobs:
                 backend=true
                 ;;
             esac
-            # Every file that a Dockerfile copies, plus the files that build and run the images.
+            # The image build and sandbox smoke cost several minutes, so they run only when the
+            # images or the sandbox change. Other code is covered by the frontend and backend jobs,
+            # and the Release workflow builds the images again before publishing.
             case "$file" in
-              docker/*|docker-compose.yml|.dockerignore|backend/*|assets/*|Cargo.toml|Cargo.lock|src/*|index.html|package.json|pnpm-lock.yaml|tsconfig.json|vite.config.ts|.github/workflows/ci.yml)
+              docker/*|docker-compose.yml|.dockerignore|backend/src/sandbox/*|Cargo.lock|.github/workflows/ci.yml)
                 docker=true
                 ;;
             esac
@@ -180,7 +182,8 @@ jobs:
     if: needs.changes.outputs.backend == 'true'
     container:
       image: rust:1.98.1-bookworm@sha256:9a73a5088750b4c95158ab26629c854c3d6fc4b173cb7bc8079ad252d8ed7bfa
-      options: --cpus 2 --memory 4g --memory-swap 4g --pids-limit 512
+      # All four CPUs of the hosted runner: compiling and the tests run in parallel.
+      options: --cpus 4 --memory 8g --memory-swap 8g --pids-limit 1024
     defaults:
       run:
         shell: bash
