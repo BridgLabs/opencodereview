@@ -513,7 +513,8 @@ fn retained_auto_post_finding_selection_acquires_lock() {
         "UPDATE review_finding_audits SET revision = $1, selection_saved = $2",
         crate::pg_params![
             fixture["revision"].as_i64().unwrap(),
-            fixture["selectionSaved"].as_bool().unwrap()
+            // A BIGINT flag, as production code binds it.
+            fixture["selectionSaved"].as_bool().unwrap() as i64
         ],
     )
     .unwrap();
