@@ -110,7 +110,16 @@ The [Provider CLI canary](../.github/workflows/provider-cli-canary.yml) builds t
 
 ## Releases
 
-`pnpm changelog:release <version>` moves the notes in `changelog.d/` into a new `CHANGELOG.md` section. Commit that, then push the tag `v<version>`: the [Release workflow](../.github/workflows/release.yml) publishes the `server`, `runner` and `web` images for `amd64` and `arm64` to `ghcr.io/bridglabs/opencodereview-*`.
+Releases are automatic. After each merge to `main`, the [Release workflow](../.github/workflows/release.yml) reads the Conventional Commits since the last `v*` tag with `scripts/release-version.mjs`:
+
+- `feat` releases a minor version; `fix`, `perf` and `revert` a patch version; a breaking change (`!` or `BREAKING CHANGE:`) a major version, or a minor one before 1.0.
+- `build`, `chore`, `ci`, `docs`, `refactor`, `style` and `test` release nothing on their own, unless the pull request left notes in `changelog.d/`.
+
+When there is something to release, the workflow moves the `changelog.d/` notes into a new `CHANGELOG.md` section (or, when no pull request wrote notes, writes them from the commit subjects), sets `package.json` to the version, pushes a `release: vX.Y.Z` commit and the `vX.Y.Z` tag to `main`, builds the `server`, `runner` and `web` images for `amd64` and `arm64`, publishes them to `ghcr.io/bridglabs/opencodereview-*` as `X.Y.Z` and `latest`, and creates the GitHub release from the `CHANGELOG.md` section.
+
+The push uses the `RELEASE_DEPLOY_KEY` deploy key, which the `main` ruleset lets bypass the pull request rule. Automatic releases start once the repository is public; until then, or to preview, run the workflow by hand from the Actions tab. With **dry-run** on (the default), it shows the next version and its notes and builds the server and web images without publishing anything. `node scripts/release-version.mjs` prints the next version locally.
+
+GHCR creates packages private, even for a public repository. After the first release, open each package (`opencodereview-server`, `-runner`, `-web`), set its visibility to **Public** and check it is linked to the repository; the workflow's last step fails until users can pull the images without a login.
 
 ## Landing page
 

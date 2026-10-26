@@ -1,27 +1,101 @@
 name: Release
 
-# Pushing a tag `v<version>` publishes the server, runner and web images for amd64 and arm64 to
-# ghcr.io, so users can run docker-compose.images.yml without building. Prepare the tag with
-# `pnpm changelog:release <version>` (docs/development.md#releases). The server and runner share an
-# executor fingerprint, so both come from the same commit and carry the same tag.
+# Every merge to main that changes what users run is released, with no manual step:
+#   1. scripts/release-version.mjs picks the next version from the Conventional Commits since the
+#      last tag (feat → minor, fix/perf → patch, breaking → major), or stops when there is nothing
+#      to release.
+#   2. The changelog.d notes move into CHANGELOG.md, package.json takes the version, and the
+#      workflow pushes a `release: vX.Y.Z` commit and the `vX.Y.Z` tag to main with the
+#      RELEASE_DEPLOY_KEY deploy key, which the ruleset lets bypass the pull request rule.
+#   3. The server, runner and web images are built for amd64 and arm64 and published to ghcr.io
+#      as X.Y.Z and latest, and the GitHub release takes the version's CHANGELOG.md section.
+# Releases start once the repository is public. Run the workflow by hand to release earlier, or
+# leave dry-run on to see the next version and build the server and web images without publishing.
 on:
   push:
-    tags: ["v*.*.*"]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Show the next version and build without publishing, tagging or committing
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+# One release at a time, in merge order: a later merge waits instead of racing for the same version.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io/bridglabs
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
 
 jobs:
+  prepare:
+    name: Version and tag
+    if: >-
+      github.repository == 'BridgLabs/opencodereview' &&
+      (github.event_name == 'workflow_dispatch' || !github.event.repository.private) &&
+      !startsWith(github.event.head_commit.message, 'release: ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      ref: ${{ steps.tag.outputs.ref }}
+    steps:
+      # The deploy key pushes the release commit to the protected main branch: the ruleset lets
+      # deploy keys bypass the pull request rule, and only this workflow holds the key.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Next version
+        id: version
+        run: |
+          version=$(node scripts/release-version.mjs notes)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ -z "$version" ]; then
+            echo "Nothing to release: no feat, fix, perf or breaking commit since the last tag." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Next version: **v$version**." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Commit and tag the release
+        id: tag
+        if: steps.version.outputs.version != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          node scripts/changelog.mjs release "$VERSION"
+          node -e 'const fs = require("fs"); const p = JSON.parse(fs.readFileSync("package.json", "utf8")); p.version = process.argv[1]; fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n")' "$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md changelog.d package.json
+          git commit -m "release: v$VERSION"
+          git tag -a "v$VERSION" -m "OpenCodeReview v$VERSION"
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "ref=$(git rev-parse HEAD^)" >> "$GITHUB_OUTPUT"
+            { echo "Dry run: nothing was pushed. Release notes:"; echo; awk -v h="## [$VERSION]" 'index($0,h)==1{f=1;next} f&&/^## \[/{exit} f&&/^\[[^]]+\]: /{exit} f' CHANGELOG.md; } >> "$GITHUB_STEP_SUMMARY"
+          else
+            git push origin HEAD:main "v$VERSION"
+            echo "ref=v$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
   images:
     name: Images (${{ matrix.arch }})
-    if: github.repository == 'BridgLabs/opencodereview'
+    needs: prepare
+    if: needs.prepare.outputs.version != ''
     strategy:
       matrix:
         include:
@@ -34,16 +108,20 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      TAG: v${{ needs.prepare.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Log in to GitHub Container Registry
+        if: env.DRY_RUN != 'true'
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
@@ -57,13 +135,16 @@ jobs:
           context: .
           file: docker/Dockerfile
           platforms: linux/${{ matrix.arch }}
-          push: true
-          tags: ${{ env.REGISTRY }}/opencodereview-server:${{ github.ref_name }}-${{ matrix.arch }}
+          push: ${{ env.DRY_RUN != 'true' }}
+          tags: ${{ env.REGISTRY }}/opencodereview-server:${{ env.TAG }}-${{ matrix.arch }}
           cache-from: type=gha,scope=server-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=server-${{ matrix.arch }}
 
-      # The runner image starts from the server image of the same build, as in docker-compose.yml.
+      # The runner image starts from the published server image of the same build, as in
+      # docker-compose.yml; the server and runner share an executor fingerprint. A dry run has no
+      # published server image, so it skips the runner.
       - name: Runner image
+        if: env.DRY_RUN != 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -72,7 +153,7 @@ jobs:
           push: true
           build-args: OCR_RUNTIME_IMAGE=ocr_runtime
           build-contexts: ocr_runtime=docker-image://${{ env.REGISTRY }}/opencodereview-server@${{ steps.server.outputs.digest }}
-          tags: ${{ env.REGISTRY }}/opencodereview-runner:${{ github.ref_name }}-${{ matrix.arch }}
+          tags: ${{ env.REGISTRY }}/opencodereview-runner:${{ env.TAG }}-${{ matrix.arch }}
           cache-from: type=gha,scope=runner-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=runner-${{ matrix.arch }}
 
@@ -82,23 +163,28 @@ jobs:
           context: .
           file: docker/Dockerfile.web
           platforms: linux/${{ matrix.arch }}
-          push: true
-          tags: ${{ env.REGISTRY }}/opencodereview-web:${{ github.ref_name }}-${{ matrix.arch }}
+          push: ${{ env.DRY_RUN != 'true' }}
+          tags: ${{ env.REGISTRY }}/opencodereview-web:${{ env.TAG }}-${{ matrix.arch }}
           cache-from: type=gha,scope=web-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=web-${{ matrix.arch }}
 
   publish:
     name: Publish multi-arch tags and release
-    needs: images
+    needs: [prepare, images]
+    if: needs.prepare.outputs.version != '' && !(github.event_name == 'workflow_dispatch' && inputs.dry-run)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
       packages: write
+    env:
+      TAG: v${{ needs.prepare.outputs.version }}
+      VERSION: ${{ needs.prepare.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
       - name: Log in to GitHub Container Registry
@@ -109,13 +195,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Combine the architectures under the version and latest tags
-        env:
-          TAG: ${{ github.ref_name }}
         run: |
-          version="${TAG#v}"
           for image in server runner web; do
             name="$REGISTRY/opencodereview-$image"
-            docker buildx imagetools create -t "$name:$version" -t "$name:latest" \
+            docker buildx imagetools create -t "$name:$VERSION" -t "$name:latest" \
               "$name:$TAG-amd64" "$name:$TAG-arm64"
           done
 
@@ -123,17 +206,23 @@ jobs:
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
-          version="${TAG#v}"
-          awk -v heading="## [$version]" '
+          awk -v heading="## [$VERSION]" '
             index($0, heading) == 1 { found = 1; next }
             found && /^## \[/ { exit }
             found && /^\[[^]]+\]: / { exit }
             found { print }
           ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
-            echo "::error::CHANGELOG.md has no section for $version. Run pnpm changelog:release $version before tagging."
-            exit 1
-          fi
-          gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+          gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag --latest
+
+      # GHCR creates packages private, even for a public repository; users must pull without a login.
+      - name: Check anonymous pulls
+        if: ${{ !github.event.repository.private }}
+        run: |
+          anonymous=$(mktemp -d)
+          for image in server runner web; do
+            if ! docker --config "$anonymous" manifest inspect "$REGISTRY/opencodereview-$image:$VERSION" >/dev/null; then
+              echo "::error::$REGISTRY/opencodereview-$image is private. In its package settings, change the visibility to Public, then run this job again."
+              exit 1
+            fi
+          done
