@@ -292,6 +292,32 @@ impl Database {
         tx.commit().map_err(|error| error.to_string())
     }
 
+    /// Starts indexing a repository unless a live server instance already is, and returns `None`
+    /// then. Instances only know their own index jobs; this makes the database the judge.
+    pub fn claim_repo_index(&self, repo_id: i64, base_ref: Option<&str>) -> Result<Option<RepoIndexStatus>, String> {
+        let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        // Keyed by repository, so it also covers a repository with no index row yet.
+        tx.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended('index:' || $1, 0))",
+            params![repo_id.to_string()],
+        )
+        .map_err(|error| error.to_string())?;
+        let busy: bool = tx
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM repo_index_state WHERE repo_id = $1 AND status = 'indexing'
+                   AND owner_instance IN (SELECT id FROM server_instances WHERE heartbeat_at > $2))",
+                params![repo_id, now_millis() - super::INSTANCE_TIMEOUT_MS],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if busy {
+            return Ok(None);
+        }
+        let status = self.begin_repo_index(repo_id, base_ref)?;
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(Some(status))
+    }
+
     pub fn begin_repo_index(&self, repo_id: i64, base_ref: Option<&str>) -> Result<RepoIndexStatus, String> {
         let now = now_millis();
         self.conn.execute(
