@@ -4,14 +4,9 @@ A review skill is the Markdown methodology the AI follows when it reviews a pull
 
 Manage skills on the Skills page (`/platform/skills`).
 
-## Built-in skills
+## Built-in skill
 
-| Skill | Source | Description |
-| --- | --- | --- |
-| Default | [`backend/src/assets/review-skill.md`](../backend/src/assets/review-skill.md) | The full, repository-agnostic review strategy. Active on a new install. |
-| Generic | [`backend/src/assets/review-skill-generic.md`](../backend/src/assets/review-skill-generic.md) | A shorter, minimal variant. |
-
-Both are embedded in the binary and cannot be edited in place.
+**Default** ([`backend/src/assets/review-skill.md`](../backend/src/assets/review-skill.md)) is the full, repository-agnostic review strategy, active on a new install. It is embedded in the binary and cannot be edited in place.
 
 ## Versions
 

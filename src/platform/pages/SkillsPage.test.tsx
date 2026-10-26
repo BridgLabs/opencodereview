@@ -40,8 +40,8 @@ let client: QueryClient;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.clearAllMocks();
-  versions = [version(0), version(-1), version(1, true)];
-  contents = { 0: original, [-1]: "# Generic\n\nGeneral rules.", 1: "# Learned\n\nLearned rules." };
+  versions = [version(0), version(1, true)];
+  contents = { 0: original, 1: "# Learned\n\nLearned rules." };
   vi.mocked(setupApi.listSkillVersions).mockImplementation(async () => versions);
   vi.mocked(setupApi.getSkillVersionContent).mockImplementation(async (id) => contents[id]);
   client = new QueryClient({
@@ -289,10 +289,10 @@ describe("Skills workspace", () => {
     });
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     await render();
-    await click("Open Generic");
+    await click("Open Default");
     await click("Use saved version");
-    expect(vi.mocked(setupApi.setActiveSkillVersion).mock.calls[0][0]).toBe(-1);
-    expect(host.textContent).toContain("Generic is active");
+    expect(vi.mocked(setupApi.setActiveSkillVersion).mock.calls[0][0]).toBe(0);
+    expect(host.textContent).toContain("Default is active");
     expect(host.textContent).not.toContain("Delete version");
     await click("Open v1");
     await click("Delete version");
@@ -300,7 +300,7 @@ describe("Skills workspace", () => {
     confirm.mockReturnValue(true);
     await click("Delete version");
     expect(vi.mocked(setupApi.deleteSkillVersion).mock.calls[0][0]).toBe(1);
-    expect(button("Open Generic").getAttribute("aria-pressed")).toBe("true");
+    expect(button("Open Default").getAttribute("aria-pressed")).toBe("true");
   });
 
   it("reports content errors instead of presenting an editable empty skill", async () => {

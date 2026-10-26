@@ -608,11 +608,6 @@ pub(crate) struct HistoricalReviewCoverageCandidate {
 
 pub const INDEX_SPEC_VERSION: i64 = 4;
 
-/// Sentinel skill id for the second built-in (generic) review skill. `0`/absent
-/// selects the default built-in (`REVIEW_SKILL`); positive ids are learned DB
-/// versions; this negative id selects `REVIEW_SKILL_GENERIC`.
-pub const GENERIC_SKILL_ID: i64 = -1;
-
 #[derive(Debug, Clone)]
 pub struct RepoIndexFileInput {
     pub path: String,
