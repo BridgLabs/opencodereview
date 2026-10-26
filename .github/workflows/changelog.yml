@@ -17,6 +17,8 @@ concurrency:
 jobs:
   notes:
     name: Release notes
+    # Dependabot pull requests skip CI to save Actions minutes.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

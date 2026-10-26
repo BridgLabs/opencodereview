@@ -18,6 +18,8 @@ concurrency:
 jobs:
   changes:
     name: Detect changed areas
+    # Dependabot pull requests skip CI to save Actions minutes.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -94,6 +96,8 @@ jobs:
 
   file-size:
     name: Source file-size guard
+    # Dependabot pull requests skip CI to save Actions minutes.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -110,6 +114,8 @@ jobs:
 
   docs:
     name: Documentation links
+    # Dependabot pull requests skip CI to save Actions minutes.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -279,7 +285,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [changes, file-size, docs, frontend, backend, dependencies, docker]
-    if: always()
+    if: always() && github.actor != 'dependabot[bot]'
     steps:
       - name: Require every job to succeed or be skipped
         env:
