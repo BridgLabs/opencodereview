@@ -152,7 +152,6 @@ pub const REVIEW_SKILL: &str = include_str!("../assets/review-skill.md");
 /// A second built-in: a minimal, repository-agnostic review skill offered as a
 /// selectable alternative for reviewing other codebases. The default
 /// (`REVIEW_SKILL`) stays active unless a user selects this in the Skills page.
-pub const REVIEW_SKILL_GENERIC: &str = include_str!("../assets/review-skill-generic.md");
 
 #[derive(Clone)]
 pub struct ReviewInputs {

@@ -13,11 +13,9 @@ impl Database {
 
     /// The skill text reviews should use: the active version's content,
     /// or the built-in embedded skill when the baseline (v0) is active or missing.
+    /// A negative id, left by the removed generic built-in, also means the baseline.
     pub fn active_skill_content(&self) -> String {
         let id = self.active_skill_version_id();
-        if id == GENERIC_SKILL_ID {
-            return crate::review::REVIEW_SKILL_GENERIC.to_string();
-        }
         if id <= 0 {
             return crate::review::REVIEW_SKILL.to_string();
         }
@@ -30,12 +28,8 @@ impl Database {
             .unwrap_or_else(|_| crate::review::REVIEW_SKILL.to_string())
     }
 
-    /// Content of a specific version; the generic built-in id → the generic
-    /// skill; id 0 (or unknown) → the default built-in skill.
+    /// Content of a specific version; id 0 (or unknown) → the built-in skill.
     pub fn skill_version_content(&self, id: i64) -> String {
-        if id == GENERIC_SKILL_ID {
-            return crate::review::REVIEW_SKILL_GENERIC.to_string();
-        }
         if id <= 0 {
             return crate::review::REVIEW_SKILL.to_string();
         }
@@ -72,22 +66,13 @@ impl Database {
         for v in rows {
             out.push(v.map_err(|error| error.to_string())?);
         }
-        // Always include the two built-ins: the default (v0) and the generic
-        // alternative. The default is active for any non-generic baseline value.
+        // Always include the built-in (v0), active for any baseline value.
         out.push(SkillVersion {
             id: 0,
             version: 0,
             note: Some("Built-in review skill (default)".to_string()),
             char_count: crate::review::REVIEW_SKILL.chars().count() as i64,
-            active: active <= 0 && active != GENERIC_SKILL_ID,
-            created_at: 0,
-        });
-        out.push(SkillVersion {
-            id: GENERIC_SKILL_ID,
-            version: 0,
-            note: Some("Built-in generic review skill (for other codebases)".to_string()),
-            char_count: crate::review::REVIEW_SKILL_GENERIC.chars().count() as i64,
-            active: active == GENERIC_SKILL_ID,
+            active: active <= 0,
             created_at: 0,
         });
         Ok(out)
@@ -172,13 +157,7 @@ impl Database {
                 return Err("skill version not found".to_string());
             }
         }
-        // Preserve the generic built-in sentinel; clamp any other negative to the
-        // default baseline (0).
-        let normalized = if id == GENERIC_SKILL_ID {
-            GENERIC_SKILL_ID
-        } else {
-            id.max(0)
-        };
-        self.save_setting_value("active_skill_version", &normalized.to_string())
+        // Any negative id is the baseline (0).
+        self.save_setting_value("active_skill_version", &id.max(0).to_string())
     }
 }
