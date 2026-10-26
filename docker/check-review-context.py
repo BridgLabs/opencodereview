@@ -2,6 +2,7 @@ import argparse
 import contextlib
 import json
 import pathlib
+import secrets
 import subprocess
 import tempfile
 import time
@@ -25,6 +26,37 @@ def volume_sockets(image, volume, target):
     # Runner replicas share one IPC volume; each listens on /ipc/<its hostname>.sock.
     listing = command("docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--entrypoint", "/bin/sh", "--mount", f"type=volume,source={volume},target=/ipc,readonly", image, "-c", 'cd /ipc && for socket in *.sock; do if test -S "$socket"; then echo "$socket"; fi; done').stdout.split()
     return [f"{target}/{name}" for name in sorted(listing)]
+
+
+POSTGRES_IMAGE = "postgres:17@sha256:ae69c452f483507a6b99fb654cf93aad7fe156ffd2c56247707eef4e36d3c12b"
+
+
+@contextlib.contextmanager
+def scratch_database():
+    # Context preparation writes the head commit's index to a database. A throwaway Postgres on an
+    # internal network gives it one while the diagnostic stays without any outside network.
+    prefix = "ocr-context-db-" + uuid.uuid4().hex[:12]
+    network, database = prefix + "-net", prefix + "-pg"
+    password = secrets.token_hex(16)
+    created_network = created_database = False
+    try:
+        command("docker", "network", "create", "--internal", network)
+        created_network = True
+        command("docker", "run", "-d", "--name", database, "--network", network, "--tmpfs", "/var/lib/postgresql/data", "-e", "POSTGRES_PASSWORD=" + password, POSTGRES_IMAGE, timeout=300)
+        created_database = True
+        # The image's init server listens only on its socket; TCP answers once the real one is up.
+        for _ in range(150):
+            if command("docker", "exec", database, "pg_isready", "-h", "127.0.0.1", "-U", "postgres", check=False).returncode == 0:
+                break
+            time.sleep(0.2)
+        else:
+            raise RuntimeError("Diagnostic database did not become ready")
+        yield network, f"postgres://postgres:{password}@{database}:5432/postgres"
+    finally:
+        if created_database:
+            command("docker", "rm", "-f", "-v", database, check=False)
+        if created_network:
+            command("docker", "network", "rm", network, check=False)
 
 
 @contextlib.contextmanager
@@ -173,7 +205,8 @@ def main():
                 sockets = sockets[:3]
             if sockets:
                 runner_args.extend(["-e", "OCR_DIAGNOSTIC_RUNNER_SOCKETS=" + ",".join(sockets)])
-            result = command("docker", "run", "--rm", "-i", "--init", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--cpus", "1", "--memory", "768m", "--memory-swap", "768m", "--tmpfs", "/tmp:size=128m", "--mount", f"type=volume,source={args.volume},volume-subpath=repos,target=/repos,readonly", "-e", "OCR_DIAGNOSTIC_REPOS=/repos", "-e", "GIT_NO_LAZY_FETCH=1", "-e", "OCR_GH_HOST=github.com", *runner_args, *export_args, args.image, "review::usage_tests::persisted_review_chunk_preparation_without_inference", "--exact", "--ignored", "--nocapture", "--test-threads=1", input=packet, check=False, timeout=1200 if sockets else 180)
+            database_network, database_url = resources.enter_context(scratch_database())
+            result = command("docker", "run", "--rm", "-i", "--init", "--network", database_network, "-e", "OCR_TEST_DATABASE_URL=" + database_url, "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--cpus", "1", "--memory", "768m", "--memory-swap", "768m", "--tmpfs", "/tmp:size=128m", "--mount", f"type=volume,source={args.volume},volume-subpath=repos,target=/repos,readonly", "-e", "OCR_DIAGNOSTIC_REPOS=/repos", "-e", "GIT_NO_LAZY_FETCH=1", "-e", "OCR_GH_HOST=github.com", *runner_args, *export_args, args.image, "review::usage_tests::persisted_review_chunk_preparation_without_inference", "--exact", "--ignored", "--nocapture", "--test-threads=1", input=packet, check=False, timeout=1200 if sockets else 180)
             for line in result.stdout.splitlines():
                 for marker in ["OFFLINE_ARCHIVE_DIAGNOSTIC ", "PINNED_DEPENDENCY_DIAGNOSTIC ", "OFFLINE_SCOPE_REPLAN ", "RUNTIME_PREFLIGHT ", "EXPORTED_DIAGNOSTIC_STAGE "]:
                     if marker in line:
