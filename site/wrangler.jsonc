@@ -1,0 +1,10 @@
+// Cloudflare Workers static assets for the landing page, served at opencodereview.run.
+// Deployed by .github/workflows/site.yml.
+{
+  "name": "opencodereview-site",
+  "compatibility_date": "2026-10-06",
+  "assets": {
+    "directory": "."
+  },
+  "routes": [{ "pattern": "opencodereview.run", "custom_domain": true }]
+}
