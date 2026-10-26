@@ -60,20 +60,23 @@ it("uses the same attention count as the review workspace", () => {
   }
 });
 
-it.each(["/platform/reviews", "/platform/indexing"])(
-  "uses the full-height, edge-to-edge workspace shell for %s",
-  (pathname) => {
-    location.pathname = pathname;
-    const client = new QueryClient();
-    try {
-      const html = renderToStaticMarkup(
-        <QueryClientProvider client={client}>
-          <PlatformLayout />
-        </QueryClientProvider>,
-      );
-      expect(html).toContain('data-shell="workspace"');
-    } finally {
-      client.clear();
-    }
-  },
-);
+it.each([
+  ["/platform/reviews", "workspace", "Reviews"],
+  ["/platform/indexing", "workspace", "Indexing"],
+  ["/platform/usage", "page", "Usage"],
+])("uses the %s route's shell (%s) and names the page in the top bar", (pathname, shell, title) => {
+  location.pathname = pathname;
+  const client = new QueryClient();
+  try {
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={client}>
+        <PlatformLayout />
+      </QueryClientProvider>,
+    );
+    expect(html).toContain(`data-shell="${shell}"`);
+    expect(html).toContain('href="/platform/usage"');
+    expect(html).toContain(`>${title}</span>`);
+  } finally {
+    client.clear();
+  }
+});

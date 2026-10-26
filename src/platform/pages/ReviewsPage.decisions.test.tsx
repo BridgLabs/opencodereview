@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { NuqsTestingAdapter } from "nuqs/adapters/testing";
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -120,7 +121,9 @@ describe("review result decisions", () => {
       await act(async () =>
         root.render(
           <QueryClientProvider client={client}>
-            <ReviewsPage />
+            <NuqsTestingAdapter>
+              <ReviewsPage />
+            </NuqsTestingAdapter>
           </QueryClientProvider>,
         ),
       );
@@ -213,7 +216,9 @@ describe("review result decisions", () => {
         await act(async () =>
           root.render(
             <QueryClientProvider client={client}>
-              <ReviewsPage />
+              <NuqsTestingAdapter>
+                <ReviewsPage />
+              </NuqsTestingAdapter>
             </QueryClientProvider>,
           ),
         );
@@ -349,7 +354,9 @@ describe("review result decisions", () => {
         await act(async () =>
           root.render(
             <QueryClientProvider client={client}>
-              <ReviewsPage />
+              <NuqsTestingAdapter>
+                <ReviewsPage />
+              </NuqsTestingAdapter>
             </QueryClientProvider>,
           ),
         );
@@ -480,7 +487,9 @@ describe("review result decisions", () => {
         await act(async () =>
           root.render(
             <QueryClientProvider client={client}>
-              <ReviewsPage />
+              <NuqsTestingAdapter>
+                <ReviewsPage />
+              </NuqsTestingAdapter>
             </QueryClientProvider>,
           ),
         );

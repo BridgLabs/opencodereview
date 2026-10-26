@@ -110,6 +110,18 @@ Comments carry hidden `<!-- ocr-... -->` markers so OpenCodeReview can find and 
 
 Usage is reported in tokens only (input, output, cache read, cache creation), taken from the CLI's final result event. There are no cost estimates. Usage from failed, repaired and superseded executions is kept.
 
+The **Usage** page shows token usage over the last 7, 30 or 90 days, for every repository or one. Days are your browser's calendar days.
+
+- **Tokens** are input + output + cache creation, the same figure as a run's usage in Reviews. **Read from cache** (context the provider re-read from its prompt cache) is shown apart and not counted in Tokens.
+- **Reused chunks** are chunks whose earlier review result was reused because their code did not change; no model call was made for them. This is OpenCodeReview's own cache, not the provider's.
+- **Findings posted** count findings and questions in reviews that were published.
+- **Median time** is a run's execution, from its first stage starting to its last stage finishing; time the run waited before its first stage is not counted.
+- **Re-review overhead** is the tokens of runs that failed, were cancelled, or were superseded by a newer commit before being published.
+
+The breakdown lists pull requests, repositories, models and accounts. A pull request opens into its runs in the window, newest first, with each run's commit, outcome, account, model, time, tokens and findings, and a link to the review.
+
+Each execution of a review stage records the account and model it ran on, including executions abandoned when an account hit its usage limit. Usage from before this was recorded appears as **Unattributed** in the model, provider and account breakdowns, so each breakdown still adds up to the total.
+
 ## Archive retention
 
 Frozen archives of merged pull requests are deleted one day after merge by an hourly cleanup job. Open and closed-but-unmerged pull requests keep their archives, and review results, findings and usage are never deleted. To preview or run a cleanup by hand:
@@ -129,4 +141,5 @@ docker compose exec -T server ocr-server archive-retention --apply  # apply
 | Evidence and validation | `backend/src/review/evidence.rs`, `review/validation.rs`, `review/output_repair.rs`, `review/findings.rs` |
 | Final integration | `backend/src/review/integration/` |
 | Publication | `backend/src/server/publication.rs`, `server/summary.rs`, `server/status_comments.rs` |
+| Usage | `backend/src/db/usage_report.rs`, `server/usage_http.rs`, `src/platform/pages/usage/` |
 | Runners | `backend/src/sandbox/`, `accounts/sandbox_sync.rs`, `providers/` |
