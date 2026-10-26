@@ -9,6 +9,9 @@ import { renderShareCard, SHARE_HEIGHT, SHARE_WIDTH, shareCardData } from "./sha
 const canCopyImage = () => typeof ClipboardItem !== "undefined" && Boolean(navigator.clipboard?.write);
 
 function ShareDialog({ report, onClose }: { report: UsageReport; onClose: () => void }) {
+  // The numbers as the dialog opened: the report refetches while a run is in progress, and the
+  // image being shown, copied or downloaded must not change or lose its URL under the viewer.
+  const [data] = useState(() => shareCardData(report));
   const [image, setImage] = useState<{ blob: Blob; url: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -16,7 +19,7 @@ function ShareDialog({ report, onClose }: { report: UsageReport; onClose: () => 
   useEffect(() => {
     let url: string | null = null;
     let cancelled = false;
-    renderShareCard(document.createElement("canvas"), shareCardData(report))
+    renderShareCard(document.createElement("canvas"), data)
       .then((blob) => {
         if (cancelled) return;
         url = URL.createObjectURL(blob);
@@ -27,7 +30,7 @@ function ShareDialog({ report, onClose }: { report: UsageReport; onClose: () => 
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [report]);
+  }, [data]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
@@ -49,7 +52,7 @@ function ShareDialog({ report, onClose }: { report: UsageReport; onClose: () => 
     if (!image) return;
     const link = document.createElement("a");
     link.href = image.url;
-    link.download = `opencodereview-usage-${report.days}d.png`;
+    link.download = `opencodereview-usage-${data.days}d.png`;
     link.click();
   };
 

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setupApi } from "../../services/setupApi";
 import type { UsageGroupRow, UsagePrRow, UsageReport, UsageRun } from "../../types";
 import { UsagePage } from "./UsagePage";
-import { shareCardData } from "./usage/shareCard";
+import { renderShareCard, shareCardData } from "./usage/shareCard";
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, to, search }: { children: ReactNode; to: string; search?: Record<string, unknown> }) => (
@@ -15,6 +15,10 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 vi.mock("./usage/UsageChart", () => ({
   UsageChart: ({ action }: { action?: ReactNode }) => <div data-usage-chart>{action}</div>,
+}));
+vi.mock("./usage/shareCard", async (original) => ({
+  ...(await original<typeof import("./usage/shareCard")>()),
+  renderShareCard: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
 }));
 vi.mock("../../services/setupApi", () => ({
   setupApi: { usageReport: vi.fn(), usagePrs: vi.fn(), usagePrRuns: vi.fn() },
@@ -280,6 +284,20 @@ describe("Usage page", () => {
     expect(dialog?.textContent).toContain("no repository, pull request, account or model names");
     await click(button("Close", dialog ?? document.body));
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("keeps the shared image while the report refetches", async () => {
+    const revoke = vi.fn();
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:usage", revokeObjectURL: revoke }));
+    await render();
+    await click(button("Share"));
+    expect(renderShareCard).toHaveBeenCalledTimes(1);
+    const tz = -new Date().getTimezoneOffset();
+    await act(async () => client.setQueryData(["usage", "report", 30, null, tz], report({ hasRunning: true })));
+    await settle();
+    expect(renderShareCard).toHaveBeenCalledTimes(1);
+    expect(revoke).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[role="dialog"] img')?.getAttribute("src")).toBe("blob:usage");
   });
 
   it("points an old server at a Docker rebuild", async () => {
