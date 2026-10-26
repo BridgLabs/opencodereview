@@ -171,7 +171,12 @@ impl Database {
         force_full: bool,
         reprocess: bool,
     ) -> Result<(bool, bool), String> {
-        self.conn.query_row(
+        // Lock first: a post being claimed holds the PR's lock without changing its row, so an
+        // UPDATE that only waited on the row would not see the claim and its NOT EXISTS would pass.
+        // After the lock the UPDATE reads a snapshot that includes it.
+        let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        self.lock_pull_request(pr_id)?;
+        let intent = self.conn.query_row(
             "UPDATE pull_requests SET force_full_next_review = (force_full_next_review <> 0 OR $2::BOOLEAN)::INT,
              reprocess_next_review = (reprocess_next_review <> 0 OR $3::BOOLEAN)::INT,
              review_scope_revision = review_scope_revision + CASE WHEN force_full_next_review <> 0 OR reprocess_next_review <> 0 OR $2 OR $3 THEN 1 ELSE 0 END
@@ -179,9 +184,11 @@ impl Database {
              RETURNING force_full_next_review, reprocess_next_review",
             params![pr_id, force_full, reprocess], |row| Ok((row.get(0)?, row.get(1)?)),
         ).map_err(|error| match error {
-            pg::Error::QueryReturnedNoRows => "PR unavailable or a review is already being published".into(),
+            pg::Error::QueryReturnedNoRows => "PR unavailable or a review is already being published".to_string(),
             error => error.to_string(),
-        })
+        })?;
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(intent)
     }
 
     pub fn restore_review_intent(&self, pr_id: i64, force_full: bool, reprocess: bool) -> Result<(), String> {
