@@ -62,4 +62,4 @@ Compose's `postgres` service is the supported setup. To use another Postgres (16
 | `OCR_DATABASE_RO_URL_FILE` | Reads only (`ocr_ro`). Optional; defaults to the first URL with read-only transactions. |
 | `OCR_DATABASE_OWNER_URL_FILE` | Owns the schema and runs migrations (`ocr`). Optional; defaults to the first URL. |
 
-[`docker/postgres/init-roles.sh`](../docker/postgres/init-roles.sh) shows the grants these roles need. A database outside the local network must be reached over TLS: add `sslmode=require` to the URL, and set `OCR_DATABASE_CA_FILE` when the server's certificate is not signed by a public authority.
+[`docker/postgres/init-roles.sh`](../docker/postgres/init-roles.sh) shows the grants these roles need. The server connects without TLS only to `localhost`, `127.0.0.1`, `::1` or Compose's `postgres` service. Any other host, a machine on your LAN included, must be reached over TLS: add `sslmode=require` to the URL, and set `OCR_DATABASE_CA_FILE` when the database's certificate is not signed by a public authority. `OCR_DATABASE_INSECURE=1` allows plain text anyway. The import reads the same settings.

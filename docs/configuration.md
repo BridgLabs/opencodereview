@@ -37,7 +37,7 @@ The remaining variables are set by `docker-compose.yml` or have working defaults
 | `OCR_DATABASE_RO_URL_FILE` | `/run/ocr-db/ro-url` | URL for read paths. Optional. |
 | `OCR_DATABASE_OWNER_URL_FILE` | `/run/ocr-db/owner-url` | URL of the role that owns the schema and runs migrations. Optional. |
 | `OCR_DATABASE_CA_FILE` | unset | PEM certificates to trust for a Postgres reached over TLS (`sslmode=require`). |
-| `OCR_DATABASE_INSECURE` | unset | `1` allows a plain-text connection to a Postgres outside the local network. |
+| `OCR_DATABASE_INSECURE` | unset | `1` allows a plain-text connection to a Postgres other than `localhost`, `127.0.0.1`, `::1` or Compose's `postgres`. Without it such a host needs `sslmode=require`. |
 | `OCR_DB_POOL_MAX` | `32` | Connections for reads and writes. Keep the sum of all pools below Postgres' `max_connections`. |
 | `OCR_DB_READ_POOL_MAX` | `16` | Connections for read paths. |
 | `OCR_REPOS_DIR` | `/data/repos` | Git cache for monitored repositories. |
