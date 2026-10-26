@@ -11,6 +11,7 @@ pub(crate) const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("0001_baseline.sql")),
     (2, include_str!("0002_scratch.sql")),
     (3, include_str!("0003_json_functions.sql")),
+    (4, include_str!("0004_scratch_access.sql")),
 ];
 
 /// Arbitrary, fixed key for `pg_advisory_lock`; shared by every instance of this application.
