@@ -153,7 +153,9 @@ fn legacy_full_coverage_is_recovered_read_only_using_the_recorded_merge_base() {
     assert!(!coverage.diff_text.contains("main-only.rs"));
     crate::review::scope::verify_coverage(&root, &coverage, &cancel).unwrap();
     assert!(!db.review_coverage_exists(run).unwrap());
-    let readonly = crate::db::Db::for_test_at(root.join("state.sqlite")).open().unwrap();
+    let readonly = crate::db::Db::for_test_at(root.join("state.sqlite"))
+        .open_read()
+        .unwrap();
     assert!(snapshot_for_reuse(&root, &readonly, 1, pr, &head, &cancel)
         .unwrap()
         .is_some());

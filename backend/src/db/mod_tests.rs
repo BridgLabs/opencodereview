@@ -2172,6 +2172,8 @@ fn a_repository_leaving_the_workspace_keeps_its_review_history() {
         )
         .unwrap();
     let run = db.start_review_skeleton_with(1, None).unwrap();
+    db.upsert_pending_action("manual_review_needed", api, 1, "Manual review needed", "review")
+        .unwrap();
     // The workspace no longer lists acme/api: it leaves, its history stays.
     let listed = db.upsert_repos(&[repo("web")]).unwrap();
     assert!(listed.iter().all(|repo| repo.id != api));
@@ -2182,6 +2184,15 @@ fn a_repository_leaving_the_workspace_keeps_its_review_history() {
         .unwrap();
     assert!(removed.is_some());
     assert!(db.queued_pr_ids().unwrap().is_empty());
+    let open_notices: i64 = db
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM pending_actions WHERE status != 'resolved'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(open_notices, 0, "a removed repository's notices cannot be acted on");
     // Listed again, it is the same repository with the same history.
     let listed = db.upsert_repos(&[repo("api"), repo("web")]).unwrap();
     assert!(listed.iter().any(|repo| repo.id == api));
