@@ -222,7 +222,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     # Each shard compiles the tests itself: building once and handing the binaries over through an
-    # artifact costs about as long as the compile, because the shards then wait for it.
+    # artifact costs about as long as the compile, because the shards then wait for it. Tests run in
+    # one process per shard, not one per test: nextest's process per test doubled the suite's time.
     strategy:
       fail-fast: false
       matrix:
@@ -245,6 +246,8 @@ jobs:
       # Backtraces keep their file and line; full debug info only slows the compile and link.
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       OCR_TEST_DATABASE_URL: postgres://ocr_test:ci-only@localhost:5432/postgres
+      SHARD: ${{ matrix.shard }}
+      SHARDS: 4
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -252,21 +255,21 @@ jobs:
           persist-credentials: false
 
       # Tests run as a role that may create databases but is not a superuser, so a migration that
-      # quietly needs superuser fails here rather than in a deployment.
+      # quietly needs superuser fails here rather than in a deployment. A throwaway server needs no
+      # durability, and the runner's disk makes every flush slow.
       - name: Create the test database role
         run: |
           docker exec ${{ job.services.postgres.id }} psql -U postgres -v ON_ERROR_STOP=1 \
-            -c "CREATE ROLE ocr_test LOGIN CREATEDB PASSWORD 'ci-only'"
+            -c "CREATE ROLE ocr_test LOGIN CREATEDB PASSWORD 'ci-only'" \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
 
       - name: Install Rust
         run: |
           rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
           rustup default "$RUST_TOOLCHAIN"
-
-      - name: Install nextest
-        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
-        with:
-          tool: cargo-nextest
 
       # The shards build the same tests, so one of them saves the cache for all.
       - name: Cache cargo
@@ -278,10 +281,25 @@ jobs:
           prefix-key: v4-rust-ci
           save-if: ${{ matrix.shard == 1 }}
 
-      # nextest runs each test in its own process, and `slice` deals the tests out round-robin, so
-      # each shard gets a quarter of them.
+      # Most of a test's time is spent waiting on Postgres and git, so four threads keep two CPUs
+      # busy. The binaries and doc tests hold no tests today; the first shard runs them anyway.
       - name: Test
-        run: cargo nextest run --workspace --locked --profile ci --partition slice:${{ matrix.shard }}/4
+        run: |
+          tests=()
+          # Every library test, dealt round-robin: shard k of n takes the k-th name of every n.
+          while IFS= read -r name; do tests+=("$name"); done < <(
+            cargo test --lib --locked -q -- --list --format terse | sed -n 's/: test$//p' |
+              awk -v n="$SHARDS" -v k="$SHARD" 'NR % n == k % n')
+          if [ "${#tests[@]}" -eq 0 ]; then
+            echo "::error::Shard $SHARD/$SHARDS has no tests"
+            exit 1
+          fi
+          echo "Shard $SHARD/$SHARDS: ${#tests[@]} tests"
+          cargo test --lib --locked -- --exact --test-threads 4 "${tests[@]}"
+          if [ "$SHARD" -eq 1 ]; then
+            cargo test --workspace --bins --locked
+            cargo test --workspace --doc --locked
+          fi
 
   dependencies:
     name: Dependency audit

@@ -1,7 +1,0 @@
-# CI runs `cargo nextest run --profile ci`; locally, `cargo test` and `cargo nextest run` both work.
-[profile.ci]
-# Report every failing test in the shard, not just the first.
-fail-fast = false
-# Flag a test after 30s and stop it after 2 minutes, well under the job timeout.
-slow-timeout = { period = "30s", terminate-after = 4 }
-failure-output = "immediate-final"

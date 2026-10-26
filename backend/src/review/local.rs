@@ -17,8 +17,8 @@ pub(crate) fn collect_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 pub(crate) fn make_run_dir(pr_id: i64) -> Result<PathBuf, String> {
-    // Two runs of one pull request in the same millisecond, from one process or two (tests run
-    // one per process), must not share a directory.
+    // Two runs of one pull request in the same millisecond, from one process or two, must not
+    // share a directory.
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
