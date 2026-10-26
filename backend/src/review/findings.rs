@@ -67,6 +67,26 @@ pub fn actionable(comments_json: Option<&str>, body: Option<&str>) -> bool {
     }) || body.is_some_and(|body| matches!(point_kind(body), "finding" | "mixed"))
 }
 
+/// (findings, questions) among a run's inline comments. A comment that is both counts as both;
+/// one without a marker counts as a finding. Older runs stored the comments as a bare array.
+pub fn point_counts(comments_json: Option<&str>) -> (i64, i64) {
+    let value = comments_json.and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+    let items = value
+        .as_ref()
+        .and_then(|value| value.get("comments").or(Some(value)))
+        .and_then(Value::as_array);
+    items
+        .into_iter()
+        .flatten()
+        .fold((0, 0), |(findings, questions), comment| {
+            match point_kind(comment["body"].as_str().unwrap_or_default()) {
+                "question" => (findings, questions + 1),
+                "mixed" => (findings + 1, questions + 1),
+                _ => (findings + 1, questions),
+            }
+        })
+}
+
 pub(crate) fn auto_post_event(mode: &str, comments_json: Option<&str>, body: Option<&str>) -> Option<&'static str> {
     match mode {
         "request_changes" if actionable(comments_json, body) => Some("REQUEST_CHANGES"),

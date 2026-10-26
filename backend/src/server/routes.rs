@@ -50,6 +50,8 @@ pub(crate) fn route(request: Request, state: SharedState) -> Response {
         ("GET", "/workspaces") => with_db_read(&state, |db| db.list_workspaces()),
         ("GET", "/indexing/jobs") => list_index_jobs(&state),
         ("GET", "/reviews/board") => list_review_board(&state),
+        ("GET", "/usage") => usage_report_http(&request, &state),
+        ("GET", "/usage/prs") => usage_prs_http(&request, &state),
         ("GET", "/pending") => with_db(&state, |db| {
             db.sync_review_attention_pendings()?;
             db.list_pending_actions()
@@ -142,6 +144,7 @@ pub(crate) fn route_dynamic(request: &Request, state: &SharedState) -> Result<se
         ("GET", ["reviews", pr_id, "context"]) => with_db_read(state, |db| db.latest_context_plan(parse_id(pr_id)?)),
         ("GET", ["reviews", pr_id, "threads"]) => with_db_read(state, |db| db.get_review_threads(parse_id(pr_id)?)),
         ("GET", ["reviews", pr_id, "usage"]) => with_db_read(state, |db| db.pr_usage(parse_id(pr_id)?)),
+        ("GET", ["usage", "prs", pr_id, "runs"]) => usage_pr_runs_http(request, state, parse_id(pr_id)?),
         _ => Err(format!("route not found: {} {}", request.method, request.path)),
     }
 }

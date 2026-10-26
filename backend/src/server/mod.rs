@@ -37,6 +37,7 @@ mod review_http;
 mod review_jobs;
 mod status_comments;
 mod summary;
+mod usage_http;
 mod workspace;
 
 pub(crate) use accounts::*;
@@ -57,6 +58,7 @@ pub(crate) use runtime::*;
 pub(crate) use status_comments::*;
 pub(crate) use stream::*;
 pub(crate) use summary::*;
+pub(crate) use usage_http::*;
 pub(crate) use workspace::*;
 #[cfg(test)]
 mod progress_tests;
@@ -309,6 +311,8 @@ pub fn run(mut config: ServerConfig) -> Result<(), String> {
 pub(crate) struct Request {
     method: String,
     path: String,
+    /// The raw query string, without `?`.
+    query: String,
     origin: Option<String>,
     authorization: Option<String>,
     content_type: Option<String>,

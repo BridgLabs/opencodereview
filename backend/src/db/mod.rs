@@ -25,10 +25,12 @@ mod review_runs;
 mod review_usage;
 mod settings;
 mod skills;
+mod usage_report;
 pub use accounts::AiAccount;
 pub use handle::Db;
 pub(crate) use handle::ARCHIVE_GATE_KEY;
 pub use instances::{INSTANCE_HEARTBEAT, INSTANCE_TIMEOUT_MS};
+pub use usage_report::{UsageFilter, USAGE_RANGES};
 
 #[cfg(test)]
 pub(crate) use queue_acknowledgements::QUEUE_POST_SETTLE_MS;
