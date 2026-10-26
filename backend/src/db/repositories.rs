@@ -304,6 +304,7 @@ impl Database {
            description = excluded.description,
            is_private = excluded.is_private,
            default_branch = excluded.default_branch,
+           removed_at = NULL,
            updated_at = excluded.updated_at",
         params![workspace_id, repo.owner, repo.name, repo.full_name, repo.description, repo.is_private as i64, repo.default_branch, now],
       ).map_err(|error| error.to_string())?;
@@ -333,8 +334,13 @@ impl Database {
                     self.conn
                         .execute("DELETE FROM subscriptions WHERE repo_id = $1", params![repo_id])
                         .map_err(|error| error.to_string())?;
+                    // The repository leaves the workspace but keeps its review history; it comes
+                    // back as it was if the workspace lists it again.
                     self.conn
-                        .execute("DELETE FROM repos WHERE id = $1", params![repo_id])
+                        .execute(
+                            "UPDATE repos SET workspace_id = NULL, removed_at = $2, updated_at = $2 WHERE id = $1",
+                            params![repo_id, now_millis()],
+                        )
                         .map_err(|error| error.to_string())?;
                 }
             }

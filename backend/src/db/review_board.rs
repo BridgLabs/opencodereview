@@ -104,7 +104,7 @@ impl Database {
         let rows = {
             let mut stmt = self.conn.prepare(
                 "SELECT pr.id, pr.repo_id, pr.number, pr.review_lane, COALESCE(pr.status_reason, ''), LOWER(pr.state)
-                 FROM pull_requests pr",
+                 FROM pull_requests pr JOIN repos r ON r.id = pr.repo_id AND r.removed_at IS NULL",
             ).map_err(|error| error.to_string())?;
             let mapped = stmt
                 .query_map([], |row| {
@@ -337,7 +337,7 @@ impl Database {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT p.id FROM pull_requests p WHERE p.review_lane = 'queued' AND (p.last_decision_sha IS NULL OR p.last_decision_sha != p.head_sha) AND (NOT EXISTS(SELECT 1 FROM pr_comment_activations a WHERE a.pr_id = p.id) OR (p.state = 'open' AND EXISTS(SELECT 1 FROM subscriptions s WHERE s.repo_id = p.repo_id AND s.enabled = 1))) ORDER BY p.updated_at ASC",
+                "SELECT p.id FROM pull_requests p JOIN repos r ON r.id = p.repo_id AND r.removed_at IS NULL WHERE p.review_lane = 'queued' AND (p.last_decision_sha IS NULL OR p.last_decision_sha != p.head_sha) AND (NOT EXISTS(SELECT 1 FROM pr_comment_activations a WHERE a.pr_id = p.id) OR (p.state = 'open' AND EXISTS(SELECT 1 FROM subscriptions s WHERE s.repo_id = p.repo_id AND s.enabled = 1))) ORDER BY p.updated_at ASC",
             )
             .map_err(|error| error.to_string())?;
         let ids = stmt
