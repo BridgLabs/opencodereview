@@ -623,9 +623,7 @@ fn result_comment_links_to_ocr_repository() {
     assert!(clean.contains(
         "### ✅ OpenCodeReview found no issues\n\nReviewed [`abcdef12`](https://github.com/owner/repo/commit/abcdef123456). Nothing here needs action."
     ));
-    assert!(clean.ends_with(
-        "<sub>Reviewed by [OpenCodeReview](https://github.com/BridgLabs/opencodereview), source-available AI code review with the AI account you already have.</sub>"
-    ));
+    assert!(clean.ends_with("<sub>Reviewed by [OpenCodeReview](https://github.com/BridgLabs/opencodereview).</sub>"));
     assert!(clean.contains("ocr-result-key:v1 repo=owner/repo pr=7"));
     assert!(clean.contains("<!-- ocr-status-publication:v1 run=42 -->"));
     assert!(clean.contains("head=abcdef123456 reviewed_head=abcdef123456"));
@@ -690,7 +688,7 @@ Reviewed [`5c540aa1`](https://github.com/owner/repo/commit/5c540aa1234567). Each
 | ❓ | Should the old schema stay readable during deploy? | `src/billing/invoices.ts:57` |\n\
 | ⚠️ | Totals use `a \\| b` instead of `a \\|\\| b` | `src/billing/total.ts` |\n\
 | ⚠️ | Missing rollout note | General |\n\n\
-<sub>Reviewed by [OpenCodeReview](https://github.com/BridgLabs/opencodereview), source-available AI code review with the AI account you already have.</sub>\n\n\
+<sub>Reviewed by [OpenCodeReview](https://github.com/BridgLabs/opencodereview).</sub>\n\n\
 <!-- ocr-review-post:v1 run=7 -->");
 }
 
@@ -768,7 +766,7 @@ fn evidence_warning_publication_preserves_findings_and_recovery_markers() {
     assert!(body.starts_with("### ⚠️ OpenCodeReview finished with warnings\n\nReviewed [`head`](https://github.com/owner/repo/commit/head).\n\n> [!WARNING]"));
     assert!(
         body.contains("[!WARNING]")
-            && body.ends_with("source-available AI code review with the AI account you already have.</sub>")
+            && body.ends_with("Reviewed by [OpenCodeReview](https://github.com/BridgLabs/opencodereview).</sub>")
     );
     assert!(!body.contains("posted findings"));
 }

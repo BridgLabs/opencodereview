@@ -66,7 +66,7 @@ const OCR_REPOSITORY_URL: &str = "https://github.com/BridgLabs/opencodereview";
 /// Closing line of every visible OpenCodeReview comment. Reviews post from the
 /// user's own GitHub account, so each one says where it came from.
 fn ocr_footer() -> String {
-    format!("<sub>Reviewed by [OpenCodeReview]({OCR_REPOSITORY_URL}), source-available AI code review with the AI account you already have.</sub>")
+    format!("<sub>Reviewed by [OpenCodeReview]({OCR_REPOSITORY_URL}).</sub>")
 }
 
 #[derive(Clone)]
