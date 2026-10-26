@@ -109,6 +109,43 @@ fn nested_transactions_are_savepoints_and_unfinished_ones_roll_back() {
 }
 
 #[test]
+fn commit_fails_after_an_ignored_statement_failure_outside_a_savepoint() {
+    let db = TestDb::new();
+    let conn = db.pool().get().unwrap();
+    let tx = conn.unchecked_transaction().unwrap();
+    tx.execute("UPDATE settings SET value = 'dark' WHERE key = 'theme'", [])
+        .unwrap();
+    // SQLite code could ignore a failed statement and carry on; Postgres has aborted the transaction.
+    let _ = tx.execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES ('theme', 'x', 0)",
+        [],
+    );
+    assert!(matches!(tx.commit(), Err(Error::TransactionAborted)));
+    assert!(conn.is_autocommit());
+    assert_eq!(setting(&conn, "theme").as_deref(), Some("system"));
+
+    let tx = conn.unchecked_transaction().unwrap();
+    tx.execute("UPDATE settings SET value = 'dark' WHERE key = 'theme'", [])
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(setting(&conn, "theme").as_deref(), Some("dark"));
+}
+
+#[test]
+fn a_savepoint_failure_released_instead_of_rolled_back_fails_the_outer_commit() {
+    let db = TestDb::new();
+    let conn = db.pool().get().unwrap();
+    let outer = conn.unchecked_transaction().unwrap();
+    let inner = outer.unchecked_transaction().unwrap();
+    let _ = inner.execute(
+        "INSERT INTO settings (key, value, updated_at) VALUES ('theme', 'x', 0)",
+        [],
+    );
+    assert!(inner.commit().is_err());
+    assert!(matches!(outer.commit(), Err(Error::TransactionAborted)));
+}
+
+#[test]
 fn a_connection_dropped_mid_transaction_returns_clean_to_the_pool() {
     let db = TestDb::new();
     {
