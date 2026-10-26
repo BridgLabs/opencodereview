@@ -75,7 +75,9 @@ it.each([
     );
     expect(html).toContain(`data-shell="${shell}"`);
     expect(html).toContain('href="/platform/usage"');
-    expect(html).toContain(`>${title}</span>`);
+    // The rail's tooltips carry every page name, so look only in the top bar.
+    const topbar = new DOMParser().parseFromString(html, "text/html").querySelector("[data-topbar]");
+    expect(topbar?.textContent).toContain(title);
   } finally {
     client.clear();
   }
