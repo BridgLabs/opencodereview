@@ -21,7 +21,7 @@ impl Fixture {
                 .as_nanos(),
             NEXT.fetch_add(1, Ordering::Relaxed),
         ));
-        let db = Database::open_at(root.join("test.sqlite")).unwrap();
+        let db = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
         db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
         let reviews = (1..=5)
             .map(|number| {
@@ -51,7 +51,8 @@ impl Fixture {
             .collect();
         let state = Arc::new(ServerState::new(ServerConfig {
             bind: "127.0.0.1:0".into(),
-            db_path: root.join("test.sqlite"),
+            db: crate::db::Db::for_test_at(root.join("test.sqlite")),
+            data_dir: root.to_path_buf(),
             repos_dir: root.join("repos"),
             auto_reindex: false,
             poll_interval_seconds: 300,
@@ -96,7 +97,8 @@ impl Drop for Fixture {
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
-        std::fs::remove_dir_all(self.state.config.db_path.parent().unwrap()).unwrap();
+        // Nothing is written there now that the database is Postgres; remove it if a test did.
+        let _ = std::fs::remove_dir_all(&self.state.config.data_dir);
     }
 }
 

@@ -1,20 +1,7 @@
 use super::*;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_db_path() -> PathBuf {
-    let unique = format!(
-        "ocr-review-results-test-{}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    );
-    std::env::temp_dir().join(unique).join("opencodereview.sqlite")
-}
-
 #[test]
 fn failed_clean_results_due_filters_by_status_state_age_and_installation() {
-    let db = Database::open_at(temp_db_path()).expect("open db");
+    let db = Db::for_test().open().expect("open db");
     db.conn
         .execute(
             "INSERT INTO repos (owner, name, full_name, is_private, created_at, updated_at)
@@ -28,7 +15,7 @@ fn failed_clean_results_due_filters_by_status_state_age_and_installation() {
         db.conn
             .execute(
                 "INSERT INTO pull_requests (repo_id, number, title, author, head_sha, state, last_synced_at, created_at, updated_at)
-                 VALUES (?1, ?2, 'PR', 'alice', 'head', ?3, 1, 1, 1)",
+                 VALUES ($1, $2, 'PR', 'alice', 'head', $3, 1, 1, 1)",
                 params![repo_id, number, state],
             )
             .expect("pr");
@@ -37,7 +24,7 @@ fn failed_clean_results_due_filters_by_status_state_age_and_installation() {
     let add_result = |pr_id: i64, installation: &str, effective_state: &str, status: &str, updated_at: i64| {
         db.conn
             .execute(
-                "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, model) VALUES (?1, 'head', 'completed', 1, 1, 'gpt')",
+                "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, model) VALUES ($1, 'head', 'completed', 1, 1, 'gpt')",
                 params![pr_id],
             )
             .expect("run");
@@ -48,7 +35,7 @@ fn failed_clean_results_due_filters_by_status_state_age_and_installation() {
                    pr_id, installation_id, marker_key, run_id, observed_head_sha, reviewed_head_sha,
                    observation, effective_state, publication_status, reviewer_version, skill_version,
                    created_at, updated_at
-                 ) VALUES (?1, ?2, 'marker', ?3, 'head', 'head', 'clean', ?4, ?5, 'v1', 'v1', 1, ?6)",
+                 ) VALUES ($1, $2, 'marker', $3, 'head', 'head', 'clean', $4, $5, 'v1', 'v1', 1, $6)",
                 params![pr_id, installation, run_id, effective_state, status, updated_at],
             )
             .expect("result");
@@ -75,7 +62,7 @@ fn failed_clean_results_due_filters_by_status_state_age_and_installation() {
 #[test]
 fn failed_clean_results_due_requires_the_current_run_at_current_head() {
     let due_fixture = || {
-        let db = Database::open_at(temp_db_path()).expect("open db");
+        let db = Db::for_test().open().expect("open db");
         db.conn
             .execute(
                 "INSERT INTO repos (id, owner, name, full_name, is_private, created_at, updated_at)
@@ -104,7 +91,7 @@ fn failed_clean_results_due_requires_the_current_run_at_current_head() {
                    pr_id, installation_id, marker_key, run_id, observed_head_sha, reviewed_head_sha,
                    observation, effective_state, publication_status, reviewer_version, skill_version,
                    created_at, updated_at
-                 ) VALUES (1, ?1, 'marker', ?2, 'head-a', 'head-a', 'clean', 'clean', 'failed', 'v1', 'v1', 1, 1)",
+                 ) VALUES (1, $1, 'marker', $2, 'head-a', 'head-a', 'clean', 'clean', 'failed', 'v1', 'v1', 1, 1)",
                 params![installation_id, run_id],
             )
             .expect("result");

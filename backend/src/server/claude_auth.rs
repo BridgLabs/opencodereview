@@ -125,8 +125,8 @@ pub(crate) fn failure_message(text: &str) -> String {
 }
 
 /// Saves a signed-in token to `account` (a re-sign-in) or to a new Claude account.
-fn store_token(db_path: &Path, account: Option<i64>, token: &str) -> Result<(), String> {
-    let db = Database::open_at(db_path.to_path_buf())?;
+fn store_token(db_handle: &Db, account: Option<i64>, token: &str) -> Result<(), String> {
+    let db = db_handle.open()?;
     let id = match account {
         Some(id) => {
             if db.ai_account(id)?.provider != "claude" {
@@ -233,7 +233,7 @@ pub(crate) fn start_claude_auth(request: &Request, state: &SharedState) -> Resul
     if let Some(id) = account {
         with_db_read_raw(state, |db| db.ai_account(id))?;
     }
-    let db_path = state.config.db_path.clone();
+    let db_handle = state.config.db.clone();
     let mut current = flow();
     if current.cancel.is_some() {
         return Ok(serde_json::json!({ "running": true, "flowSecret": current.secret }));
@@ -321,7 +321,7 @@ pub(crate) fn start_claude_auth(request: &Request, state: &SharedState) -> Resul
             }
             if let Some(token) = oauth_token(&text) {
                 crate::review::kill_tree(pid, &mut child);
-                let message = match store_token(&db_path, account, &token) {
+                let message = match store_token(&db_handle, account, &token) {
                     Ok(()) => serde_json::json!({ "kind": "done", "success": true, "message": "Signed in to Claude." }),
                     Err(error) => serde_json::json!({ "kind": "done", "success": false, "message": error }),
                 };
@@ -392,7 +392,7 @@ pub(crate) fn save_claude_token(request: &Request, state: &SharedState) -> Resul
     if let Some(id) = paste.account_id {
         with_db_read_raw(state, |db| db.ai_account(id))?;
     }
-    store_token(&state.config.db_path, paste.account_id, token)?;
+    store_token(&state.config.db, paste.account_id, token)?;
     Ok(serde_json::json!({ "ok": true }))
 }
 

@@ -62,7 +62,14 @@ docker compose build && python3 -u docker/runner-smoke.py
 
 CI also checks the links and heading anchors between Markdown files with lychee.
 
-Run a subset of Rust tests with a filter, for example `cargo test -p opencodereview-server review_scope --lib --locked`. If SQLite-backed tests fail with `database is locked`, rerun with `-- --test-threads=1`.
+Rust tests need a Postgres where their role may create databases; each test gets its own, cloned from a migrated template:
+
+```bash
+docker run -d --name ocr-pg-dev -e POSTGRES_USER=ocr -e POSTGRES_PASSWORD=dev -p 127.0.0.1:55432:5432 postgres:17
+export OCR_TEST_DATABASE_URL=postgres://ocr:dev@127.0.0.1:55432/postgres
+```
+
+Run a subset of Rust tests with a filter, for example `cargo test -p opencodereview-server review_scope --lib --locked`.
 
 After building the images, the runner smoke test checks archive IPC and sandboxing with fake inference. It uses no credentials and makes no AI calls:
 
@@ -88,7 +95,7 @@ src/                     React frontend (React 19, TypeScript, Vite, Tailwind)
 backend/                 Rust crate opencodereview-server
   src/main_server.rs     ocr-server binary
   src/main_sandbox.rs    ocr-sandbox binary (runner, egress, tool guard)
-  src/db/                SQLite schema, migrations and queries
+  src/db/                Postgres access, migrations (pg/) and queries
   src/assets/            Built-in review skills
 assets/                  Mascot, favicon and static onboarding page
 docker/                  Dockerfiles, nginx config, smoke and diagnostic scripts

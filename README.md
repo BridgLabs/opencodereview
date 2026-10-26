@@ -78,7 +78,7 @@ The full list of variables, including the ones Compose sets internally, is in [d
 
 ```text
 browser ──> web (nginx, :1421) ──/api──> server (Rust API, 127.0.0.1:8787)
-                                            │  SQLite, Git cache, index, gh CLI
+                                            │  Git cache, gh CLI ──> postgres
                                             │  private IPC
                                             v
                               review-runner × 20 ──> review-egress ──> AI provider

@@ -1,13 +1,15 @@
-use crate::db::Database;
+use crate::db::{Database, Db};
 use crate::review_archive::{ArchiveStore, STORE_QUOTA};
 use crate::server::SharedState;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 pub const MS_PER_DAY: i64 = 86_400_000;
+/// Where the last maintenance pass leaves the storage status, for whichever instance is asked.
+pub const STORAGE_STATUS_SETTING: &str = "archive_storage_status";
 pub const MAX_RETENTION_DAYS: i64 = 365;
 pub const MIN_RETENTION_DAYS: i64 = 1;
 pub const DEFAULT_RETENTION_DAYS: i64 = 1;
@@ -85,7 +87,7 @@ impl Default for ArchiveStorageStatus {
 }
 
 pub struct RetentionCoordinator {
-    pub db_path: PathBuf,
+    pub db: Db,
     pub archive_root: PathBuf,
     pub leases: ArchiveLeaseTracker,
     pub status: Arc<Mutex<ArchiveStorageStatus>>,
@@ -95,14 +97,14 @@ pub struct RetentionCoordinator {
 
 impl RetentionCoordinator {
     pub fn new(
-        db_path: PathBuf,
+        db: Db,
         archive_root: PathBuf,
         leases: ArchiveLeaseTracker,
         status: Arc<Mutex<ArchiveStorageStatus>>,
         notify: Arc<(Mutex<bool>, Condvar)>,
     ) -> Self {
         Self {
-            db_path,
+            db,
             archive_root,
             leases,
             status,
@@ -120,15 +122,56 @@ impl RetentionCoordinator {
         backfill: impl FnOnce(&ArchiveStore, &Database) -> Result<(), String>,
     ) -> Result<MaintenanceResult, String> {
         let result = self.maintenance_pass(backfill);
-        if let Err(error) = &result {
-            eprintln!("Archive retention maintenance error: {error}");
-            if let Ok(mut status) = self.status.lock() {
-                status.last_error = Some(
-                    "Archive maintenance failed. Check server logs; previous successful metrics are retained.".into(),
-                );
+        match &result {
+            Ok(_) => self.publish_status(),
+            Err(error) => {
+                eprintln!("Archive retention maintenance error: {error}");
+                self.publish_failure();
             }
         }
         result
+    }
+
+    /// Records the status in the database: the pass runs on one instance, and every instance
+    /// answers the status endpoint.
+    fn publish_status(&self) {
+        let Ok(status) = self.status.lock().map(|status| status.clone()) else {
+            return;
+        };
+        if let (Ok(json), Ok(db)) = (serde_json::to_string(&status), self.db.open()) {
+            let _ = db.save_setting_value(STORAGE_STATUS_SETTING, &json);
+        }
+    }
+
+    /// Marks the recorded status failed and keeps its metrics: another instance's last successful
+    /// pass may have recorded them, and this instance's own may be older or empty.
+    fn publish_failure(&self) {
+        const FAILED: &str = "Archive maintenance failed. Check server logs; previous successful metrics are retained.";
+        // Marked locally first, so the failure shows even when the database cannot be reached.
+        let Ok(mut status) = self.status.lock().map(|mut local| {
+            local.last_error = Some(FAILED.into());
+            local.clone()
+        }) else {
+            return;
+        };
+        let Ok(db) = self.db.open() else {
+            return;
+        };
+        if let Some(mut recorded) = db
+            .setting(STORAGE_STATUS_SETTING)
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str::<ArchiveStorageStatus>(&json).ok())
+        {
+            recorded.last_error = Some(FAILED.into());
+            if let Ok(mut local) = self.status.lock() {
+                *local = recorded.clone();
+            }
+            status = recorded;
+        }
+        if let Ok(json) = serde_json::to_string(&status) {
+            let _ = db.save_setting_value(STORAGE_STATUS_SETTING, &json);
+        }
     }
 
     fn maintenance_pass(
@@ -137,9 +180,9 @@ impl RetentionCoordinator {
     ) -> Result<MaintenanceResult, String> {
         let mut warnings = Vec::new();
         let now_ms = crate::sandbox::now();
-        let db = Database::open_at(self.db_path.clone()).map_err(|e| format!("Could not open database: {e}"))?;
-        let mut store =
-            ArchiveStore::open(&self.archive_root).map_err(|e| format!("Could not open archive store: {e:?}"))?;
+        let db = self.db.open().map_err(|e| format!("Could not open database: {e}"))?;
+        let mut store = ArchiveStore::open(&self.archive_root, &self.db)
+            .map_err(|e| format!("Could not open archive store: {e:?}"))?;
 
         // 1. Validate retention setting.
         let raw_setting = db
@@ -486,13 +529,8 @@ fn wait_for_maintenance(notify: &(Mutex<bool>, Condvar), interval: Duration) -> 
 
 pub(crate) fn start_archive_retention_worker(state: SharedState) {
     let coordinator = Arc::new(RetentionCoordinator::new(
-        state.config.db_path.clone(),
-        state
-            .config
-            .db_path
-            .parent()
-            .unwrap_or(Path::new("."))
-            .join("review-archives"),
+        state.config.db.clone(),
+        state.config.archive_dir(),
         state.archive_leases.clone(),
         state.archive_storage_status.clone(),
         state.retention_worker_notify.clone(),
@@ -503,9 +541,20 @@ pub(crate) fn start_archive_retention_worker(state: SharedState) {
         .spawn(move || {
             let cancel = AtomicBool::new(false);
             loop {
-                let _ = coordinator.perform_maintenance(&cancel);
-
-                if wait_for_maintenance(&coordinator.notify, Duration::from_secs(3600)).is_err() {
+                // Several instances may share the archive; one maintains it at a time. When another
+                // instance is mid-pass (or the lock is unreachable), try again soon rather than in an
+                // hour, so a requested pass (a retention change) still happens.
+                let ran = match coordinator.db.run_exclusive(crate::server::exclusive::RETENTION, || {
+                    coordinator.perform_maintenance(&cancel)
+                }) {
+                    Ok(ran) => ran.is_some(),
+                    Err(error) => {
+                        eprintln!("Archive retention could not take its turn: {error}");
+                        false
+                    }
+                };
+                let interval = Duration::from_secs(if ran { 3600 } else { 60 });
+                if wait_for_maintenance(&coordinator.notify, interval).is_err() {
                     break;
                 }
             }

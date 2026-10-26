@@ -43,7 +43,7 @@ fn legacy_fixture() -> (std::path::PathBuf, crate::db::Database, i64, i64, Strin
     git(&["add", "."]);
     git(&["commit", "-qm", "advance base"]);
     let base = git(&["rev-parse", "HEAD"]);
-    let db = crate::db::Database::open_at(root.join("state.sqlite")).unwrap();
+    let db = crate::db::Db::for_test_at(root.join("state.sqlite")).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     let pr = db
         .upsert_pull_request(&crate::db::PullRequestInput {
@@ -64,15 +64,15 @@ fn legacy_fixture() -> (std::path::PathBuf, crate::db::Database, i64, i64, Strin
         })
         .unwrap();
     let run = db.start_review_skeleton_with(pr, Some("fixture")).unwrap();
-    let conn = rusqlite::Connection::open(db.path()).unwrap();
-    conn.execute("UPDATE review_runs SET status='running',review_body='Reviewed',reviewed_head_sha=?2,reviewed_base_sha=?3,stacked_base_ref='main',finished_at=1 WHERE id=?1", rusqlite::params![run, head, base]).unwrap();
+    let conn = db.handle().open().unwrap();
+    conn.execute("UPDATE review_runs SET status='running',review_body='Reviewed',reviewed_head_sha=$2,reviewed_base_sha=$3,stacked_base_ref='main',finished_at=1 WHERE id=$1", crate::pg_params![run, head, base]).unwrap();
     let plan = serde_json::json!({"repoId":1,"baseRef":"main","reviewedBaseSha":base,"mergeBaseSha":merge_base,"headSha":head,"baseSha":head,"priorSha":null,"incremental":false,"range":format!("{base}...{head}"),"changedFiles":["code.rs"],"relatedFiles":[],"testFiles":[],"conventionFiles":[],"packages":[],"dependentPackages":[],"dependencyEdges":[],"omittedCount":0});
     db.save_review_context_snapshot(1, pr, Some(run), &head, Some(&head), None, &plan.to_string(), 1, 0)
         .unwrap();
     let mut audit = crate::review::findings::seed_audit(&serde_json::json!({"comments":[]}), &head, "");
     audit.complete = true;
     db.store_finding_audit(run, &audit).unwrap();
-    conn.execute("UPDATE review_runs SET status='posted' WHERE id=?1", [run])
+    conn.execute("UPDATE review_runs SET status='posted' WHERE id=$1", [run])
         .unwrap();
     (root, db, pr, run, head)
 }
@@ -89,10 +89,10 @@ fn limited_reviews_never_supply_incremental_or_recovered_coverage() {
         path: Some("code.rs".into()),
         reference: None,
     }]);
-    let conn = rusqlite::Connection::open(db.path()).unwrap();
+    let conn = db.handle().open().unwrap();
     conn.execute(
-        "UPDATE review_finding_audits SET audit_json=?1 WHERE run_id=?2",
-        rusqlite::params![serde_json::to_string(&audit).unwrap(), run],
+        "UPDATE review_finding_audits SET audit_json=$1 WHERE run_id=$2",
+        crate::pg_params![serde_json::to_string(&audit).unwrap(), run],
     )
     .unwrap();
     assert!(db.last_reviewed_sha(pr).unwrap().is_none());
@@ -122,7 +122,7 @@ fn limited_reviews_never_supply_incremental_or_recovered_coverage() {
     db.finalize_review_coverage(run).unwrap();
     assert!(!db.review_coverage_exists(run).unwrap());
     db.begin_review_coverage(&input).unwrap();
-    conn.execute("UPDATE review_coverage SET status='valid' WHERE run_id=?1", [run])
+    conn.execute("UPDATE review_coverage SET status='valid' WHERE run_id=$1", [run])
         .unwrap();
     assert!(db.review_coverage_snapshot(pr, &head).unwrap().is_none());
     assert!(db.review_coverage_patch_ids_for_pr(pr).unwrap().unwrap().is_empty());
@@ -153,7 +153,9 @@ fn legacy_full_coverage_is_recovered_read_only_using_the_recorded_merge_base() {
     assert!(!coverage.diff_text.contains("main-only.rs"));
     crate::review::scope::verify_coverage(&root, &coverage, &cancel).unwrap();
     assert!(!db.review_coverage_exists(run).unwrap());
-    let readonly = crate::db::Database::open_read_at(root.join("state.sqlite")).unwrap();
+    let readonly = crate::db::Db::for_test_at(root.join("state.sqlite"))
+        .open_read()
+        .unwrap();
     assert!(snapshot_for_reuse(&root, &readonly, 1, pr, &head, &cancel)
         .unwrap()
         .is_some());
@@ -162,7 +164,7 @@ fn legacy_full_coverage_is_recovered_read_only_using_the_recorded_merge_base() {
         .unwrap()
         .is_none());
     assert!(snapshot_for_reuse(&root, &db, 1, pr, &head, &AtomicBool::new(true)).is_err());
-    backfill_historical(&root, &db.path(), 1, &cancel).unwrap();
+    backfill_historical(&root, &db.handle(), 1, &cancel).unwrap();
     let backfilled = db.review_coverage_snapshot(pr, &head).unwrap().unwrap();
     assert_eq!(backfilled.diff_text, coverage.diff_text);
     assert_eq!(backfilled.changed_files, coverage.changed_files);
@@ -201,11 +203,11 @@ fn legacy_two_dot_backfill_is_recovered_only_after_verifying_both_snapshots() {
     assert_eq!(repaired.changed_files, ["code.rs"]);
     crate::review::scope::verify_coverage(&root, &repaired, &cancel).unwrap();
     assert_eq!(db.review_coverage_snapshot(pr, &head).unwrap().unwrap().diff_text, diff);
-    let conn = rusqlite::Connection::open(db.path()).unwrap();
+    let conn = db.handle().open().unwrap();
     for mutation in 0..3 {
         conn.execute(
-            "UPDATE review_coverage SET source_json=?2,diff_text=?3,diff_hash=?4,changed_files_json=?5 WHERE run_id=?1",
-            rusqlite::params![
+            "UPDATE review_coverage SET source_json=$2,diff_text=$3,diff_hash=$4,changed_files_json=$5 WHERE run_id=$1",
+            crate::pg_params![
                 run,
                 source,
                 diff,
@@ -216,20 +218,20 @@ fn legacy_two_dot_backfill_is_recovered_only_after_verifying_both_snapshots() {
         .unwrap();
         match mutation {
             0 => {
-                conn.execute("UPDATE review_coverage SET source_json='{}' WHERE run_id=?1", [run])
+                conn.execute("UPDATE review_coverage SET source_json='{}' WHERE run_id=$1", [run])
                     .unwrap();
             }
             1 => {
                 let altered = format!("{diff}tampered\n");
                 conn.execute(
-                    "UPDATE review_coverage SET diff_text=?2,diff_hash=?3 WHERE run_id=?1",
-                    rusqlite::params![run, altered, diff_hash(&altered)],
+                    "UPDATE review_coverage SET diff_text=$2,diff_hash=$3 WHERE run_id=$1",
+                    crate::pg_params![run, altered, diff_hash(&altered)],
                 )
                 .unwrap();
             }
             _ => {
                 conn.execute(
-                    "UPDATE review_coverage SET changed_files_json='[]' WHERE run_id=?1",
+                    "UPDATE review_coverage SET changed_files_json='[]' WHERE run_id=$1",
                     [run],
                 )
                 .unwrap();
@@ -246,33 +248,33 @@ fn legacy_two_dot_backfill_is_recovered_only_after_verifying_both_snapshots() {
 fn legacy_recovery_rejects_partial_malformed_and_uncompleted_proofs() {
     for mutation in 0..7 {
         let (root, db, pr, run, head) = legacy_fixture();
-        let conn = rusqlite::Connection::open(db.path()).unwrap();
+        let conn = db.handle().open().unwrap();
         match mutation {
             0 => {
-                conn.execute("UPDATE review_runs SET status='failed' WHERE id=?1", [run])
+                conn.execute("UPDATE review_runs SET status='failed' WHERE id=$1", [run])
                     .unwrap();
             }
             1 => {
-                conn.execute("UPDATE review_finding_audits SET audit_json=json_set(audit_json,'$.complete',json('false')) WHERE run_id=?1", [run]).unwrap();
+                conn.execute("UPDATE review_finding_audits SET audit_json=jsonb_set(audit_json::jsonb,'{complete}','false')::text WHERE run_id=$1", [run]).unwrap();
             }
             2 => {
-                conn.execute("UPDATE review_context_snapshots SET manifest_json=json_set(manifest_json,'$.incremental',json('true')) WHERE review_run_id=?1", [run]).unwrap();
+                conn.execute("UPDATE review_context_snapshots SET manifest_json=jsonb_set(manifest_json::jsonb,'{incremental}','true')::text WHERE review_run_id=$1", [run]).unwrap();
             }
             3 => {
-                conn.execute("UPDATE review_context_snapshots SET manifest_json=json_set(manifest_json,'$.changedFiles',json('[]')) WHERE review_run_id=?1", [run]).unwrap();
+                conn.execute("UPDATE review_context_snapshots SET manifest_json=jsonb_set(manifest_json::jsonb,'{changedFiles}','[]')::text WHERE review_run_id=$1", [run]).unwrap();
             }
             4 => {
-                conn.execute("UPDATE review_context_snapshots SET manifest_json=json_set(manifest_json,'$.range','wrong') WHERE review_run_id=?1", [run]).unwrap();
+                conn.execute("UPDATE review_context_snapshots SET manifest_json=jsonb_set(manifest_json::jsonb,'{range}','\"wrong\"')::text WHERE review_run_id=$1", [run]).unwrap();
             }
             5 => {
                 conn.execute(
-                    "UPDATE review_context_snapshots SET manifest_json='broken' WHERE review_run_id=?1",
+                    "UPDATE review_context_snapshots SET manifest_json='broken' WHERE review_run_id=$1",
                     [run],
                 )
                 .unwrap();
             }
             _ => {
-                conn.execute("UPDATE review_finding_audits SET audit_json=json_set(audit_json,'$.headSha','wrong') WHERE run_id=?1", [run]).unwrap();
+                conn.execute("UPDATE review_finding_audits SET audit_json=jsonb_set(audit_json::jsonb,'{headSha}','\"wrong\"')::text WHERE run_id=$1", [run]).unwrap();
             }
         }
         assert!(
@@ -310,10 +312,10 @@ fn legacy_merge_with_only_excluded_delta_finishes_without_inference() {
     let head = git(&["rev-parse", "HEAD"]);
     git(&["remote", "add", "origin", root.to_str().unwrap()]);
     git(&["update-ref", "refs/pull/1/head", &head]);
-    let conn = rusqlite::Connection::open(db.path()).unwrap();
+    let conn = db.handle().open().unwrap();
     conn.execute(
-        "UPDATE pull_requests SET head_sha=?2 WHERE id=?1",
-        rusqlite::params![pr, head],
+        "UPDATE pull_requests SET head_sha=$2 WHERE id=$1",
+        crate::pg_params![pr, head],
     )
     .unwrap();
     let run = db.start_review_skeleton_with(pr, Some("fixture")).unwrap();
@@ -343,7 +345,8 @@ fn legacy_merge_with_only_excluded_delta_finishes_without_inference() {
         review_deep_threshold: 20,
         review_chunk_size: 5,
         review_parallel_chunks: 1,
-        db_path: db.path(),
+        db_handle: Some(db.handle()),
+        archive_dir: std::env::temp_dir().join(format!("ocr-review-archives-{}", crate::sandbox::secret().unwrap())),
     };
     let output = crate::review::execute(&input, &AtomicBool::new(false), &mut |_, _| {}).unwrap();
     assert!(output.no_new_changes);
@@ -357,7 +360,7 @@ fn legacy_merge_with_only_excluded_delta_finishes_without_inference() {
     assert_eq!(selection.excluded_files.len(), 1);
     let ids: String = conn
         .query_row(
-            "SELECT covered_patch_ids_json FROM review_coverage WHERE run_id=?1",
+            "SELECT covered_patch_ids_json FROM review_coverage WHERE run_id=$1",
             [run],
             |row| row.get(0),
         )
@@ -443,9 +446,9 @@ fn stacked_child_integration_finishes_without_inference(integration: &str) {
     })
     .unwrap();
     db.finalize_review_coverage(child_run).unwrap();
-    let conn = rusqlite::Connection::open(db.path()).unwrap();
+    let conn = db.handle().open().unwrap();
     conn.execute(
-        "UPDATE review_runs SET status='posted',review_body='Reviewed child',finished_at=1 WHERE id=?1",
+        "UPDATE review_runs SET status='posted',review_body='Reviewed child',finished_at=1 WHERE id=$1",
         [child_run],
     )
     .unwrap();
@@ -466,8 +469,8 @@ fn stacked_child_integration_finishes_without_inference(integration: &str) {
     git(&["remote", "add", "origin", root.to_str().unwrap()]);
     git(&["update-ref", "refs/pull/1/head", &head]);
     conn.execute(
-        "UPDATE pull_requests SET head_sha=?2 WHERE id=?1",
-        rusqlite::params![pr, head],
+        "UPDATE pull_requests SET head_sha=$2 WHERE id=$1",
+        crate::pg_params![pr, head],
     )
     .unwrap();
     let run = db.start_review_skeleton_with(pr, Some("fixture")).unwrap();
@@ -497,7 +500,8 @@ fn stacked_child_integration_finishes_without_inference(integration: &str) {
         review_deep_threshold: 20,
         review_chunk_size: 5,
         review_parallel_chunks: 1,
-        db_path: db.path(),
+        db_handle: Some(db.handle()),
+        archive_dir: std::env::temp_dir().join(format!("ocr-review-archives-{}", crate::sandbox::secret().unwrap())),
     };
     let output = crate::review::execute(&input, &cancel, &mut |_, _| {})
         .expect("Reviewed child must be skipped before model preparation");
@@ -507,7 +511,7 @@ fn stacked_child_integration_finishes_without_inference(integration: &str) {
     assert_eq!(plan.scope_selection.unwrap().reused_files, ["child.rs", "code.rs"]);
     let source_json: String = conn
         .query_row(
-            "SELECT source_json FROM review_coverage WHERE run_id=?1",
+            "SELECT source_json FROM review_coverage WHERE run_id=$1",
             [run],
             |row| row.get(0),
         )
@@ -561,23 +565,23 @@ fn stacked_child_integration_finishes_without_inference(integration: &str) {
     assert_eq!(select(&current, true).0, ["child.rs", "code.rs"]);
     for status in ["failed", "cancelled", "pending", "running"] {
         conn.execute(
-            "UPDATE review_runs SET status=?2 WHERE id=?1",
-            rusqlite::params![child_run, status],
+            "UPDATE review_runs SET status=$2 WHERE id=$1",
+            crate::pg_params![child_run, status],
         )
         .unwrap();
         assert_eq!(select(&current, false).0, ["child.rs", "code.rs"], "{status}");
     }
-    conn.execute("UPDATE review_runs SET status='posted' WHERE id=?1", [child_run])
+    conn.execute("UPDATE review_runs SET status='posted' WHERE id=$1", [child_run])
         .unwrap();
     conn.execute(
-        "UPDATE review_coverage SET diff_hash='invalid' WHERE run_id=?1",
+        "UPDATE review_coverage SET diff_hash='invalid' WHERE run_id=$1",
         [child_run],
     )
     .unwrap();
     assert_eq!(select(&current, false).0, ["child.rs", "code.rs"]);
     conn.execute(
-        "UPDATE review_coverage SET diff_hash=?2 WHERE run_id=?1",
-        rusqlite::params![child_run, diff_hash(&diff)],
+        "UPDATE review_coverage SET diff_hash=$2 WHERE run_id=$1",
+        crate::pg_params![child_run, diff_hash(&diff)],
     )
     .unwrap();
     assert!(select(&current, false).0.is_empty());
@@ -605,7 +609,7 @@ fn persisted_scope_recovery_without_inference() {
     std::io::stdin().take(8_388_609).read_to_string(&mut raw).unwrap();
     assert!(raw.len() <= 8_388_608);
     let packet: serde_json::Value = serde_json::from_str(&raw).unwrap();
-    let db = crate::db::Database::open_read_at(std::env::var("OCR_DIAGNOSTIC_DB").unwrap().into()).unwrap();
+    let db = crate::db::Db::diagnostic_from_env().open_read().unwrap();
     let repo = std::path::PathBuf::from(std::env::var("OCR_DIAGNOSTIC_REPO").unwrap());
     let run = db.review_run_by_id(packet["runId"].as_i64().unwrap()).unwrap().unwrap();
     assert_eq!(run.status, "failed");
@@ -824,7 +828,7 @@ fn stacked_rebase_reuses_verified_patch_coverage_and_reviews_only_new_commit() {
 
     let db_root = root.with_extension("db-dir");
     let db_path = db_root.join("opencodereview.sqlite");
-    let db = crate::db::Database::open_at(db_path.clone()).unwrap();
+    let db = crate::db::Db::for_test_at(db_path.clone()).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     let parent_pr = db
         .upsert_pull_request(&crate::db::PullRequestInput {
@@ -892,7 +896,7 @@ fn stacked_rebase_reuses_verified_patch_coverage_and_reviews_only_new_commit() {
     let child_diff = crate::review::diff_local(&root, &format!("{parent_head}...{child_head}"), &cancel).unwrap();
     let first = resolve(
         &root,
-        &db_path.to_string_lossy(),
+        &crate::db::Db::for_test_at(db_path.clone()),
         1,
         &parent_head,
         &child_head,
@@ -919,7 +923,7 @@ fn stacked_rebase_reuses_verified_patch_coverage_and_reviews_only_new_commit() {
         crate::review::diff_local(&root, &format!("{rebased_parent}...{rebased_child}"), &cancel).unwrap();
     let rebased = resolve(
         &root,
-        &db_path.to_string_lossy(),
+        &crate::db::Db::for_test_at(db_path.clone()),
         1,
         &rebased_parent,
         &rebased_child,
@@ -940,7 +944,7 @@ fn stacked_rebase_reuses_verified_patch_coverage_and_reviews_only_new_commit() {
         crate::review::diff_local(&root, &format!("{rebased_parent}...{child_with_new_change}"), &cancel).unwrap();
     let incremental = resolve(
         &root,
-        &db_path.to_string_lossy(),
+        &crate::db::Db::for_test_at(db_path.clone()),
         1,
         &rebased_parent,
         &child_with_new_change,
@@ -978,7 +982,7 @@ fn malformed_persisted_coverage_is_quarantined_before_fresh_reuse() {
     let merge_base = crate::review::scope::merge_base(&root, &base, &head, &cancel).unwrap();
     let db_root = root.with_extension("db-dir");
     let db_path = db_root.join("opencodereview.sqlite");
-    let db = crate::db::Database::open_at(db_path.clone()).unwrap();
+    let db = crate::db::Db::for_test_at(db_path.clone()).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     let pr_id = db
         .upsert_pull_request(&crate::db::PullRequestInput {
@@ -999,22 +1003,36 @@ fn malformed_persisted_coverage_is_quarantined_before_fresh_reuse() {
         })
         .unwrap();
     let run_id = db.start_review_skeleton_with(pr_id, Some("fixture")).unwrap();
-    let second_malformed_run_id = db.start_review_skeleton_with(pr_id, Some("fixture")).unwrap();
+    // A second pending run of the PR, as an older version could leave behind; starting one now
+    // is refused while the first is active.
+    let second_malformed_run_id: i64 = db
+        .query_row(
+            "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, model) SELECT pr_id, head_sha, 'pending', created_at, updated_at, model FROM review_runs WHERE id = $1 RETURNING id",
+            [run_id],
+            |row| row.get(0),
+        )
+        .unwrap();
     drop(db);
-    let conn = rusqlite::Connection::open(&db_path).unwrap();
-    for (coverage_id, malformed_run_id) in [(1, run_id), (2, second_malformed_run_id)] {
+    let conn = crate::db::Db::for_test_at(&db_path).open().unwrap();
+    for malformed_run_id in [run_id, second_malformed_run_id] {
         conn.execute(
-            "INSERT INTO review_coverage (id, repo_id, pr_id, run_id, status, base_ref, base_sha, merge_base_sha, head_sha, changed_files_json, covered_patch_ids_json, diff_hash, diff_text, created_at)
-             VALUES (?1, 1, ?2, ?3, 'valid', 'main', ?4, ?5, ?6, '[]', 'not-json', 'hash', '', 1)",
-            rusqlite::params![coverage_id, pr_id, malformed_run_id, base, merge_base, head],
+            "INSERT INTO review_coverage (repo_id, pr_id, run_id, status, base_ref, base_sha, merge_base_sha, head_sha, changed_files_json, covered_patch_ids_json, diff_hash, diff_text, created_at)
+             VALUES (1, $1, $2, 'valid', 'main', $3, $4, $5, '[]', 'not-json', 'hash', '', 1)",
+            crate::pg_params![pr_id, malformed_run_id, base, merge_base, head],
         ).unwrap();
     }
     drop(conn);
 
-    let db = crate::db::Database::open_at(db_path.clone()).unwrap();
+    let db = crate::db::Db::for_test_at(db_path.clone()).open().unwrap();
     assert!(db.review_coverage_patch_ids_for_pr(pr_id).unwrap().is_none());
     assert!(!db.review_coverage_exists(run_id).unwrap());
     assert!(!db.review_coverage_exists(second_malformed_run_id).unwrap());
+    // The malformed runs ended; a fresh review of the PR may start.
+    db.execute(
+        "UPDATE review_runs SET status = 'failed' WHERE id = ANY($1)",
+        crate::pg_params![vec![run_id, second_malformed_run_id]],
+    )
+    .unwrap();
     let fresh_run_id = db.start_review_skeleton_with(pr_id, Some("fixture")).unwrap();
     db.begin_review_coverage(&crate::db::ReviewCoverageInput {
         repo_id: 1,
@@ -1034,9 +1052,18 @@ fn malformed_persisted_coverage_is_quarantined_before_fresh_reuse() {
     db.finalize_review_coverage(fresh_run_id).unwrap();
     drop(db);
 
-    let resolution = resolve(&root, &db_path.to_string_lossy(), 1, &base, &head, &diff, None, &cancel)
-        .unwrap()
-        .unwrap();
+    let resolution = resolve(
+        &root,
+        &crate::db::Db::for_test_at(db_path.clone()),
+        1,
+        &base,
+        &head,
+        &diff,
+        None,
+        &cancel,
+    )
+    .unwrap()
+    .unwrap();
     assert!(resolution.usable);
     assert!(resolution.fully_covered);
     assert_eq!(resolution.review_base.as_deref(), Some(base.as_str()));

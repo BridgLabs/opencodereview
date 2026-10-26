@@ -21,7 +21,7 @@ pub struct AiAccount {
 const COLUMNS: &str =
     "id, provider, label, priority, enabled, status, limited_until, last_error, last_used_at, created_at";
 
-fn account(row: &rusqlite::Row) -> rusqlite::Result<AiAccount> {
+fn account(row: &pg::Row) -> Result<AiAccount, pg::Error> {
     Ok(AiAccount {
         id: row.get(0)?,
         provider: row.get(1)?,
@@ -49,7 +49,7 @@ impl Database {
     pub fn ai_account(&self, id: i64) -> Result<AiAccount, String> {
         self.conn
             .query_row(
-                &format!("SELECT {COLUMNS} FROM ai_accounts WHERE id = ?1"),
+                &format!("SELECT {COLUMNS} FROM ai_accounts WHERE id = $1"),
                 [id],
                 account,
             )
@@ -67,16 +67,17 @@ impl Database {
             return Err("Account name must have 1 to 80 characters".into());
         }
         let now = now_millis();
-        self.conn.execute(
-            "INSERT INTO ai_accounts (provider, label, priority, created_at, updated_at) VALUES (?1, ?2, (SELECT COALESCE(MAX(priority), 0) + 1 FROM ai_accounts), ?3, ?3)",
+        let id: i64 = self.conn.query_row(
+            "INSERT INTO ai_accounts (provider, label, priority, created_at, updated_at) VALUES ($1, $2, (SELECT COALESCE(MAX(priority), 0) + 1 FROM ai_accounts), $3, $3) RETURNING id",
             params![provider, label, now],
+            |row| row.get(0),
         ).map_err(|error| error.to_string())?;
-        self.ai_account(self.conn.last_insert_rowid())
+        self.ai_account(id)
     }
 
     pub fn delete_ai_account(&self, id: i64) -> Result<(), String> {
         self.conn
-            .execute("DELETE FROM ai_accounts WHERE id = ?1", [id])
+            .execute("DELETE FROM ai_accounts WHERE id = $1", [id])
             .map_err(|error| error.to_string())?;
         Ok(())
     }
@@ -88,7 +89,7 @@ impl Database {
         }
         self.conn
             .execute(
-                "UPDATE ai_accounts SET label = ?2, updated_at = ?3 WHERE id = ?1",
+                "UPDATE ai_accounts SET label = $2, updated_at = $3 WHERE id = $1",
                 params![id, label, now_millis()],
             )
             .map_err(|error| error.to_string())?;
@@ -98,7 +99,7 @@ impl Database {
     pub fn set_ai_account_enabled(&self, id: i64, enabled: bool) -> Result<AiAccount, String> {
         self.conn
             .execute(
-                "UPDATE ai_accounts SET enabled = ?2, updated_at = ?3 WHERE id = ?1",
+                "UPDATE ai_accounts SET enabled = $2, updated_at = $3 WHERE id = $1",
                 params![id, enabled as i64, now_millis()],
             )
             .map_err(|error| error.to_string())?;
@@ -121,7 +122,7 @@ impl Database {
         let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
         for (index, id) in ids.iter().enumerate() {
             tx.execute(
-                "UPDATE ai_accounts SET priority = ?2 WHERE id = ?1",
+                "UPDATE ai_accounts SET priority = $2 WHERE id = $1",
                 params![id, index as i64 + 1],
             )
             .map_err(|error| error.to_string())?;
@@ -154,7 +155,7 @@ impl Database {
 
     pub fn mark_ai_account_used(&self, id: i64) -> Result<(), String> {
         let now = now_millis();
-        self.conn.execute("UPDATE ai_accounts SET status = 'ok', limited_until = NULL, last_error = NULL, last_used_at = ?2, updated_at = ?2 WHERE id = ?1", params![id, now]).map_err(|error| error.to_string())?;
+        self.conn.execute("UPDATE ai_accounts SET status = 'ok', limited_until = NULL, last_error = NULL, last_used_at = $2, updated_at = $2 WHERE id = $1", params![id, now]).map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -163,18 +164,18 @@ impl Database {
         let until = resets_at
             .filter(|at| *at > now)
             .unwrap_or(now + DEFAULT_LIMIT_BACKOFF_MS);
-        self.conn.execute("UPDATE ai_accounts SET status = 'limited', limited_until = ?2, last_error = ?3, updated_at = ?4 WHERE id = ?1", params![id, until, error, now]).map_err(|error| error.to_string())?;
+        self.conn.execute("UPDATE ai_accounts SET status = 'limited', limited_until = $2, last_error = $3, updated_at = $4 WHERE id = $1", params![id, until, error, now]).map_err(|error| error.to_string())?;
         Ok(until)
     }
 
     pub fn mark_ai_account_auth_failed(&self, id: i64, error: &str) -> Result<(), String> {
-        self.conn.execute("UPDATE ai_accounts SET status = 'auth_failed', limited_until = NULL, last_error = ?2, updated_at = ?3 WHERE id = ?1", params![id, error, now_millis()]).map_err(|error| error.to_string())?;
+        self.conn.execute("UPDATE ai_accounts SET status = 'auth_failed', limited_until = NULL, last_error = $2, updated_at = $3 WHERE id = $1", params![id, error, now_millis()]).map_err(|error| error.to_string())?;
         Ok(())
     }
 
     /// A fresh sign-in clears any recorded failure.
     pub fn reset_ai_account_status(&self, id: i64) -> Result<(), String> {
-        self.conn.execute("UPDATE ai_accounts SET status = 'ok', limited_until = NULL, last_error = NULL, updated_at = ?2 WHERE id = ?1", params![id, now_millis()]).map_err(|error| error.to_string())?;
+        self.conn.execute("UPDATE ai_accounts SET status = 'ok', limited_until = NULL, last_error = NULL, updated_at = $2 WHERE id = $1", params![id, now_millis()]).map_err(|error| error.to_string())?;
         Ok(())
     }
 }

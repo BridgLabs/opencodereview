@@ -1,0 +1,48 @@
+# A second server instance next to the first, sharing the database, the data volume (sign-ins,
+# review archives, the API token) and the egress proxy:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.scale.yml up --build
+#
+# Each instance has its own runners and its own Git cache. Queued reviews spread across instances
+# (each starts reviews while it has free slots); polling, indexing, retention and other background
+# work runs on one instance at a time. Sign-in flows always go to the first instance, which owns
+# the Codex callback port.
+services:
+  server:
+    image: opencodereview-server:local
+
+  server-2:
+    extends:
+      file: docker-compose.yml
+      service: server
+    image: opencodereview-server:local
+    build: !reset null
+    ports: !reset []
+    environment:
+      OCR_REPOS_DIR: /repos
+    volumes: !override
+      - ocr-data:/data
+      - review-claude-auth:/review-claude-auth
+      - review-ipc-2:/review-ipc
+      - database-secret:/run/ocr-db:ro
+      - repos-2:/repos
+    depends_on:
+      server:
+        condition: service_started
+
+  review-runner-2:
+    extends:
+      file: docker-compose.yml
+      service: review-runner
+    volumes: !override
+      - review-ipc-2:/ipc
+      - review-claude-auth:/claude-auth:ro
+
+  web:
+    depends_on: [server, server-2]
+    volumes:
+      - ./docker/web-nginx.scale.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  review-ipc-2:
+  repos-2:

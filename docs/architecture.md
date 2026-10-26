@@ -1,6 +1,6 @@
 # Architecture
 
-OpenCodeReview is a single-node Docker application: a React web UI, a Rust HTTP backend backed by SQLite, and isolated review runners. There is no message broker and no hosted component. Long-running work (polling, indexing, reviews, publication, cleanup) runs as bounded background jobs inside the `server` container, and every AI execution runs in a runner container.
+OpenCodeReview is a Docker application: a React web UI, a Rust HTTP backend backed by Postgres, and isolated review runners. There is no message broker and no hosted component. Long-running work (polling, indexing, reviews, publication, cleanup) runs as bounded background jobs inside the `server` container, and every AI execution runs in a runner container.
 
 ## Services
 
@@ -8,7 +8,8 @@ OpenCodeReview is a single-node Docker application: a React web UI, a Rust HTTP 
 flowchart TB
   Browser[Browser] -->|UI + same-origin /api| Web[web: nginx + React]
   Web -->|authenticated HTTP + SSE| API[server: Rust API]
-  API --> DB[(SQLite, Git cache, index, archives)]
+  API --> DB[(Postgres)]
+  API --> FS[(Git cache, archives, sign-ins)]
   API --> GH[gh CLI -> GitHub]
   API -->|private IPC| Runners[review-runner replicas]
   Runners --> Egress[review-egress]
@@ -28,7 +29,7 @@ Volumes: `ocr-data` (database, repository cache, index, review archives, setting
 
 ## Review runners
 
-- Runners receive only their IPC socket and a read-only projection of the AI sign-ins. They never mount `ocr-data`, repository checkouts or SQLite.
+- Runners receive only their IPC socket and a read-only projection of the AI sign-ins. They never mount `ocr-data` or repository checkouts, and they cannot reach the database.
 - The containers are read-only, drop all capabilities except the few the supervisor needs, use `no-new-privileges`, and limit CPU, memory and process count. The AI process runs as an unprivileged UID separate from its supervisor.
 - Claude Code runs as `claude --print` with a fixed model and effort (`claude-opus-5-5`, medium), JSON streaming output, no MCP servers, no session persistence, no slash commands and an explicit tool list (`Read`, `Grep`, `Glob`, `Bash`, `Write`). `Agent`, `Task`, `WebFetch`, `WebSearch` and `mcp__*` are denied, and a `PreToolUse` hook (`ocr-sandbox tool-guard`) checks every tool call. Shell access is limited to bounded reads, searches and listings inside the snapshot.
 - Codex runs as `codex exec` with medium reasoning effort, the CLI's default model, ephemeral sessions and user config, extensions and web search disabled. Codex's own sandbox cannot start inside the hardened runner, so the container is the sandbox.
@@ -62,17 +63,23 @@ React 19, TypeScript and Vite, built into static files served by nginx ([`docker
 
 ## Persistence
 
-SQLite in WAL mode at `/data/opencodereview.sqlite`. Read paths open read-only connections; writes use short explicit transactions. The schema starts from [`backend/src/db/schema.sql`](../backend/src/db/schema.sql) followed by the migrations listed in [`backend/src/db/migrations.rs`](../backend/src/db/migrations.rs); `PRAGMA user_version` records how many have run. New migrations are appended and applied migrations are never edited. Opening a database newer than the application fails explicitly.
+Postgres, run by Compose as the `postgres` service on an internal network only `server` joins. The server works through connection pools: one for reads and writes, a read-only one for read paths, and one that sees only the `scratch` schema, where each review indexes its pull request's head commit. A connection is held for one step at a time, never across Git, GitHub or model calls. Transactions that decide from a pull request's state lock its row first, so concurrent work on one pull request runs in turn.
+
+Migrations live in [`backend/src/db/pg/`](../backend/src/db/pg) and are listed in [`migrate.rs`](../backend/src/db/pg/migrate.rs). They run once at startup under an advisory lock and are recorded in `schema_migrations`. New migrations are appended and applied ones are never edited. A database newer than the application fails explicitly. Installs that ran on SQLite move their data with `ocr-server import-sqlite` ([upgrading](upgrading.md)).
+
+Several server instances can share the database ([`docker-compose.scale.yml`](../docker-compose.scale.yml)). Each one records a heartbeat and the reviews and indexing it runs, so only the work of a stopped instance is interrupted. Queued reviews start on whichever instance has a free slot. Polling, indexing, archive retention and other background jobs run on one instance at a time.
 
 | Area | Tables |
 | --- | --- |
 | Setup | `workspaces`, `repos`, `subscriptions`, `settings`, `ai_accounts` |
 | Pull requests | `pull_requests`, `pending_actions`, `pr_comment_activations`, `comment_activation_receipts`, `comment_scan_cursors`, `queue_acknowledgements`, `review_request_restorations` |
-| Index | `repo_index_state`, `repo_index_files`, `repo_index_packages`, `repo_index_pkg_deps`, `repo_index_edges`, `repo_index_symbols`, `repo_index_symbol_edges` |
+| Index | `repo_index_state`, `repo_index_files`, `repo_index_packages`, `repo_index_pkg_deps`, `repo_index_edges`, `repo_index_symbols`, `repo_index_symbol_edges`; per-review copies in `scratch` |
+| Review archives | `archive.artifacts`, `archive.receipts`, `archive.uploads`, `archive.deletions`, `archive.retention_queue`, `archive.retention_events` |
+| Instances | `server_instances` |
 | Reviews | `review/` (`mod.rs`, `frozen.rs`, `execution.rs`, `scope.rs`, `coverage.rs`, `chunks.rs`, `integration/`, `evidence.rs`, `validation.rs`, `findings.rs`), `review_archive/` |
 | Skills | `skill_versions` |
 
-Frozen review archives live under `/data/review-archives` with a 4 GiB quota. Archives of merged pull requests are deleted one day after merge by an hourly cleanup job; review results, findings and usage are kept. Named volumes hold all state, so do not use `docker compose down -v` as a normal restart.
+Frozen review archives live under `/data/review-archives` with a 4 GiB quota; their index is in the `archive` schema. Archives of merged pull requests are deleted one day after merge by an hourly cleanup job; review results, findings and usage are kept. Named volumes hold all state, so do not use `docker compose down -v` as a normal restart.
 
 ## API security
 

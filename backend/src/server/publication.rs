@@ -403,7 +403,7 @@ pub(crate) fn publish_reserved_review_result(
         Ok(comment_id) => {
             db.finish_review_result_publication(result.id, comment_id)?;
             let _ = db.retire_queue_acknowledgement(result.pr_id, &result.observed_head_sha, result.run_id);
-            spawn_queue_acknowledgements(PathBuf::from(db.path()));
+            spawn_queue_acknowledgements(db.handle());
             verify_published_result_live_head(
                 db,
                 result,
@@ -764,7 +764,7 @@ pub(crate) fn handle_completed_review(
 }
 
 pub(crate) fn run_review_job(
-    db_path: String,
+    db_handle: Db,
     jobs: Arc<Mutex<HashMap<i64, ReviewJob>>>,
     inputs: review::ReviewInputs,
     cancel: Arc<AtomicBool>,
@@ -772,17 +772,17 @@ pub(crate) fn run_review_job(
 ) {
     let pr_id = inputs.pr_id;
     let run_id = inputs.run_id;
-    let progress_db = Database::open_at(PathBuf::from(&db_path)).ok();
     let progress_cancel = cancel.clone();
+    // A connection per update: holding one for the whole review would pin it for minutes.
     let mut on_progress = |phase: &str, tail: &str| {
-        if let Some(db) = progress_db.as_ref() {
+        if let Ok(db) = db_handle.open() {
             if matches!(db.update_review_run_progress(run_id, phase, tail), Ok(false)) {
                 progress_cancel.store(true, Ordering::Relaxed);
             }
         }
     };
     let result = review::execute(&inputs, &cancel, &mut on_progress);
-    if let Ok(db) = Database::open_at(PathBuf::from(&db_path)) {
+    if let Ok(db) = db_handle.open() {
         let done_phase = completed_review_phase(&db, run_id);
         let mut coverage_finalized = false;
         match &result {
@@ -998,7 +998,7 @@ pub(crate) fn auto_post_review(
         if let Some(review_id) = posted_review_id {
             let _ = db.accept_review_request_restoration(run.id, review_id);
             let _ = db.retire_queue_acknowledgement(pr_id, &run.head_sha, Some(run.id));
-            spawn_queue_acknowledgements(PathBuf::from(db.path()));
+            spawn_queue_acknowledgements(db.handle());
             if review_has_findings(run.comments_json.as_deref(), run.review_body.as_deref()) {
                 retire_clean_comments_after_findings(db, full_name, number, run.id);
             }
@@ -1013,7 +1013,7 @@ pub(crate) fn auto_post_review(
     // so its "reviewing" comment has to go too.
     if posted_review_id.is_none() {
         let _ = db.retire_queue_acknowledgement(pr_id, &run.head_sha, Some(run.id));
-        spawn_queue_acknowledgements(PathBuf::from(db.path()));
+        spawn_queue_acknowledgements(db.handle());
     }
     confirm_posted_review_live_head(
         db,
