@@ -70,13 +70,13 @@ pub(crate) fn stream_review_progress(
     stream.write_all(head.as_bytes()).map_err(|error| error.to_string())?;
     stream.flush().map_err(|error| error.to_string())?;
 
-    let db = state.config.db.open_read()?;
     let started = Instant::now();
     let mut last_key: Option<(i64, i64)> = None;
     let mut sent_initial = false;
     let mut last_heartbeat = Instant::now();
     while started.elapsed() < REVIEW_SSE_MAX_AGE {
-        let snapshot = db.review_progress_snapshot(pr_id)?;
+        // A connection per poll, not per stream: streams live for hours and would hold the pool.
+        let snapshot = state.config.db.open_read()?.review_progress_snapshot(pr_id)?;
         let key = snapshot.as_ref().map(|value| (value.run_id, value.updated_at));
         if !sent_initial || key != last_key {
             write_review_progress_event(stream, snapshot.as_ref())?;

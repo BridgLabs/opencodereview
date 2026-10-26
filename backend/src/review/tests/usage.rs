@@ -75,7 +75,7 @@ pub(super) fn review_inputs(depth: &str, threshold: usize, chunk_size: usize) ->
         review_deep_threshold: threshold,
         review_chunk_size: chunk_size,
         review_parallel_chunks: 1,
-        db_handle: Some(crate::db::Db::sqlite(":memory:".into())),
+        db_handle: Some(crate::db::Db::for_test()),
         archive_dir: std::path::PathBuf::from("review-archives"),
     }
 }
@@ -139,7 +139,6 @@ fn review_context_uses_the_pinned_head_graph() {
         &["entry.ts".into()],
         &head,
         &inputs.base_ref,
-        &root,
         &std::sync::atomic::AtomicBool::new(false),
         &mut |_, _| {},
     )
@@ -577,14 +576,10 @@ pub(crate) struct RecordedDependencies {
 }
 
 pub(crate) fn load_recorded_dependencies(
-    db_path: &std::path::Path,
+    archives_dir: &std::path::Path,
     run_id: i64,
 ) -> Result<Option<RecordedDependencies>, crate::review_archive::Error> {
-    let Some(parent) = db_path.parent() else {
-        return Ok(None);
-    };
-    let archives_dir = parent.join("review-archives");
-    match std::fs::symlink_metadata(&archives_dir) {
+    match std::fs::symlink_metadata(archives_dir) {
         Ok(meta) => {
             if !meta.is_dir() {
                 return Err(crate::review_archive::Error::Integrity);
@@ -593,7 +588,7 @@ pub(crate) fn load_recorded_dependencies(
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err(crate::review_archive::Error::Preparation),
     }
-    let store = crate::review_archive::ArchiveStore::open_read(&archives_dir)?;
+    let store = crate::review_archive::ArchiveStore::open_read(archives_dir)?;
     let archive = store.load_linked(&format!("review:{run_id}"))?;
     Ok(archive.map(|archive| RecordedDependencies {
         // Native submodules have no URL provenance, but retain authenticated archive membership.
@@ -616,31 +611,32 @@ mod dependency_diagnostics_tests;
 #[test]
 fn export_recorded_dependencies_distinguishes_absence_from_corruption() {
     let root = super::make_run_dir(-789).unwrap();
-    let db_path = root.join("opencodereview.sqlite");
-    std::fs::write(&db_path, b"").unwrap();
-
     // 1. Missing review-archives directory -> Ok(None) (legacy absence)
-    assert!(load_recorded_dependencies(&db_path, 42).unwrap().is_none());
+    assert!(load_recorded_dependencies(&root.join("review-archives"), 42)
+        .unwrap()
+        .is_none());
 
     // 1b. Existing review-archives path that is a regular file -> Err(Integrity)
     let archives_dir = root.join("review-archives");
     std::fs::write(&archives_dir, b"not a directory").unwrap();
     assert!(matches!(
-        load_recorded_dependencies(&db_path, 42),
+        load_recorded_dependencies(&root.join("review-archives"), 42),
         Err(crate::review_archive::Error::Integrity)
     ));
     std::fs::remove_file(&archives_dir).unwrap();
 
     // 2. Existing store with no receipt for run -> Ok(None)
     let _store = crate::review_archive::ArchiveStore::open(&archives_dir).unwrap();
-    assert!(load_recorded_dependencies(&db_path, 42).unwrap().is_none());
+    assert!(load_recorded_dependencies(&root.join("review-archives"), 42)
+        .unwrap()
+        .is_none());
 
     // 3. Existing store with receipt pointing to missing artifact -> Err(Integrity)
     let conn = rusqlite::Connection::open(archives_dir.join("index.sqlite")).unwrap();
     conn.execute("INSERT INTO receipts(owner, id) VALUES('review:42', '0000000000000000000000000000000000000000000000000000000000000000')", []).unwrap();
     drop(conn);
     assert!(matches!(
-        load_recorded_dependencies(&db_path, 42),
+        load_recorded_dependencies(&root.join("review-archives"), 42),
         Err(crate::review_archive::Error::Integrity)
     ));
 
@@ -648,18 +644,17 @@ fn export_recorded_dependencies_distinguishes_absence_from_corruption() {
 }
 
 #[test]
-#[ignore = "Exports only one PR context through SQLite read-only connections; no Git or model calls"]
+#[ignore = "Exports only one PR context through a read-only database connection; no Git or model calls"]
 fn export_read_only_review_context_fixture() {
-    use rusqlite::OptionalExtension;
-    let path = std::path::PathBuf::from(std::env::var("OCR_DIAGNOSTIC_DB").expect("Database path required"));
+    use crate::db::pg::OptionalExtension;
     let repository = std::env::var("OCR_DIAGNOSTIC_REPOSITORY").expect("Repository required");
     let number: i64 = std::env::var("OCR_DIAGNOSTIC_PR")
         .expect("PR required")
         .parse()
         .unwrap();
-    let conn = rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
-    conn.busy_timeout(std::time::Duration::from_secs(5)).unwrap();
-    let (pr_id, repo_id): (i64, i64) = conn.query_row("SELECT p.id,p.repo_id FROM pull_requests p JOIN repos r ON r.id=p.repo_id WHERE r.full_name=?1 AND p.number=?2", rusqlite::params![repository, number], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+    let db = crate::db::Db::diagnostic_from_env().open_read().unwrap();
+    let conn = &db;
+    let (pr_id, repo_id): (i64, i64) = conn.query_row("SELECT p.id,p.repo_id FROM pull_requests p JOIN repos r ON r.id=p.repo_id WHERE r.full_name=$1 AND p.number=$2", crate::pg_params![repository, number], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
     let size = conn
         .query_row("SELECT value FROM settings WHERE key='review_chunk_size'", [], |row| {
             row.get::<_, String>(0)
@@ -668,7 +663,6 @@ fn export_read_only_review_context_fixture() {
         .and_then(|size| size.parse::<usize>().ok())
         .unwrap_or(5);
     let chunk_size = if size == 0 { 5 } else { size.clamp(2, 20) };
-    let db = crate::db::Database::open_read_at(path.clone()).unwrap();
     let run = if let Ok(id) = std::env::var("OCR_DIAGNOSTIC_RUN") {
         db.review_run_by_id(id.parse().unwrap())
             .unwrap()
@@ -706,7 +700,7 @@ fn export_read_only_review_context_fixture() {
     } else {
         None
     };
-    let prior_run: Option<i64> = conn.query_row("SELECT id FROM review_runs WHERE pr_id=?1 AND head_sha=?2 AND id<?3 AND review_body IS NOT NULL ORDER BY id DESC LIMIT 1", rusqlite::params![pr_id, plan.prior_sha, run.id], |row| row.get(0)).optional().unwrap();
+    let prior_run: Option<i64> = conn.query_row("SELECT id FROM review_runs WHERE pr_id=$1 AND head_sha=$2 AND id<$3 AND review_body IS NOT NULL ORDER BY id DESC LIMIT 1", crate::pg_params![pr_id, plan.prior_sha, run.id], |row| row.get(0)).optional().unwrap();
     let prior_scope = prior_run.and_then(|id| db.review_run_scope(id).unwrap());
     let prior_coverage = if std::env::var("OCR_DIAGNOSTIC_REPLAN_BASE_SYNC").as_deref() == Ok("true") {
         plan.prior_sha
@@ -718,8 +712,13 @@ fn export_read_only_review_context_fixture() {
     } else {
         None
     };
-    let (authorized_dependencies, recorded_dependencies) = match load_recorded_dependencies(&path, run.id)
-        .expect("Review archive store and receipt must be valid if present")
+    let (authorized_dependencies, recorded_dependencies) = match load_recorded_dependencies(
+        &crate::review_archive::archive_dir(std::path::Path::new(
+            &std::env::var("OCR_DATA_DIR").unwrap_or_else(|_| "data".into()),
+        )),
+        run.id,
+    )
+    .expect("Review archive store and receipt must be valid if present")
     {
         Some(recorded) => (recorded.repositories, Some(recorded.provenance)),
         None => (std::collections::BTreeSet::new(), None),
@@ -735,10 +734,7 @@ fn hydrate_pinned_review_dependencies_without_inference() {
     let fixture = &packet["fixture"];
     let repository = fixture["repository"].as_str().unwrap();
     let root = std::path::PathBuf::from(std::env::var("OCR_DIAGNOSTIC_REPOS").expect("Repository root required"));
-    let db = crate::db::Database::open_read_at(std::path::PathBuf::from(
-        std::env::var("OCR_DIAGNOSTIC_DB").expect("Database required"),
-    ))
-    .unwrap();
+    let db = crate::db::Db::diagnostic_from_env().open_read().unwrap();
     let run = db
         .review_run_by_id(fixture["runId"].as_i64().unwrap())
         .unwrap()
@@ -883,7 +879,6 @@ fn persisted_review_chunk_preparation_without_inference() {
             &assigned,
             &scope.head_sha,
             &scope.base_sha,
-            &root,
             &cancel,
             &mut |_, _| {},
         )
@@ -928,7 +923,6 @@ fn persisted_review_chunk_preparation_without_inference() {
             &selected.changed_files,
             &scope.head_sha,
             &scope.base_sha,
-            &root,
             &cancel,
             &mut |_, _| {},
         )
@@ -985,7 +979,6 @@ fn persisted_review_chunk_preparation_without_inference() {
             &paths,
             &scope.head_sha,
             &scope.base_sha,
-            &root,
             &cancel,
             &mut |_, _| {},
         )
@@ -1017,7 +1010,6 @@ fn persisted_review_chunk_preparation_without_inference() {
                 &paths,
                 &scope.head_sha,
                 &scope.base_sha,
-                &root,
                 &cancel,
                 &mut |_, _| {},
             )
@@ -1510,7 +1502,7 @@ fn verify_retained_final_and_audit() {
     let map: super::ReviewMap = serde_json::from_value(packet["map"].clone()).unwrap();
     let mut inputs = review_inputs("deep", 20, 5);
     let db_path = source.join("diagnostic.sqlite");
-    inputs.db_handle = Some(crate::db::Db::sqlite(db_path.clone()));
+    inputs.db_handle = Some(crate::db::Db::for_test_at(db_path.clone()));
     inputs.archive_dir = source.join("review-archives");
     inputs.frozen = Some(std::sync::Arc::new(super::frozen::FrozenContext::new(archive)));
     let mut payload = super::integration::Payload::empty(&map.head_sha);
@@ -1832,21 +1824,21 @@ fn validate_complete_real_review() {
     inputs.fixed_head_sha = Some(map.head_sha.clone());
     inputs.review_parallel_chunks = targets.len();
     let db_path = source.join("diagnostic.sqlite");
-    inputs.db_handle = Some(crate::db::Db::sqlite(db_path.clone()));
+    inputs.db_handle = Some(crate::db::Db::for_test_at(db_path.clone()));
     inputs.archive_dir = source.join("review-archives");
     assert!(!db_path.exists(), "Diagnostic ledger already exists");
     drop(inputs.open_db().unwrap());
-    let ledger = rusqlite::Connection::open(&db_path).unwrap();
+    let ledger = crate::db::Db::for_test_at(&db_path).open().unwrap();
     ledger
         .execute(
-            "INSERT INTO repos(id,owner,name,full_name,created_at,updated_at) VALUES(1,'diagnostic','repo',?1,0,0)",
+            "INSERT INTO repos(id,owner,name,full_name,created_at,updated_at) VALUES(1,'diagnostic','repo',$1,0,0)",
             [&inputs.full_name],
         )
         .unwrap();
-    ledger.execute("INSERT INTO pull_requests(id,repo_id,number,title,author,head_sha,last_synced_at,created_at,updated_at) VALUES(1,1,?1,?2,'diagnostic',?3,0,0,0)", rusqlite::params![inputs.number,inputs.pr_title,map.head_sha]).unwrap();
+    ledger.execute("INSERT INTO pull_requests(id,repo_id,number,title,author,head_sha,last_synced_at,created_at,updated_at) VALUES(1,1,$1,$2,'diagnostic',$3,0,0,0)", crate::pg_params![inputs.number,inputs.pr_title,map.head_sha]).unwrap();
     ledger
         .execute(
-            "INSERT INTO review_runs(id,pr_id,head_sha,status,created_at,updated_at) VALUES(1,1,?1,'running',0,0)",
+            "INSERT INTO review_runs(id,pr_id,head_sha,status,created_at,updated_at) VALUES(1,1,$1,'running',0,0)",
             [&map.head_sha],
         )
         .unwrap();

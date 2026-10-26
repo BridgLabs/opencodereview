@@ -73,12 +73,12 @@ fn review_preflight_refreshes_and_reuses_a_shared_index() {
         "initial",
     ]);
     git(&["remote", "add", "origin", &repo_path.to_string_lossy()]);
-    let db = Database::open_at(root.join("test.sqlite")).unwrap();
+    let db = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/repo").unwrap();
     let repo = db.save_repo_default_branch(1, "main").unwrap();
     let state = Arc::new(ServerState::new(ServerConfig {
         bind: "127.0.0.1:0".to_string(),
-        db: crate::db::Db::sqlite(root.join("test.sqlite")),
+        db: crate::db::Db::for_test_at(root.join("test.sqlite")),
         data_dir: root.to_path_buf(),
         repos_dir: root.join("repos"),
         auto_reindex: false,
@@ -180,10 +180,11 @@ fn review_preflight_refreshes_and_reuses_a_shared_index() {
     }
     start_review_job(&state, second_pr, true).unwrap();
     assert!(db.take_force_full_next_review(second_pr).unwrap());
-    rusqlite::Connection::open(db.path())
+    db.handle()
+        .open()
         .unwrap()
         .execute(
-            "UPDATE pull_requests SET last_decision_sha=head_sha WHERE id=?1",
+            "UPDATE pull_requests SET last_decision_sha=head_sha WHERE id=$1",
             [second_pr],
         )
         .unwrap();
@@ -212,7 +213,7 @@ fn clean_reviews_are_completed_without_finding_selection_even_with_auto_post_ena
             .unwrap()
             .as_nanos()
     ));
-    let db = Database::open_at(root.join("test.sqlite")).unwrap();
+    let db = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     db.save_setting("auto_post_mode", "comment").unwrap();
     db.save_setting("pr_summary_comment_enabled", "false").unwrap();
@@ -264,10 +265,7 @@ fn clean_reviews_are_completed_without_finding_selection_even_with_auto_post_ena
         review_chunk_size: 5,
         review_parallel_chunks: 2,
         db_handle: Some(db.handle()),
-        archive_dir: std::path::Path::new(&db.path())
-            .parent()
-            .unwrap()
-            .join("review-archives"),
+        archive_dir: std::env::temp_dir().join(format!("ocr-review-archives-{}", crate::sandbox::secret().unwrap())),
     };
     for no_changes in [false, true] {
         handle_completed_review(&db, &inputs, no_changes, false);
@@ -433,7 +431,7 @@ fn stale_review_target_supersedes_run_without_failure_notification() {
             .unwrap()
             .as_nanos()
     ));
-    let db = Database::open_at(root.join("test.sqlite")).unwrap();
+    let db = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     let pr_id = db
         .upsert_pull_request(&crate::db::PullRequestInput {
@@ -786,7 +784,7 @@ fn skip_decision_leaves_attention_and_survives_restore() {
             .unwrap()
             .as_nanos()
     ));
-    let db = Database::open_at(root.join("test.sqlite")).unwrap();
+    let db = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     db.save_repo_subscription(1, true, "manual", false, false).unwrap();
     let pr_id = db
@@ -827,7 +825,7 @@ fn skip_decision_leaves_attention_and_survives_restore() {
         .unwrap();
     let state = Arc::new(ServerState::new(ServerConfig {
         bind: "127.0.0.1:0".into(),
-        db: crate::db::Db::sqlite(root.join("test.sqlite")),
+        db: crate::db::Db::for_test_at(root.join("test.sqlite")),
         data_dir: root.to_path_buf(),
         repos_dir: root.join("repos"),
         auto_reindex: false,
@@ -944,7 +942,7 @@ fn review_publication_recovery_cases(snapshot_fails: bool, payload_fails: bool) 
             .unwrap()
             .as_nanos(),
     ));
-    let db = Database::open_at(root.join("test.sqlite")).unwrap();
+    let db = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     let pr_id = db
         .upsert_pull_request(&crate::db::PullRequestInput {
@@ -1071,7 +1069,7 @@ fn retry_failed_clean_results_republishes_due_failures_only() {
             .unwrap()
             .as_nanos()
     ));
-    let db = Database::open_at(root.join("test.sqlite")).unwrap();
+    let db = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
     db.save_setting("review_result_mode", "silent").unwrap();
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     let pr_id = db
@@ -1159,7 +1157,7 @@ fn two_due_failed_clean_results(label: &str) -> (PathBuf, Database, Vec<i64>) {
             .unwrap()
             .as_nanos()
     ));
-    let db = Database::open_at(root.join("test.sqlite")).unwrap();
+    let db = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     db.save_setting("review_result_mode", "result_comment").unwrap();
     let mut pr_ids = Vec::new();

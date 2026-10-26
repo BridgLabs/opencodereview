@@ -772,10 +772,10 @@ pub(crate) fn run_review_job(
 ) {
     let pr_id = inputs.pr_id;
     let run_id = inputs.run_id;
-    let progress_db = db_handle.open().ok();
     let progress_cancel = cancel.clone();
+    // A connection per update: holding one for the whole review would pin it for minutes.
     let mut on_progress = |phase: &str, tail: &str| {
-        if let Some(db) = progress_db.as_ref() {
+        if let Ok(db) = db_handle.open() {
             if matches!(db.update_review_run_progress(run_id, phase, tail), Ok(false)) {
                 progress_cancel.store(true, Ordering::Relaxed);
             }

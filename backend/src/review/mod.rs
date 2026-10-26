@@ -391,16 +391,26 @@ fn build_snapshot_context_plan(
     paths: &[String],
     head: &str,
     base: &str,
-    run_dir: &Path,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(&str, &str),
 ) -> Result<(ReviewContextPlan, Option<String>), String> {
-    let db = Database::open_at(run_dir.join("head-context.sqlite3"))?;
-    db.ensure_temp_repo_for_index(inputs.repo_id, &inputs.full_name)?;
-    let status = db.repo_index_status(inputs.repo_id)?;
-    if status.status != "ready" || status.base_sha.as_deref() != Some(head) || status.spec_version != INDEX_SPEC_VERSION
-    {
-        db.begin_repo_index(inputs.repo_id, Some(head))?;
+    let db_handle = inputs.db_handle.as_ref().ok_or("Review storage unavailable")?;
+    // The head commit's index lives in `scratch` under this run's id, apart from the repository's
+    // own index; `execute` drops it when the run ends. No connection is held while indexing.
+    let index_id = inputs.run_id;
+    let stale = {
+        let db = db_handle.open_scratch()?;
+        db.ensure_temp_repo_for_index(index_id, &inputs.full_name)?;
+        let status = db.repo_index_status(index_id)?;
+        let stale = status.status != "ready"
+            || status.base_sha.as_deref() != Some(head)
+            || status.spec_version != INDEX_SPEC_VERSION;
+        if stale {
+            db.begin_repo_index(index_id, Some(head))?;
+        }
+        stale
+    };
+    if stale {
         let mut last_emit = Instant::now() - Duration::from_secs(1);
         let write = indexer::run_index_for_ref(&inputs.repo_path, head, None, cancel, &mut |event| {
             if last_emit.elapsed() >= Duration::from_secs(1) {
@@ -414,11 +424,12 @@ fn build_snapshot_context_plan(
                 last_emit = Instant::now();
             }
         })?;
-        db.finish_repo_index(inputs.repo_id, &write)?;
+        db_handle.open_scratch()?.write_repo_index(index_id, &write)?;
     }
-    let mut plan = db.build_review_context_plan(inputs.repo_id, paths, MAX_RELATED_CONTEXT)?;
+    let db = db_handle.open_scratch()?;
+    let mut plan = db.build_review_context_plan(index_id, paths, MAX_RELATED_CONTEXT)?;
     for path in paths {
-        for (related, _, _) in db.related_index_files(inputs.repo_id, std::slice::from_ref(path), 100)? {
+        for (related, _, _) in db.related_index_files(index_id, std::slice::from_ref(path), 100)? {
             plan.dependency_edges.push((path.clone(), related));
         }
     }

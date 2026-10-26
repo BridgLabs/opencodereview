@@ -75,12 +75,8 @@ pub fn execute(
         }
         let _ = db.clear_finding_evidence(inputs.run_id);
     }
-    for name in [
-        "head-context.sqlite3",
-        "head-context.sqlite3-wal",
-        "head-context.sqlite3-shm",
-    ] {
-        let _ = fs::remove_file(run_dir.join(name));
+    if let Some(db_handle) = &inputs.db_handle {
+        let _ = db_handle.open().and_then(|db| db.drop_snapshot_index(inputs.run_id));
     }
     let debug_dir = save_review_debug_artifacts(inputs, &run_dir, &result);
     if let Some(debug_dir) = &debug_dir {
@@ -413,7 +409,7 @@ pub(crate) fn run_inner(
     );
     let plan = {
         let (mut plan, base_sha) =
-            build_snapshot_context_plan(inputs, &changed, &head_sha, &base_rev, run_dir, cancel, progress)?;
+            build_snapshot_context_plan(inputs, &changed, &head_sha, &base_rev, cancel, progress)?;
         let db = inputs.open_db()?;
         let _ = db.set_review_run_context_metadata(
             inputs.run_id,
@@ -469,16 +465,7 @@ pub(crate) fn run_inner(
     let risk_plan = if full_pr_changed == changed {
         plan.clone()
     } else {
-        build_snapshot_context_plan(
-            inputs,
-            &full_pr_changed,
-            &head_sha,
-            &base_rev,
-            run_dir,
-            cancel,
-            progress,
-        )?
-        .0
+        build_snapshot_context_plan(inputs, &full_pr_changed, &head_sha, &base_rev, cancel, progress)?.0
     };
 
     for name in [

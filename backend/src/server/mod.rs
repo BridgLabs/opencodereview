@@ -86,17 +86,14 @@ impl ServerConfig {
         crate::review_archive::archive_dir(&self.data_dir)
     }
 
-    pub fn from_env() -> Self {
+    /// Connects to Postgres (and migrates it); call before any thread starts.
+    pub fn from_env() -> Result<Self, String> {
         let data_dir = std::env::var("OCR_DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("data"));
-        Self {
+        Ok(Self {
             bind: std::env::var("OCR_BIND").unwrap_or_else(|_| "127.0.0.1:8787".to_string()),
-            db: Db::sqlite(
-                std::env::var("OCR_DB_PATH")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|_| data_dir.join("opencodereview.sqlite")),
-            ),
+            db: Db::from_env()?,
             repos_dir: std::env::var("OCR_REPOS_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| data_dir.join("repos")),
@@ -112,7 +109,7 @@ impl ServerConfig {
                 .filter(|v| !v.is_empty())
                 .or_else(|| resolve_persisted_token(&data_dir)),
             data_dir,
-        }
+        })
     }
 }
 
@@ -248,13 +245,14 @@ fn resolve_persisted_token(data_dir: &Path) -> Option<String> {
 }
 
 pub fn run_from_env() -> Result<(), String> {
-    run(ServerConfig::from_env())
+    run(ServerConfig::from_env()?)
 }
 
 pub fn run(config: ServerConfig) -> Result<(), String> {
     std::fs::create_dir_all(&config.repos_dir).map_err(|error| error.to_string())?;
     let db = config.db.open()?;
     db.reconcile_interrupted_jobs()?;
+    db.reap_snapshot_indexes()?;
     crate::accounts::adopt_legacy_token(&db)?;
     drop(db);
     cleanup_runtime_artifacts();

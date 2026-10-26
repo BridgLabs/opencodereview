@@ -1,4 +1,5 @@
 use super::*;
+use crate::db::{Database, Db};
 use crate::review_archive::{Archive, ArchiveStore, Scope, SourceEntry};
 use rusqlite::{params, Connection};
 use std::path::PathBuf;
@@ -8,23 +9,42 @@ const NOW: i64 = 10 * RETENTION_MS;
 
 struct Fixture {
     root: PathBuf,
-    database: PathBuf,
-    db: Connection,
+    handle: Db,
+    db: Database,
 }
 
 impl Fixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!("ocr-retention-{}", crate::sandbox::secret().unwrap()));
         std::fs::create_dir(&root).unwrap();
-        let database = root.join("opencodereview.sqlite");
-        let db = Connection::open(&database).unwrap();
-        db.execute_batch("PRAGMA journal_mode=WAL;
-            CREATE TABLE pull_requests(id INTEGER PRIMARY KEY,state TEXT NOT NULL,review_lane TEXT NOT NULL DEFAULT 'merged',reprocess_next_review INTEGER NOT NULL DEFAULT 0,force_full_next_review INTEGER NOT NULL DEFAULT 0);
-            CREATE TABLE review_runs(id INTEGER PRIMARY KEY,pr_id INTEGER,status TEXT,finished_at INTEGER,review_body TEXT);
-            CREATE TABLE review_results(pr_id INTEGER,effective_state TEXT,publication_status TEXT);
-            CREATE TABLE review_coverage(run_id INTEGER,status TEXT);
-            CREATE TABLE review_finding_audits(run_id INTEGER,audit_json TEXT);").unwrap();
-        Self { root, database, db }
+        let handle = Db::for_test();
+        let db = handle.open().unwrap();
+        db.execute(
+            "INSERT INTO repos (id, owner, name, full_name, created_at, updated_at) VALUES (1, 'owner', 'repo', 'owner/repo', 0, 0)",
+            [],
+        )
+        .unwrap();
+        Self { root, handle, db }
+    }
+
+    fn pr(&self, id: i64, state: &str) {
+        self.db
+            .execute(
+                "INSERT INTO pull_requests (id, repo_id, number, title, author, head_sha, state, review_lane, last_synced_at, created_at, updated_at)
+                 VALUES ($1, 1, $1, 'PR', 'author', 'head', $2, 'merged', 0, 0, 0)",
+                crate::pg_params![id, state],
+            )
+            .unwrap();
+    }
+
+    fn review_run(&self, id: i64, pr_id: i64, status: &str, finished_at: Option<i64>) {
+        self.db
+            .execute(
+                "INSERT INTO review_runs (id, pr_id, head_sha, status, finished_at, review_body, created_at, updated_at)
+                 VALUES ($1, $2, 'head', $3, $4, 'retained result', 0, 0)",
+                crate::pg_params![id, pr_id, status, finished_at],
+            )
+            .unwrap();
     }
 
     fn archive(&self, id: i64) -> Archive {
@@ -51,20 +71,21 @@ impl Fixture {
     }
 
     fn add(&self, id: i64) -> Archive {
-        self.db
-            .execute("INSERT INTO pull_requests(id,state) VALUES(?1,'merged')", [id])
-            .unwrap();
+        self.pr(id, "merged");
+        self.review_run(id, id, "posted", Some(NOW - 2 * RETENTION_MS));
         self.db
             .execute(
-                "INSERT INTO review_runs VALUES(?1,?1,'posted',?2,'retained result')",
-                params![id, NOW - 2 * RETENTION_MS],
+                "INSERT INTO review_coverage (repo_id, pr_id, run_id, status, base_ref, base_sha, merge_base_sha, head_sha,
+                   changed_files_json, covered_patch_ids_json, diff_hash, diff_text, created_at)
+                 VALUES (1, $1, $1, 'valid', 'main', 'b', 'c', 'head', '[]', '[]', 'h', '', 0)",
+                [id],
             )
             .unwrap();
         self.db
-            .execute("INSERT INTO review_coverage VALUES(?1,'valid')", [id])
-            .unwrap();
-        self.db
-            .execute("INSERT INTO review_finding_audits VALUES(?1,'retained audit')", [id])
+            .execute(
+                "INSERT INTO review_finding_audits (run_id, audit_json, updated_at) VALUES ($1, 'retained audit', 0)",
+                [id],
+            )
             .unwrap();
         let archive = self.archive(id);
         let mut store = ArchiveStore::open(&self.root.join("review-archives")).unwrap();
@@ -95,7 +116,7 @@ fn archive_retention_preview_is_read_only_and_apply_preserves_review_history() {
     let fixture = Fixture::new();
     let archive = fixture.add(1);
     let before = std::fs::read(fixture.path(&archive)).unwrap();
-    let preview = run(&fixture.database, &fixture.root.join("review-archives"), false, NOW).unwrap();
+    let preview = run(&fixture.handle, &fixture.root.join("review-archives"), false, NOW).unwrap();
     assert_eq!(preview.candidates.len(), 1);
     assert!(preview.candidate_bytes > 0);
     assert!(!preview.applied);
@@ -111,7 +132,7 @@ fn archive_retention_preview_is_read_only_and_apply_preserves_review_history() {
             .unwrap(),
         0
     );
-    let applied = run(&fixture.database, &fixture.root.join("review-archives"), true, NOW).unwrap();
+    let applied = run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW).unwrap();
     assert_eq!(applied.deleted_archives, 1);
     assert_eq!(applied.deleted_bytes, preview.candidate_bytes);
     assert_eq!(applied.pending_deletions, 0);
@@ -148,7 +169,7 @@ fn archive_retention_preview_is_read_only_and_apply_preserves_review_history() {
         1
     );
     assert_eq!(
-        run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+        run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW)
             .unwrap()
             .deleted_archives,
         0
@@ -170,15 +191,15 @@ fn archive_retention_protects_open_closed_recent_pending_and_unknown_reviews() {
         "UPDATE review_runs SET finished_at=NULL",
         "UPDATE review_runs SET finished_at=0",
         "UPDATE review_runs SET finished_at=777600000",
-        "INSERT INTO review_results VALUES(1,'awaiting_action','disabled')",
-        "INSERT INTO review_results VALUES(1,'clean','pending')",
-        "INSERT INTO review_results VALUES(1,'clean','posting')",
+        "INSERT INTO review_results (pr_id, installation_id, marker_key, observed_head_sha, reviewed_head_sha, observation, effective_state, publication_status, reviewer_version, skill_version, created_at, updated_at) VALUES (1, 'i', 'm', 'head', 'head', 'o', 'awaiting_action', 'disabled', 'v', 's', 0, 0)",
+        "INSERT INTO review_results (pr_id, installation_id, marker_key, observed_head_sha, reviewed_head_sha, observation, effective_state, publication_status, reviewer_version, skill_version, created_at, updated_at) VALUES (1, 'i', 'm', 'head', 'head', 'o', 'clean', 'pending', 'v', 's', 0, 0)",
+        "INSERT INTO review_results (pr_id, installation_id, marker_key, observed_head_sha, reviewed_head_sha, observation, effective_state, publication_status, reviewer_version, skill_version, created_at, updated_at) VALUES (1, 'i', 'm', 'head', 'head', 'o', 'clean', 'posting', 'v', 's', 0, 0)",
     ] {
         let fixture = Fixture::new();
         let archive = fixture.add(1);
         fixture.db.execute_batch(sql).unwrap();
         assert!(
-            run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+            run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW)
                 .unwrap()
                 .candidates
                 .is_empty(),
@@ -193,7 +214,7 @@ fn archive_retention_rechecks_live_state_after_preview() {
     let fixture = Fixture::new();
     let archive = fixture.add(1);
     assert_eq!(
-        run(&fixture.database, &fixture.root.join("review-archives"), false, NOW)
+        run(&fixture.handle, &fixture.root.join("review-archives"), false, NOW)
             .unwrap()
             .candidates
             .len(),
@@ -201,7 +222,7 @@ fn archive_retention_rechecks_live_state_after_preview() {
     );
     fixture.db.execute("UPDATE pull_requests SET state='open'", []).unwrap();
     assert_eq!(
-        run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+        run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW)
             .unwrap()
             .deleted_archives,
         0
@@ -214,11 +235,9 @@ fn archive_retention_waits_for_any_active_execution() {
     for status in ["pending", "running", "posting", "queued", "cancelling"] {
         let fixture = Fixture::new();
         let archive = fixture.add(1);
-        fixture
-            .db
-            .execute("INSERT INTO review_runs(id,pr_id,status) VALUES(2,2,?1)", [status])
-            .unwrap();
-        let report = run(&fixture.database, &fixture.root.join("review-archives"), true, NOW).unwrap();
+        fixture.pr(2, "open");
+        fixture.review_run(2, 2, status, None);
+        let report = run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW).unwrap();
         assert_eq!(report.active_jobs, 1);
         assert!(report.candidates.is_empty());
         assert!(fixture.path(&archive).exists());
@@ -229,20 +248,11 @@ fn archive_retention_waits_for_any_active_execution() {
 fn archive_retention_requires_every_shared_reference_to_be_eligible() {
     let fixture = Fixture::new();
     let archive = fixture.add(1);
-    fixture
-        .db
-        .execute("INSERT INTO pull_requests(id,state) VALUES(2,'open')", [])
-        .unwrap();
-    fixture
-        .db
-        .execute(
-            "INSERT INTO review_runs VALUES(2,2,'posted',?1,'retained result')",
-            [NOW - 2 * RETENTION_MS],
-        )
-        .unwrap();
+    fixture.pr(2, "open");
+    fixture.review_run(2, 2, "posted", Some(NOW - 2 * RETENTION_MS));
     let store = ArchiveStore::open(&fixture.root.join("review-archives")).unwrap();
     store.link("review:2", &archive.descriptor()).unwrap();
-    assert!(run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+    assert!(run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW)
         .unwrap()
         .candidates
         .is_empty());
@@ -251,7 +261,7 @@ fn archive_retention_requires_every_shared_reference_to_be_eligible() {
         .execute("UPDATE pull_requests SET state='merged' WHERE id=2", [])
         .unwrap();
     assert_eq!(
-        run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+        run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW)
             .unwrap()
             .deleted_archives,
         1
@@ -273,7 +283,7 @@ fn archive_retention_protects_unknown_owners_and_uploads() {
         let archive = fixture.add(1);
         let store = ArchiveStore::open(&fixture.root.join("review-archives")).unwrap();
         store.link(owner, &archive.descriptor()).unwrap();
-        assert!(run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+        assert!(run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW)
             .unwrap()
             .candidates
             .is_empty());
@@ -287,7 +297,7 @@ fn archive_retention_protects_unknown_owners_and_uploads() {
             params![archive.descriptor().id, NOW + RETENTION_MS],
         )
         .unwrap();
-    assert!(run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+    assert!(run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW)
         .unwrap()
         .candidates
         .is_empty());
@@ -296,13 +306,11 @@ fn archive_retention_protects_unknown_owners_and_uploads() {
 #[test]
 fn archive_retention_does_not_create_a_missing_store() {
     let fixture = Fixture::new();
-    assert!(
-        run(&fixture.database, &fixture.root.join("review-archives"), false, NOW)
-            .unwrap()
-            .candidates
-            .is_empty()
-    );
-    assert!(run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+    assert!(run(&fixture.handle, &fixture.root.join("review-archives"), false, NOW)
+        .unwrap()
+        .candidates
+        .is_empty());
+    assert!(run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW)
         .unwrap()
         .candidates
         .is_empty());
@@ -331,7 +339,7 @@ fn archive_retention_recovers_interrupted_deletion_and_protects_reused_archives(
         if missing {
             std::fs::remove_file(fixture.path(&archive)).unwrap();
         }
-        let report = run(&fixture.database, &fixture.root.join("review-archives"), true, NOW).unwrap();
+        let report = run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW).unwrap();
         assert_eq!(report.deleted_archives, usize::from(detached));
         assert_eq!(report.pending_deletions, 0);
         assert_eq!(fixture.path(&archive).exists(), !detached);
@@ -347,7 +355,7 @@ fn archive_retention_refuses_symlinked_artifacts_without_detaching_references() 
     std::fs::write(&target, "untouched").unwrap();
     std::fs::remove_file(fixture.path(&archive)).unwrap();
     std::os::unix::fs::symlink(&target, fixture.path(&archive)).unwrap();
-    assert!(run(&fixture.database, &fixture.root.join("review-archives"), true, NOW).is_err());
+    assert!(run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW).is_err());
     assert_eq!(std::fs::read_to_string(target).unwrap(), "untouched");
     assert_eq!(
         fixture
@@ -365,20 +373,20 @@ fn archive_retention_limits_each_pass_and_continues_on_the_next() {
         fixture.add(id as i64);
     }
     assert_eq!(
-        run(&fixture.database, &fixture.root.join("review-archives"), false, NOW)
+        run(&fixture.handle, &fixture.root.join("review-archives"), false, NOW)
             .unwrap()
             .candidates
             .len(),
         BATCH_LIMIT
     );
     assert_eq!(
-        run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+        run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW)
             .unwrap()
             .deleted_archives,
         BATCH_LIMIT
     );
     assert_eq!(
-        run(&fixture.database, &fixture.root.join("review-archives"), true, NOW)
+        run(&fixture.handle, &fixture.root.join("review-archives"), true, NOW)
             .unwrap()
             .deleted_archives,
         1
@@ -393,13 +401,24 @@ fn archive_retention_limits_each_pass_and_continues_on_the_next() {
 }
 
 #[test]
-fn archive_retention_accepts_the_real_operational_schema() {
+fn archive_retention_waits_for_a_review_that_is_starting() {
     let fixture = Fixture::new();
-    let database = fixture.root.join("production.sqlite");
-    drop(crate::db::Database::open_at(database.clone()).unwrap());
-    ArchiveStore::open(&fixture.root.join("review-archives")).unwrap();
-    assert!(run(&database, &fixture.root.join("review-archives"), false, NOW)
-        .unwrap()
-        .candidates
-        .is_empty());
+    let archive = fixture.add(1);
+    // A review start holds the gate shared; retention must wait for it rather than decide early.
+    let starting = fixture.handle.open().unwrap();
+    let tx = starting.unchecked_transaction().unwrap();
+    tx.execute("SELECT pg_advisory_xact_lock_shared($1)", [crate::db::ARCHIVE_GATE_KEY])
+        .unwrap();
+    let handle = fixture.handle.clone();
+    let root = fixture.root.join("review-archives");
+    let retention = std::thread::spawn(move || run(&handle, &root, true, NOW).unwrap());
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(!retention.is_finished(), "retention ran while a review was starting");
+    // The review started: its PR is reviewing again, so the archive must stay.
+    tx.execute("UPDATE pull_requests SET review_lane = 'reviewing' WHERE id = 1", [])
+        .unwrap();
+    tx.commit().unwrap();
+    let report = retention.join().unwrap();
+    assert!(report.candidates.is_empty());
+    assert!(fixture.path(&archive).exists());
 }

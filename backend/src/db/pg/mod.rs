@@ -1,8 +1,5 @@
 //! Postgres access: pools, a connection with the rusqlite-shaped API the `db` modules use, and
 //! migrations.
-//!
-//! Nothing outside this module uses it yet: the `db` modules move over to it next, all at once.
-#![allow(dead_code, unused_imports)]
 
 mod conn;
 mod migrate;

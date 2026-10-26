@@ -55,13 +55,19 @@ fn sample_archive(suffix: &str) -> Archive {
 fn setup_env(dir: &Directory) -> (Database, ArchiveStore, RetentionCoordinator) {
     let db_path = dir.0.join("test.sqlite");
     let archive_root = dir.0.join("archives");
-    let db = Database::open_at(db_path.clone()).unwrap();
+    let db = crate::db::Db::for_test_at(db_path.clone()).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/repo").unwrap();
     let store = ArchiveStore::open(&archive_root).unwrap();
     let leases = ArchiveLeaseTracker::new();
     let status = Arc::new(Mutex::new(ArchiveStorageStatus::default()));
     let notify = Arc::new((Mutex::new(false), Condvar::new()));
-    let coordinator = RetentionCoordinator::new(crate::db::Db::sqlite(db_path), archive_root, leases, status, notify);
+    let coordinator = RetentionCoordinator::new(
+        crate::db::Db::for_test_at(db_path),
+        archive_root,
+        leases,
+        status,
+        notify,
+    );
     (db, store, coordinator)
 }
 

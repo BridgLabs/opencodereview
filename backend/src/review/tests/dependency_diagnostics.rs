@@ -111,7 +111,7 @@ fn offline_export_restores_submodule_only_and_mixed_archives() {
         store.deposit_and_link(&archive, "review:42").unwrap();
         drop(store);
 
-        let recorded = super::load_recorded_dependencies(&root.join("opencodereview.sqlite"), 42)
+        let recorded = super::load_recorded_dependencies(&root.join("review-archives"), 42)
             .unwrap()
             .unwrap();
         let expected = if with_file_link {

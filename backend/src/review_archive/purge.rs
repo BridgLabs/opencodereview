@@ -1,3 +1,4 @@
+use crate::db::Db;
 use rusqlite::{params, Connection, OpenFlags, TransactionBehavior};
 use serde::Serialize;
 use std::fs;
@@ -112,7 +113,40 @@ fn drain(conn: &mut Connection, root: &Path, report: &mut Report) -> RetentionRe
     Ok(())
 }
 
-fn run_inner(database: &Path, root: &Path, apply: bool, now: i64) -> RetentionResult<Report> {
+/// Copies the operational state the candidate query reads into the archive connection, as the
+/// in-memory database `operational`. The archive index is still SQLite while the operational
+/// tables are in Postgres; one repeatable-read snapshot keeps the three tables consistent.
+fn attach_operational(conn: &Connection, db: &Db) -> RetentionResult<()> {
+    conn.execute_batch(
+        "ATTACH DATABASE ':memory:' AS operational;
+         CREATE TABLE operational.review_runs(id INTEGER PRIMARY KEY,pr_id INTEGER,status TEXT,finished_at INTEGER);
+         CREATE TABLE operational.pull_requests(id INTEGER PRIMARY KEY,state TEXT,review_lane TEXT,reprocess_next_review INTEGER,force_full_next_review INTEGER);
+         CREATE TABLE operational.review_results(pr_id INTEGER,effective_state TEXT,publication_status TEXT);",
+    )?;
+    let snapshot = db.open_read()?;
+    let state = snapshot.operational_snapshot()?;
+    for (id, pr_id, status, finished_at) in state.review_runs {
+        conn.execute(
+            "INSERT INTO operational.review_runs VALUES(?1,?2,?3,?4)",
+            params![id, pr_id, status, finished_at],
+        )?;
+    }
+    for (id, state, lane, reprocess, force_full) in state.pull_requests {
+        conn.execute(
+            "INSERT INTO operational.pull_requests VALUES(?1,?2,?3,?4,?5)",
+            params![id, state, lane, reprocess, force_full],
+        )?;
+    }
+    for (pr_id, effective, publication) in state.review_results {
+        conn.execute(
+            "INSERT INTO operational.review_results VALUES(?1,?2,?3)",
+            params![pr_id, effective, publication],
+        )?;
+    }
+    Ok(())
+}
+
+fn run_inner(db: &Db, root: &Path, apply: bool, now: i64) -> RetentionResult<Report> {
     if now <= 0 {
         return Err("Archive retention requires a valid current timestamp".into());
     }
@@ -128,22 +162,17 @@ fn run_inner(database: &Path, root: &Path, apply: bool, now: i64) -> RetentionRe
     }
     if !fs::symlink_metadata(root.join("sealed"))?.is_dir()
         || !fs::symlink_metadata(root.join("index.sqlite"))?.is_file()
-        || !fs::symlink_metadata(database)?.is_file()
     {
         return Err("Archive retention refuses symlinked or nonregular storage".into());
     }
-    let database = database.canonicalize()?;
-    let mut uri = reqwest::Url::from_file_path(database).map_err(|_| "Invalid operational database path")?;
-    uri.query_pairs_mut()
-        .append_pair("mode", if apply { "rw" } else { "ro" });
-    let flags = if apply {
-        OpenFlags::SQLITE_OPEN_READ_WRITE
-    } else {
-        OpenFlags::SQLITE_OPEN_READ_ONLY
-    };
-    let mut conn = Connection::open_with_flags(root.join("index.sqlite"), flags | OpenFlags::SQLITE_OPEN_URI)?;
+    // Reviews take this gate shared when they start; holding it for the whole run keeps the
+    // operational snapshot below true until the deletions commit.
+    let _gate = db.lock_archive_gate()?;
+    // Writable so the in-memory operational copy can be filled; a preview then turns on
+    // query_only, which SQLite enforces for every database on the connection.
+    let mut conn = Connection::open_with_flags(root.join("index.sqlite"), OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     conn.busy_timeout(Duration::from_secs(5))?;
-    conn.execute("ATTACH DATABASE ?1 AS operational", [uri.as_str()])?;
+    attach_operational(&conn, db)?;
     if !apply {
         conn.execute_batch("PRAGMA query_only=ON")?;
     }
@@ -206,20 +235,18 @@ fn run_inner(database: &Path, root: &Path, apply: bool, now: i64) -> RetentionRe
     Ok(report)
 }
 
-pub fn run(database: &Path, root: &Path, apply: bool, now: i64) -> Result<Report, String> {
-    run_inner(database, root, apply, now).map_err(|error| format!("Archive retention failed: {error}"))
+pub fn run(db: &Db, root: &Path, apply: bool, now: i64) -> Result<Report, String> {
+    run_inner(db, root, apply, now).map_err(|error| format!("Archive retention failed: {error}"))
 }
 
 pub fn run_from_env(apply: bool) -> Result<(), String> {
     let data_dir = std::env::var_os("OCR_DATA_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("data"));
-    let database = std::env::var_os("OCR_DB_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| data_dir.join("opencodereview.sqlite"));
-    // The same store the server writes to, wherever the database file is.
+    let db = Db::from_env()?;
+    // The same store the server writes to.
     let root = crate::review_archive::archive_dir(&data_dir);
-    let report = run(&database, &root, apply, crate::db::now_millis())?;
+    let report = run(&db, &root, apply, crate::db::now_millis())?;
     println!("{}", serde_json::to_string(&report).map_err(|error| error.to_string())?);
     Ok(())
 }

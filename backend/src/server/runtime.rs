@@ -304,11 +304,10 @@ pub(crate) fn is_older_than(path: &Path, max_age: Duration) -> bool {
 // Restoration is independent of review/result publication: it must never repost a review.
 pub(crate) fn start_review_request_restoration(db_handle: Db) {
     thread::spawn(move || {
-        let Ok(db) = db_handle.open() else {
-            return;
-        };
         loop {
-            if let Ok(Some(job)) = db.claim_review_request_restoration() {
+            // Connections are taken per step and never held across GitHub calls.
+            let claimed = db_handle.open().and_then(|db| db.claim_review_request_restoration());
+            if let Ok(Some(job)) = claimed {
                 let restored = (|| {
                     let review_id = match job.review_id {
                         Some(id) => Some(id),
@@ -317,7 +316,9 @@ pub(crate) fn start_review_request_restoration(db_handle: Db) {
                     let Some(review_id) = review_id else {
                         return Ok(true);
                     };
-                    db.accept_review_request_restoration(job.run_id, review_id)?;
+                    db_handle
+                        .open()?
+                        .accept_review_request_restoration(job.run_id, review_id)?;
                     github::restore_review_requests(&job.full_name, job.number, review_id, &job.snapshot)
                 })();
                 let (status, error) = match restored {
@@ -326,7 +327,9 @@ pub(crate) fn start_review_request_restoration(db_handle: Db) {
                     Err(error) if job.attempts < 3 => ("pending", Some(error)),
                     Err(error) => ("failed", Some(format!("Review request restoration failed after three attempts. Check the requested reviewers on GitHub. {error}"))),
                 };
-                let _ = db.finish_review_request_restoration(job.run_id, status, error.as_deref());
+                let _ = db_handle
+                    .open()
+                    .and_then(|db| db.finish_review_request_restoration(job.run_id, status, error.as_deref()));
             }
             thread::sleep(Duration::from_secs(15));
         }

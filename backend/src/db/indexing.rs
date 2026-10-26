@@ -10,7 +10,7 @@ impl Database {
         let mut out = Vec::new();
         for path in paths {
             let mut stmt = self.conn.prepare(
-                "SELECT f.path, f.language, CASE WHEN e.from_path = ?2 THEN 'imports seed' ELSE 'imported by seed' END FROM repo_index_edges e JOIN repo_index_files f ON f.repo_id = e.repo_id AND f.path = CASE WHEN e.from_path = ?2 THEN e.to_path ELSE e.from_path END WHERE e.repo_id = ?1 AND e.resolved = 1 AND (e.from_path = ?2 OR e.to_path = ?2) LIMIT ?3",
+                "SELECT f.path, f.language, CASE WHEN e.from_path = $2 THEN 'imports seed' ELSE 'imported by seed' END FROM repo_index_edges e JOIN repo_index_files f ON f.repo_id = e.repo_id AND f.path = CASE WHEN e.from_path = $2 THEN e.to_path ELSE e.from_path END WHERE e.repo_id = $1 AND e.resolved = 1 AND (e.from_path = $2 OR e.to_path = $2) LIMIT $3",
             ).map_err(|error| error.to_string())?;
             let rows = stmt
                 .query_map(params![repo_id, path, limit.clamp(1, 100)], |row| {
@@ -30,9 +30,9 @@ impl Database {
     pub fn repo_index_status(&self, repo_id: i64) -> Result<RepoIndexStatus, String> {
         let mut stmt = self.conn.prepare(
       "SELECT status, stage, base_ref, base_sha, remote_base_sha, spec_version, file_count, package_count, edge_count,
-              (SELECT COUNT(*) FROM repo_index_symbols WHERE repo_id = ?1),
+              (SELECT COUNT(*) FROM repo_index_symbols WHERE repo_id = $1),
               skipped_count, total_count, started_at, indexed_at, duration_ms, error_message, updated_at
-       FROM repo_index_state WHERE repo_id = ?1",
+       FROM repo_index_state WHERE repo_id = $1",
     ).map_err(|error| error.to_string())?;
         let mut rows = stmt.query(params![repo_id]).map_err(|error| error.to_string())?;
         if let Some(row) = rows.next().map_err(|error| error.to_string())? {
@@ -87,7 +87,7 @@ impl Database {
     pub fn index_graph(&self, repo_id: i64) -> Result<IndexGraph, String> {
         let mut node_stmt = self
             .conn
-            .prepare("SELECT id, name, package_path, kind FROM repo_index_packages WHERE repo_id = ?1 ORDER BY name")
+            .prepare("SELECT id, name, package_path, kind FROM repo_index_packages WHERE repo_id = $1 ORDER BY name")
             .map_err(|error| error.to_string())?;
         let raw_nodes: Vec<(i64, String, String, String)> = node_stmt
             .query_map(params![repo_id], |row| {
@@ -101,7 +101,7 @@ impl Database {
 
         let mut dep_stmt = self
             .conn
-            .prepare("SELECT from_package_id, to_package_name, dev FROM repo_index_pkg_deps WHERE repo_id = ?1")
+            .prepare("SELECT from_package_id, to_package_name, dev FROM repo_index_pkg_deps WHERE repo_id = $1")
             .map_err(|error| error.to_string())?;
         let raw_deps: Vec<(i64, String, i64)> = dep_stmt
             .query_map(params![repo_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
@@ -142,7 +142,7 @@ impl Database {
             .conn
             .prepare(
                 "SELECT id, name, path, kind FROM repo_index_symbols
-                 WHERE repo_id = ?1 ORDER BY path, start_line",
+                 WHERE repo_id = $1 ORDER BY path, start_line",
             )
             .map_err(|error| error.to_string())?;
         let nodes: Vec<IndexGraphNode> = node_stmt
@@ -161,7 +161,7 @@ impl Database {
             .conn
             .prepare(
                 "SELECT from_symbol_id, to_symbol_id FROM repo_index_symbol_edges
-                 WHERE repo_id = ?1",
+                 WHERE repo_id = $1",
             )
             .map_err(|error| error.to_string())?;
         let edges: Vec<IndexGraphEdge> = edge_stmt
@@ -183,7 +183,7 @@ impl Database {
     /// whose BOTH ends are files of this package (internal structure only).
     pub fn package_file_graph(&self, repo_id: i64, package_id: i64) -> Result<IndexGraph, String> {
         let mut fstmt = self.conn.prepare(
-      "SELECT path, COALESCE(language, '') FROM repo_index_files WHERE repo_id = ?1 AND package_id = ?2 ORDER BY path",
+      "SELECT path, COALESCE(language, '') FROM repo_index_files WHERE repo_id = $1 AND package_id = $2 ORDER BY path",
     ).map_err(|error| error.to_string())?;
         let files: Vec<(String, String)> = fstmt
             .query_map(params![repo_id, package_id], |row| Ok((row.get(0)?, row.get(1)?)))
@@ -193,7 +193,7 @@ impl Database {
         let paths: std::collections::HashSet<String> = files.iter().map(|(path, _)| path.clone()).collect();
 
         let mut estmt = self.conn.prepare(
-      "SELECT from_path, to_path FROM repo_index_edges WHERE repo_id = ?1 AND resolved = 1 AND to_path IS NOT NULL",
+      "SELECT from_path, to_path FROM repo_index_edges WHERE repo_id = $1 AND resolved = 1 AND to_path IS NOT NULL",
     ).map_err(|error| error.to_string())?;
         let raw: Vec<(String, String)> = estmt
             .query_map(params![repo_id], |row| Ok((row.get(0)?, row.get::<_, String>(1)?)))
@@ -241,23 +241,62 @@ impl Database {
         let now = now_millis();
         self.conn.execute(
       "INSERT INTO repo_index_state (repo_id, status, stage, spec_version, file_count, package_count, edge_count, skipped_count, total_count, error_message, updated_at)
-       VALUES (?1, 'queued', 'queued', ?2, 0, 0, 0, 0, 0, NULL, ?3)
+       VALUES ($1, 'queued', 'queued', $2, 0, 0, 0, 0, 0, NULL, $3)
        ON CONFLICT(repo_id) DO UPDATE SET
          status = CASE WHEN repo_index_state.status = 'indexing' THEN repo_index_state.status ELSE 'queued' END,
          stage = CASE WHEN repo_index_state.status = 'indexing' THEN repo_index_state.stage ELSE 'queued' END,
-         spec_version = ?2,
+         spec_version = $2,
          error_message = NULL,
-         updated_at = ?3",
+         updated_at = $3",
       params![repo_id, INDEX_SPEC_VERSION, now],
     ).map_err(|error| error.to_string())?;
         self.repo_index_status(repo_id)
+    }
+
+    /// Removes a review's head-commit index from `scratch`. Names the schema outright, so it is
+    /// safe on any connection and can never reach a repository's own index.
+    pub fn drop_snapshot_index(&self, run_id: i64) -> Result<(), String> {
+        let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        for table in SNAPSHOT_INDEX_TABLES {
+            tx.execute(
+                &format!("DELETE FROM scratch.{table} WHERE repo_id = $1"),
+                params![run_id],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        tx.execute("DELETE FROM scratch.repos WHERE id = $1", params![run_id])
+            .map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())
+    }
+
+    /// Removes head-commit indexes whose review is no longer active: left behind when the server
+    /// stopped mid-review.
+    pub fn reap_snapshot_indexes(&self) -> Result<(), String> {
+        let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        for table in SNAPSHOT_INDEX_TABLES {
+            tx.execute(
+                &format!(
+                    "DELETE FROM scratch.{table} WHERE repo_id NOT IN
+                     (SELECT id FROM review_runs WHERE status IN ('pending', 'running', 'posting', 'queued', 'cancelling'))"
+                ),
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+        tx.execute(
+            "DELETE FROM scratch.repos WHERE id NOT IN
+             (SELECT id FROM review_runs WHERE status IN ('pending', 'running', 'posting', 'queued', 'cancelling'))",
+            [],
+        )
+        .map_err(|error| error.to_string())?;
+        tx.commit().map_err(|error| error.to_string())
     }
 
     pub fn begin_repo_index(&self, repo_id: i64, base_ref: Option<&str>) -> Result<RepoIndexStatus, String> {
         let now = now_millis();
         self.conn.execute(
       "INSERT INTO repo_index_state (repo_id, status, stage, spec_version, base_ref, file_count, package_count, edge_count, skipped_count, total_count, started_at, error_message, updated_at)
-       VALUES (?1, 'indexing', 'preparing', ?2, ?3, 0, 0, 0, 0, 0, ?4, NULL, ?4)
+       VALUES ($1, 'indexing', 'preparing', $2, $3, 0, 0, 0, 0, 0, $4, NULL, $4)
        ON CONFLICT(repo_id) DO UPDATE SET
          status = 'indexing', stage = 'preparing', spec_version = excluded.spec_version,
          base_ref = excluded.base_ref, file_count = 0, package_count = 0, edge_count = 0,
@@ -280,111 +319,182 @@ impl Database {
     ) -> Result<(), String> {
         let now = now_millis();
         self.conn.execute(
-      "UPDATE repo_index_state SET stage = ?1, file_count = ?2, total_count = ?3, package_count = ?4, edge_count = ?5, skipped_count = ?6, updated_at = ?7
-       WHERE repo_id = ?8 AND status = 'indexing'",
+      "UPDATE repo_index_state SET stage = $1, file_count = $2, total_count = $3, package_count = $4, edge_count = $5, skipped_count = $6, updated_at = $7
+       WHERE repo_id = $8 AND status = 'indexing'",
       params![stage, file_count, total_count, package_count, edge_count, skipped_count, now, repo_id],
     ).map_err(|error| error.to_string())?;
         Ok(())
     }
 
     pub fn finish_repo_index(&self, repo_id: i64, write: &RepoIndexWrite) -> Result<RepoIndexStatus, String> {
+        self.write_repo_index(repo_id, write)?;
+        // Index is fresh again → clear any "index outdated" pending.
+        self.resolve_repo_pending("index_stale", repo_id)?;
+        self.repo_index_status(repo_id)
+    }
+
+    /// Stores a finished index without touching the repository's pending actions: also how a
+    /// review stores the index of its head commit in `scratch`, which has no pending actions.
+    pub fn write_repo_index(&self, repo_id: i64, write: &RepoIndexWrite) -> Result<RepoIndexStatus, String> {
         let now = now_millis();
         let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
         tx.execute(
-            "DELETE FROM repo_index_symbol_edges WHERE repo_id = ?1",
+            "DELETE FROM repo_index_symbol_edges WHERE repo_id = $1",
             params![repo_id],
         )
         .map_err(|error| error.to_string())?;
-        tx.execute("DELETE FROM repo_index_symbols WHERE repo_id = ?1", params![repo_id])
+        tx.execute("DELETE FROM repo_index_symbols WHERE repo_id = $1", params![repo_id])
             .map_err(|error| error.to_string())?;
-        tx.execute("DELETE FROM repo_index_files WHERE repo_id = ?1", params![repo_id])
+        tx.execute("DELETE FROM repo_index_files WHERE repo_id = $1", params![repo_id])
             .map_err(|error| error.to_string())?;
-        tx.execute("DELETE FROM repo_index_packages WHERE repo_id = ?1", params![repo_id])
+        tx.execute("DELETE FROM repo_index_packages WHERE repo_id = $1", params![repo_id])
             .map_err(|error| error.to_string())?;
-        tx.execute("DELETE FROM repo_index_pkg_deps WHERE repo_id = ?1", params![repo_id])
+        tx.execute("DELETE FROM repo_index_pkg_deps WHERE repo_id = $1", params![repo_id])
             .map_err(|error| error.to_string())?;
-        tx.execute("DELETE FROM repo_index_edges WHERE repo_id = ?1", params![repo_id])
+        tx.execute("DELETE FROM repo_index_edges WHERE repo_id = $1", params![repo_id])
             .map_err(|error| error.to_string())?;
 
-        let mut package_ids: HashMap<String, i64> = HashMap::new();
-        for package in &write.packages {
-            tx.execute(
-        "INSERT INTO repo_index_packages (repo_id, package_path, name, kind, manager, source_roots_json, test_globs_json, indexed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![repo_id, package.package_path, package.name, package.kind, package.manager, package.source_roots_json, package.test_globs_json, now],
-      ).map_err(|error| error.to_string())?;
-            package_ids.insert(package.package_path.clone(), tx.last_insert_rowid());
-        }
-        for file in &write.files {
-            let package_id = file
-                .package_path
-                .as_ref()
-                .and_then(|path| package_ids.get(path))
-                .copied();
-            tx.execute(
-        "INSERT INTO repo_index_files (repo_id, path, language, size, blob_sha, package_id, is_binary, is_generated, indexed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![repo_id, file.path, file.language, file.size, file.blob_sha, package_id, file.is_binary as i64, file.is_generated as i64, now],
-      ).map_err(|error| error.to_string())?;
-        }
-        let mut symbol_ids = Vec::with_capacity(write.symbols.len());
-        for symbol in &write.symbols {
-            let package_id = symbol
-                .package_path
-                .as_ref()
-                .and_then(|path| package_ids.get(path))
-                .copied();
-            tx.execute(
-                "INSERT INTO repo_index_symbols (repo_id, name, kind, language, path, package_id, start_line, end_line, signature, is_exported, indexed_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                params![repo_id, symbol.name, symbol.kind, symbol.language, symbol.path, package_id, symbol.start_line, symbol.end_line, symbol.signature, symbol.is_exported as i64, now],
+        // One statement per table (arrays through UNNEST): a large repository has tens of
+        // thousands of rows, and a round trip each would take minutes.
+        let package_ids: HashMap<String, i64> = tx
+            .prepare(
+                "INSERT INTO repo_index_packages (repo_id, package_path, name, kind, manager, source_roots_json, test_globs_json, indexed_at)
+                 SELECT $1, package_path, name, kind, manager, source_roots_json, test_globs_json, $2
+                 FROM UNNEST($3::TEXT[], $4::TEXT[], $5::TEXT[], $6::TEXT[], $7::TEXT[], $8::TEXT[])
+                   AS p(package_path, name, kind, manager, source_roots_json, test_globs_json)
+                 RETURNING package_path, id",
             )
+            .and_then(|mut stmt| {
+                let packages = &write.packages;
+                stmt.query_map(
+                    params![
+                        repo_id,
+                        now,
+                        packages.iter().map(|p| p.package_path.as_str()).collect::<Vec<_>>(),
+                        packages.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+                        packages.iter().map(|p| p.kind.as_str()).collect::<Vec<_>>(),
+                        packages.iter().map(|p| p.manager.as_str()).collect::<Vec<_>>(),
+                        packages.iter().map(|p| p.source_roots_json.as_str()).collect::<Vec<_>>(),
+                        packages.iter().map(|p| p.test_globs_json.as_str()).collect::<Vec<_>>()
+                    ],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?
+                .collect()
+            })
             .map_err(|error| error.to_string())?;
-            symbol_ids.push(tx.last_insert_rowid());
-        }
-        for edge in &write.symbol_edges {
-            if let (Some(from_id), Some(to_id)) = (
-                symbol_ids.get(edge.from_symbol_index),
-                symbol_ids.get(edge.to_symbol_index),
-            ) {
-                tx.execute(
-                    "INSERT INTO repo_index_symbol_edges (repo_id, from_symbol_id, to_symbol_id, kind)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![repo_id, from_id, to_id, edge.kind],
-                )
-                .map_err(|error| error.to_string())?;
-            }
-        }
-        for dep in &write.deps {
-            if let Some(from_id) = package_ids.get(&dep.from_package_path) {
-                tx.execute(
-                    "INSERT INTO repo_index_pkg_deps (repo_id, from_package_id, to_package_name, dev)
-           VALUES (?1, ?2, ?3, ?4)",
-                    params![repo_id, from_id, dep.to_package_name, dep.dev as i64],
-                )
-                .map_err(|error| error.to_string())?;
-            }
-        }
-        for edge in &write.edges {
-            tx.execute(
-                "INSERT INTO repo_index_edges (repo_id, from_path, to_ref, to_path, kind, resolved)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    repo_id,
-                    edge.from_path,
-                    edge.to_ref,
-                    edge.to_path,
-                    edge.kind,
-                    edge.resolved as i64
-                ],
-            )
-            .map_err(|error| error.to_string())?;
-        }
+        let package_id = |path: &Option<String>| path.as_ref().and_then(|path| package_ids.get(path)).copied();
+        let files = &write.files;
         tx.execute(
-      "UPDATE repo_index_state SET status = 'ready', stage = 'ready', spec_version = ?1, base_ref = ?2, base_sha = ?3, remote_base_sha = ?3,
-         file_count = ?4, package_count = ?5, edge_count = ?6, skipped_count = ?7, total_count = ?8,
-         indexed_at = ?9, duration_ms = ?10, error_message = NULL, updated_at = ?9
-       WHERE repo_id = ?11",
+            "INSERT INTO repo_index_files (repo_id, path, language, size, blob_sha, package_id, is_binary, is_generated, indexed_at)
+             SELECT $1, path, language, size, blob_sha, package_id, is_binary, is_generated, $2
+             FROM UNNEST($3::TEXT[], $4::TEXT[], $5::BIGINT[], $6::TEXT[], $7::BIGINT[], $8::BIGINT[], $9::BIGINT[])
+               AS f(path, language, size, blob_sha, package_id, is_binary, is_generated)",
+            params![
+                repo_id,
+                now,
+                files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
+                files.iter().map(|f| f.language.as_deref()).collect::<Vec<_>>(),
+                files.iter().map(|f| f.size).collect::<Vec<_>>(),
+                files.iter().map(|f| f.blob_sha.as_str()).collect::<Vec<_>>(),
+                files.iter().map(|f| package_id(&f.package_path)).collect::<Vec<_>>(),
+                files.iter().map(|f| i64::from(f.is_binary)).collect::<Vec<_>>(),
+                files.iter().map(|f| i64::from(f.is_generated)).collect::<Vec<_>>()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        // Symbol edges point at symbols by position, so the ids are drawn first and inserted
+        // explicitly. The sequence resolves through the connection's search_path (public or
+        // scratch).
+        let symbols = &write.symbols;
+        let symbol_ids: Vec<i64> = tx
+            .prepare("SELECT nextval(pg_get_serial_sequence('repo_index_symbols', 'id')) FROM generate_series(1, $1::BIGINT)")
+            .and_then(|mut stmt| {
+                stmt.query_map(params![symbols.len() as i64], |row| row.get(0))?
+                    .collect()
+            })
+            .map_err(|error| error.to_string())?;
+        tx.execute(
+            "INSERT INTO repo_index_symbols (id, repo_id, name, kind, language, path, package_id, start_line, end_line, signature, is_exported, indexed_at)
+             SELECT id, $1, name, kind, language, path, package_id, start_line, end_line, signature, is_exported, $2
+             FROM UNNEST($3::BIGINT[], $4::TEXT[], $5::TEXT[], $6::TEXT[], $7::TEXT[], $8::BIGINT[], $9::BIGINT[], $10::BIGINT[], $11::TEXT[], $12::BIGINT[])
+               AS s(id, name, kind, language, path, package_id, start_line, end_line, signature, is_exported)",
+            params![
+                repo_id,
+                now,
+                symbol_ids,
+                symbols.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+                symbols.iter().map(|s| s.kind.as_str()).collect::<Vec<_>>(),
+                symbols.iter().map(|s| s.language.as_str()).collect::<Vec<_>>(),
+                symbols.iter().map(|s| s.path.as_str()).collect::<Vec<_>>(),
+                symbols.iter().map(|s| package_id(&s.package_path)).collect::<Vec<_>>(),
+                symbols.iter().map(|s| s.start_line).collect::<Vec<_>>(),
+                symbols.iter().map(|s| s.end_line).collect::<Vec<_>>(),
+                symbols.iter().map(|s| s.signature.as_deref()).collect::<Vec<_>>(),
+                symbols.iter().map(|s| i64::from(s.is_exported)).collect::<Vec<_>>()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        let symbol_edges: Vec<(i64, i64, &str)> = write
+            .symbol_edges
+            .iter()
+            .filter_map(|edge| {
+                let from = symbol_ids.get(edge.from_symbol_index)?;
+                let to = symbol_ids.get(edge.to_symbol_index)?;
+                Some((*from, *to, edge.kind.as_str()))
+            })
+            .collect();
+        tx.execute(
+            "INSERT INTO repo_index_symbol_edges (repo_id, from_symbol_id, to_symbol_id, kind)
+             SELECT $1, from_symbol_id, to_symbol_id, kind
+             FROM UNNEST($2::BIGINT[], $3::BIGINT[], $4::TEXT[]) AS e(from_symbol_id, to_symbol_id, kind)",
+            params![
+                repo_id,
+                symbol_edges.iter().map(|edge| edge.0).collect::<Vec<_>>(),
+                symbol_edges.iter().map(|edge| edge.1).collect::<Vec<_>>(),
+                symbol_edges.iter().map(|edge| edge.2).collect::<Vec<_>>()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        let deps: Vec<(i64, &str, i64)> = write
+            .deps
+            .iter()
+            .filter_map(|dep| {
+                let from = package_ids.get(&dep.from_package_path)?;
+                Some((*from, dep.to_package_name.as_str(), i64::from(dep.dev)))
+            })
+            .collect();
+        tx.execute(
+            "INSERT INTO repo_index_pkg_deps (repo_id, from_package_id, to_package_name, dev)
+             SELECT $1, from_package_id, to_package_name, dev
+             FROM UNNEST($2::BIGINT[], $3::TEXT[], $4::BIGINT[]) AS d(from_package_id, to_package_name, dev)",
+            params![
+                repo_id,
+                deps.iter().map(|dep| dep.0).collect::<Vec<_>>(),
+                deps.iter().map(|dep| dep.1).collect::<Vec<_>>(),
+                deps.iter().map(|dep| dep.2).collect::<Vec<_>>()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        let edges = &write.edges;
+        tx.execute(
+            "INSERT INTO repo_index_edges (repo_id, from_path, to_ref, to_path, kind, resolved)
+             SELECT $1, from_path, to_ref, to_path, kind, resolved
+             FROM UNNEST($2::TEXT[], $3::TEXT[], $4::TEXT[], $5::TEXT[], $6::BIGINT[]) AS e(from_path, to_ref, to_path, kind, resolved)",
+            params![
+                repo_id,
+                edges.iter().map(|e| e.from_path.as_str()).collect::<Vec<_>>(),
+                edges.iter().map(|e| e.to_ref.as_str()).collect::<Vec<_>>(),
+                edges.iter().map(|e| e.to_path.as_deref()).collect::<Vec<_>>(),
+                edges.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+                edges.iter().map(|e| i64::from(e.resolved)).collect::<Vec<_>>()
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+        tx.execute(
+      "UPDATE repo_index_state SET status = 'ready', stage = 'ready', spec_version = $1, base_ref = $2, base_sha = $3, remote_base_sha = $3,
+         file_count = $4, package_count = $5, edge_count = $6, skipped_count = $7, total_count = $8,
+         indexed_at = $9, duration_ms = $10, error_message = NULL, updated_at = $9
+       WHERE repo_id = $11",
       params![
         INDEX_SPEC_VERSION, write.base_ref, write.base_sha,
         write.files.len() as i64, write.packages.len() as i64, write.edges.len() as i64,
@@ -392,8 +502,6 @@ impl Database {
       ],
     ).map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
-        // Index is fresh again → clear any "index outdated" pending.
-        self.resolve_repo_pending("index_stale", repo_id)?;
         self.repo_index_status(repo_id)
     }
 
@@ -401,8 +509,8 @@ impl Database {
         let now = now_millis();
         self.conn.execute(
       "UPDATE repo_index_state SET status = 'cancelled', stage = 'cancelled', error_message = 'Indexing cancelled by user.',
-         duration_ms = CASE WHEN started_at IS NULL THEN NULL ELSE ?1 - started_at END, updated_at = ?1
-       WHERE repo_id = ?2 AND status = 'indexing'",
+         duration_ms = CASE WHEN started_at IS NULL THEN NULL ELSE $1 - started_at END, updated_at = $1
+       WHERE repo_id = $2 AND status = 'indexing'",
       params![now, repo_id],
     ).map_err(|error| error.to_string())?;
         self.repo_index_status(repo_id)
@@ -412,7 +520,7 @@ impl Database {
         let now = now_millis();
         self.conn.execute(
       "INSERT INTO repo_index_state (repo_id, status, stage, error_message, started_at, duration_ms, updated_at)
-       VALUES (?1, 'failed', 'failed', ?2, ?3, 0, ?3)
+       VALUES ($1, 'failed', 'failed', $2, $3, 0, $3)
        ON CONFLICT(repo_id) DO UPDATE SET status = 'failed', stage = 'failed', error_message = excluded.error_message,
          duration_ms = CASE WHEN repo_index_state.started_at IS NULL THEN NULL ELSE excluded.updated_at - repo_index_state.started_at END,
          updated_at = excluded.updated_at",
@@ -427,7 +535,7 @@ impl Database {
         self.conn
             .execute(
                 "INSERT INTO repo_index_state (repo_id, status, stage, error_message, updated_at)
-       VALUES (?1, 'empty', 'empty', NULL, ?2)
+       VALUES ($1, 'empty', 'empty', NULL, $2)
        ON CONFLICT(repo_id) DO UPDATE SET status = 'empty', stage = 'empty', error_message = NULL,
          duration_ms = NULL, updated_at = excluded.updated_at",
                 params![repo_id, now],
@@ -440,8 +548,8 @@ impl Database {
         let now = now_millis();
         self.conn
             .execute(
-                "UPDATE repo_index_state SET status = 'stale', stage = 'stale', remote_base_sha = ?1,
-         error_message = 'Default branch changed. Reindex required.', updated_at = ?2 WHERE repo_id = ?3",
+                "UPDATE repo_index_state SET status = 'stale', stage = 'stale', remote_base_sha = $1,
+         error_message = 'Default branch changed. Reindex required.', updated_at = $2 WHERE repo_id = $3",
                 params![remote_base_sha, now, repo_id],
             )
             .map_err(|error| error.to_string())?;
@@ -455,3 +563,14 @@ impl Database {
         self.repo_index_status(repo_id)
     }
 }
+
+/// The `scratch` tables holding a review's head-commit index, children before parents.
+const SNAPSHOT_INDEX_TABLES: [&str; 7] = [
+    "repo_index_symbol_edges",
+    "repo_index_symbols",
+    "repo_index_edges",
+    "repo_index_pkg_deps",
+    "repo_index_files",
+    "repo_index_packages",
+    "repo_index_state",
+];

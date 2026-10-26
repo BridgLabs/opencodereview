@@ -10,7 +10,7 @@ fn fixture(numbers: &[i64]) -> (PathBuf, Database, Vec<i64>) {
         std::process::id(),
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
-    let db = Database::open_at(root.join("test.sqlite")).unwrap();
+    let db = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
     db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
     let pr_ids = numbers
         .iter()
@@ -38,10 +38,10 @@ fn fixture(numbers: &[i64]) -> (PathBuf, Database, Vec<i64>) {
 }
 
 fn ack_row(root: &Path, pr_id: i64) -> (i64, String, Option<i64>, i64, i64) {
-    rusqlite::Connection::open(root.join("test.sqlite"))
+    crate::db::Db::for_test_at(root.join("test.sqlite")).open()
         .unwrap()
         .query_row(
-            "SELECT generation, status, comment_id, attempts, next_attempt_at FROM queue_acknowledgements WHERE pr_id = ?1",
+            "SELECT generation, status, comment_id, attempts, next_attempt_at FROM queue_acknowledgements WHERE pr_id = $1",
             [pr_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
         )
@@ -107,7 +107,8 @@ fn lost_post_response_is_adopted_on_retry() {
     api.post_writes_then_fails = true;
     assert!(reconcile_queue_acknowledgements_with(&db, &mut api).is_err());
     assert_eq!(ack_row(&root, pr_ids[0]).1, "pending");
-    rusqlite::Connection::open(root.join("test.sqlite"))
+    crate::db::Db::for_test_at(root.join("test.sqlite"))
+        .open()
         .unwrap()
         .execute("UPDATE queue_acknowledgements SET next_attempt_at = 0", [])
         .unwrap();
@@ -164,10 +165,11 @@ fn uncertain_post_keeps_retirement_open_until_it_settles() {
     assert!(reconcile_queue_acknowledgements_with(&db, &mut api).is_err());
     assert_eq!(api.posts, 1);
     assert_eq!(ack_row(&root, pr_ids[0]).1, "pending");
-    let uncertain: Option<i64> = rusqlite::Connection::open(root.join("test.sqlite"))
+    let uncertain: Option<i64> = crate::db::Db::for_test_at(root.join("test.sqlite"))
+        .open()
         .unwrap()
         .query_row(
-            "SELECT post_uncertain_at FROM queue_acknowledgements WHERE pr_id = ?1",
+            "SELECT post_uncertain_at FROM queue_acknowledgements WHERE pr_id = $1",
             [pr_ids[0]],
             |row| row.get(0),
         )
@@ -192,10 +194,11 @@ fn uncertain_post_keeps_retirement_open_until_it_settles() {
         "head-a",
         1,
     ));
-    rusqlite::Connection::open(root.join("test.sqlite"))
+    crate::db::Db::for_test_at(root.join("test.sqlite"))
+        .open()
         .unwrap()
         .execute(
-            "UPDATE queue_acknowledgements SET next_attempt_at = 0, post_uncertain_at = ?1 WHERE pr_id = ?2",
+            "UPDATE queue_acknowledgements SET next_attempt_at = 0, post_uncertain_at = $1 WHERE pr_id = $2",
             [crate::db::now_millis() - crate::db::QUEUE_POST_SETTLE_MS - 1, pr_ids[0]],
         )
         .unwrap();

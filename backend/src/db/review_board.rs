@@ -12,9 +12,9 @@ impl Database {
                   AND res.observed_head_sha = pr.head_sha
                   AND lr.head_sha = pr.head_sha
                   AND res.observation = 'findings'
-                  AND CASE WHEN json_valid(rfa.audit_json) THEN json_extract(rfa.audit_json, '$.complete') END = 1
-                  AND CASE WHEN json_valid(rfa.audit_json) THEN json_type(rfa.audit_json, '$.candidates') END = 'array'
-                  AND CASE WHEN json_valid(rfa.audit_json) THEN json_array_length(rfa.audit_json, '$.candidates') END = 0 THEN 'reviewed_cleanly'
+                  AND json_member_is_true(rfa.audit_json, 'complete')
+                  AND json_member_type(rfa.audit_json, 'candidates') = 'array'
+                  AND json_member_array_length(rfa.audit_json, 'candidates') = 0 THEN 'reviewed_cleanly'
                 WHEN lr.status = 'preview' THEN 'ready'
                 WHEN lr.status IN ('pending', 'running', 'posting') THEN 'reviewing'
                 ELSE pr.review_lane
@@ -26,9 +26,9 @@ impl Database {
                   AND res.observed_head_sha = pr.head_sha
                   AND lr.head_sha = pr.head_sha
                   AND res.observation = 'findings'
-                  AND CASE WHEN json_valid(rfa.audit_json) THEN json_extract(rfa.audit_json, '$.complete') END = 1
-                  AND CASE WHEN json_valid(rfa.audit_json) THEN json_type(rfa.audit_json, '$.candidates') END = 'array'
-                  AND CASE WHEN json_valid(rfa.audit_json) THEN json_array_length(rfa.audit_json, '$.candidates') END = 0 THEN 'No findings'
+                  AND json_member_is_true(rfa.audit_json, 'complete')
+                  AND json_member_type(rfa.audit_json, 'candidates') = 'array'
+                  AND json_member_array_length(rfa.audit_json, 'candidates') = 0 THEN 'No findings'
                 WHEN lr.status = 'preview' THEN 'AI review ready'
                 WHEN lr.status IN ('pending', 'running', 'posting') THEN 'AI review running'
                 ELSE pr.status_reason
@@ -40,9 +40,9 @@ impl Database {
                   AND res.observed_head_sha = pr.head_sha
                   AND lr.head_sha = pr.head_sha
                   AND res.observation = 'findings'
-                  AND CASE WHEN json_valid(rfa.audit_json) THEN json_extract(rfa.audit_json, '$.complete') END = 1
-                  AND CASE WHEN json_valid(rfa.audit_json) THEN json_type(rfa.audit_json, '$.candidates') END = 'array'
-                  AND CASE WHEN json_valid(rfa.audit_json) THEN json_array_length(rfa.audit_json, '$.candidates') END = 0 THEN 'clean'
+                  AND json_member_is_true(rfa.audit_json, 'complete')
+                  AND json_member_type(rfa.audit_json, 'candidates') = 'array'
+                  AND json_member_array_length(rfa.audit_json, 'candidates') = 0 THEN 'clean'
                 ELSE res.effective_state
               END,
               res.observation, res.observed_head_sha, res.reviewed_head_sha,
@@ -205,7 +205,7 @@ impl Database {
         let now = now_millis();
         for kind in kinds {
             self.conn.execute(
-        "UPDATE pending_actions SET status = 'seen', seen_at = COALESCE(seen_at, ?1) WHERE pr_id = ?2 AND type = ?3 AND status = 'unseen'",
+        "UPDATE pending_actions SET status = 'seen', seen_at = COALESCE(seen_at, $1) WHERE pr_id = $2 AND type = $3 AND status = 'unseen'",
         params![now, pr_id, kind],
       ).map_err(|error| error.to_string())?;
         }
@@ -224,9 +224,9 @@ impl Database {
         self.conn
             .execute(
                 "INSERT INTO pending_actions (type, repo_id, pr_id, status, title, message, created_at)
-       SELECT ?1, ?2, ?3, 'unseen', ?4, ?5, ?6
+       SELECT $1::TEXT, $2::BIGINT, $3::BIGINT, 'unseen', $4::TEXT, $5::TEXT, $6::BIGINT
        WHERE NOT EXISTS (
-         SELECT 1 FROM pending_actions WHERE type = ?1 AND pr_id = ?3 AND status != 'resolved'
+         SELECT 1 FROM pending_actions WHERE type = $1 AND pr_id = $3 AND status != 'resolved'
        )",
                 params![kind, repo_id, pr_id, title, message, now],
             )
@@ -234,9 +234,9 @@ impl Database {
         // Keep title/message current for an existing unresolved action (no new notification).
         self.conn
             .execute(
-                "UPDATE pending_actions SET title = ?4, message = ?5
-       WHERE type = ?1 AND pr_id = ?3 AND status != 'resolved'",
-                params![kind, repo_id, pr_id, title, message],
+                "UPDATE pending_actions SET title = $3, message = $4
+       WHERE type = $1 AND pr_id = $2 AND status != 'resolved'",
+                params![kind, pr_id, title, message],
             )
             .map_err(|error| error.to_string())?;
         Ok(())
@@ -246,7 +246,7 @@ impl Database {
     pub fn has_pending_action(&self, kind: &str, pr_id: i64) -> Result<bool, String> {
         self.conn
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM pending_actions WHERE type = ?1 AND pr_id = ?2 AND status != 'resolved')",
+                "SELECT EXISTS(SELECT 1 FROM pending_actions WHERE type = $1 AND pr_id = $2 AND status != 'resolved')",
                 params![kind, pr_id],
                 |row| row.get::<_, i64>(0),
             )
@@ -257,7 +257,7 @@ impl Database {
     pub fn resolve_pending_for_pr(&self, kind: &str, pr_id: i64) -> Result<(), String> {
         let now = now_millis();
         self.conn.execute(
-      "UPDATE pending_actions SET status = 'resolved', resolved_at = ?1 WHERE type = ?2 AND pr_id = ?3 AND status != 'resolved'",
+      "UPDATE pending_actions SET status = 'resolved', resolved_at = $1 WHERE type = $2 AND pr_id = $3 AND status != 'resolved'",
       params![now, kind, pr_id],
     ).map_err(|error| error.to_string())?;
         Ok(())
@@ -275,17 +275,17 @@ impl Database {
         self.conn
             .execute(
                 "INSERT INTO pending_actions (type, repo_id, pr_id, status, title, message, created_at)
-       SELECT ?1, ?2, NULL, 'unseen', ?3, ?4, ?5
+       SELECT $1::TEXT, $2::BIGINT, NULL, 'unseen', $3::TEXT, $4::TEXT, $5::BIGINT
        WHERE NOT EXISTS (
-         SELECT 1 FROM pending_actions WHERE type = ?1 AND repo_id = ?2 AND pr_id IS NULL AND status != 'resolved'
+         SELECT 1 FROM pending_actions WHERE type = $1 AND repo_id = $2 AND pr_id IS NULL AND status != 'resolved'
        )",
                 params![kind, repo_id, title, message, now],
             )
             .map_err(|error| error.to_string())?;
         self.conn
             .execute(
-                "UPDATE pending_actions SET title = ?3, message = ?4
-       WHERE type = ?1 AND repo_id = ?2 AND pr_id IS NULL AND status != 'resolved'",
+                "UPDATE pending_actions SET title = $3, message = $4
+       WHERE type = $1 AND repo_id = $2 AND pr_id IS NULL AND status != 'resolved'",
                 params![kind, repo_id, title, message],
             )
             .map_err(|error| error.to_string())?;
@@ -295,7 +295,7 @@ impl Database {
     pub fn resolve_repo_pending(&self, kind: &str, repo_id: i64) -> Result<(), String> {
         let now = now_millis();
         self.conn.execute(
-      "UPDATE pending_actions SET status = 'resolved', resolved_at = ?1 WHERE type = ?2 AND repo_id = ?3 AND pr_id IS NULL AND status != 'resolved'",
+      "UPDATE pending_actions SET status = 'resolved', resolved_at = $1 WHERE type = $2 AND repo_id = $3 AND pr_id IS NULL AND status != 'resolved'",
       params![now, kind, repo_id],
     ).map_err(|error| error.to_string())?;
         Ok(())
@@ -311,7 +311,7 @@ impl Database {
                  WHEN rr.decision = 'clean_result' THEN 'reviewed_cleanly'
                  WHEN rr.decision = 'mark_reviewed' THEN 'approved'
                  WHEN rr.decision = 'skip' THEN 'skipped'
-                 WHEN rr.decision IN ('approve_post', 'request_changes', 'comment') AND rr.outcome LIKE '%auto%' THEN 'auto_posted'
+                 WHEN rr.decision IN ('approve_post', 'request_changes', 'comment') AND rr.outcome ILIKE '%auto%' THEN 'auto_posted'
                  WHEN rr.decision IN ('approve_post', 'request_changes', 'comment') THEN 'posted'
                  ELSE NULL
                END
@@ -321,13 +321,13 @@ impl Database {
                LIMIT 1
              ), 'approved'),
              status_reason = 'Already reviewed current head',
-             updated_at = ?1
-             WHERE id = ?2 AND last_decision_sha = head_sha AND review_lane IN ('open', 'queued', 'reviewing')",
+             updated_at = $1
+             WHERE id = $2 AND last_decision_sha = head_sha AND review_lane IN ('open', 'queued', 'reviewing')",
             params![now_millis(), pr_id],
         ).map_err(|error| error.to_string())?;
         self.conn.execute(
-            "UPDATE review_runs SET status = 'superseded', outcome = 'Skipped: current head already reviewed', updated_at = ?1
-             WHERE pr_id = ?2 AND status IN ('pending', 'running')",
+            "UPDATE review_runs SET status = 'superseded', outcome = 'Skipped: current head already reviewed', updated_at = $1
+             WHERE pr_id = $2 AND status IN ('pending', 'running')",
             params![now_millis(), pr_id],
         ).map_err(|error| error.to_string())?;
         Ok(())
@@ -362,10 +362,10 @@ impl Database {
             .prepare(
                 "SELECT id, number, LOWER(state), review_lane, updated_at
              FROM pull_requests
-             WHERE repo_id = ?1
+             WHERE repo_id = $1
                AND (LOWER(state) NOT IN ('closed', 'merged') OR review_lane NOT IN ('closed', 'merged'))
-               AND (?2 IS NULL OR updated_at > ?2 OR (updated_at = ?2 AND id > ?3))
-             ORDER BY updated_at ASC, id ASC LIMIT ?4",
+               AND ($2::BIGINT IS NULL OR updated_at > $2 OR (updated_at = $2 AND id > $3))
+             ORDER BY updated_at ASC, id ASC LIMIT $4",
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
@@ -394,16 +394,17 @@ impl Database {
         };
         let now = now_millis();
         let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        self.lock_pull_request(pr_id)?;
         self.conn.execute(
-            "UPDATE pull_requests SET state = ?1, review_lane = ?2, status_reason = ?3, last_decision_sha = NULL, updated_at = ?4, merged_at = COALESCE(?5, merged_at) WHERE id = ?6",
+            "UPDATE pull_requests SET state = $1, review_lane = $2, status_reason = $3, last_decision_sha = NULL, updated_at = $4, merged_at = COALESCE($5, merged_at) WHERE id = $6",
             params![state.to_ascii_lowercase(), lane, reason, now, merged_at, pr_id],
         ).map_err(|error| error.to_string())?;
         self.conn.execute(
-            "UPDATE review_runs SET status = 'superseded', error_message = ?1, finished_at = COALESCE(finished_at, ?2), updated_at = ?2 WHERE pr_id = ?3 AND status IN ('pending', 'running', 'posting', 'preview')",
+            "UPDATE review_runs SET status = 'superseded', error_message = $1, finished_at = COALESCE(finished_at, $2), updated_at = $2 WHERE pr_id = $3 AND status IN ('pending', 'running', 'posting', 'preview')",
             params![reason, now, pr_id],
         ).map_err(|error| error.to_string())?;
         self.conn.execute(
-            "UPDATE review_results SET publication_status = 'superseded', error_message = ?1, updated_at = ?2 WHERE pr_id = ?3 AND publication_status IN ('pending', 'posting')",
+            "UPDATE review_results SET publication_status = 'superseded', error_message = $1, updated_at = $2 WHERE pr_id = $3 AND publication_status IN ('pending', 'posting')",
             params![reason, now, pr_id],
         ).map_err(|error| error.to_string())?;
         self.resolve_all_pending_for_pr(pr_id)?;
@@ -413,7 +414,7 @@ impl Database {
     pub fn set_pr_merged_at(&self, pr_id: i64, merged_at: i64) -> Result<(), String> {
         self.conn
             .execute(
-                "UPDATE pull_requests SET merged_at = ?1 WHERE id = ?2",
+                "UPDATE pull_requests SET merged_at = $1 WHERE id = $2",
                 params![merged_at, pr_id],
             )
             .map_err(|error| error.to_string())?;
@@ -423,7 +424,7 @@ impl Database {
     pub fn review_run_retention_info(&self, run_id: i64) -> Result<Option<(String, i64)>, String> {
         self.conn
             .query_row(
-                "SELECT status, pr_id FROM review_runs WHERE id = ?1",
+                "SELECT status, pr_id FROM review_runs WHERE id = $1",
                 params![run_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -434,7 +435,7 @@ impl Database {
     pub fn pr_retention_info(&self, pr_id: i64) -> Result<Option<(String, Option<i64>)>, String> {
         self.conn
             .query_row(
-                "SELECT state, merged_at FROM pull_requests WHERE id = ?1",
+                "SELECT state, merged_at FROM pull_requests WHERE id = $1",
                 params![pr_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -446,27 +447,23 @@ impl Database {
         if run_ids.is_empty() {
             return Ok(Vec::new());
         }
-        let mut candidates = Vec::new();
-        for chunk in run_ids.chunks(500) {
-            let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-            let sql = format!(
+        let mut stmt = self
+            .conn
+            .prepare(
                 "SELECT DISTINCT p.id, r.full_name, p.number
                  FROM review_runs rr
                  JOIN pull_requests p ON rr.pr_id = p.id
                  JOIN repos r ON p.repo_id = r.id
-                 WHERE rr.id IN ({placeholders}) AND p.merged_at IS NULL"
-            );
-            let mut stmt = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
-            let params = rusqlite::params_from_iter(chunk.iter());
-            let rows = stmt
-                .query_map(params, |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
-                })
-                .map_err(|e| e.to_string())?;
-            for row in rows.flatten() {
-                candidates.push(row);
-            }
-        }
+                 WHERE rr.id = ANY($1) AND p.merged_at IS NULL",
+            )
+            .map_err(|e| e.to_string())?;
+        let candidates = stmt
+            .query_map(params![run_ids], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
+            })
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .collect();
         Ok(candidates)
     }
 
@@ -474,7 +471,7 @@ impl Database {
         let count: Option<i64> = self
             .conn
             .query_row(
-                "SELECT changed_file_count FROM pr_review_file_counts WHERE pr_id = ?1",
+                "SELECT changed_file_count FROM pr_review_file_counts WHERE pr_id = $1",
                 params![pr_id],
                 |row| row.get(0),
             )
@@ -490,7 +487,7 @@ impl Database {
 
     pub fn set_pr_lane_if_open(&self, pr_id: i64, lane: &str, status_reason: Option<&str>) -> Result<bool, String> {
         let changed = self.conn.execute(
-            "UPDATE pull_requests SET review_lane = ?1, status_reason = ?2, updated_at = ?3 WHERE id = ?4 AND LOWER(state) NOT IN ('closed', 'merged')",
+            "UPDATE pull_requests SET review_lane = $1, status_reason = $2, updated_at = $3 WHERE id = $4 AND LOWER(state) NOT IN ('closed', 'merged')",
             params![lane, status_reason, now_millis(), pr_id],
         ).map_err(|error| error.to_string())?;
         Ok(changed == 1)
@@ -500,7 +497,7 @@ impl Database {
         let now = now_millis();
         self.conn
             .execute(
-                "UPDATE pull_requests SET review_lane = ?1, status_reason = ?2, updated_at = ?3 WHERE id = ?4",
+                "UPDATE pull_requests SET review_lane = $1, status_reason = $2, updated_at = $3 WHERE id = $4",
                 params![lane, status_reason, now, pr_id],
             )
             .map_err(|error| error.to_string())?;
@@ -510,7 +507,7 @@ impl Database {
     pub fn resolve_all_pending_for_pr(&self, pr_id: i64) -> Result<(), String> {
         let now = now_millis();
         self.conn.execute(
-      "UPDATE pending_actions SET status = 'resolved', resolved_at = ?1 WHERE pr_id = ?2 AND status != 'resolved'",
+      "UPDATE pending_actions SET status = 'resolved', resolved_at = $1 WHERE pr_id = $2 AND status != 'resolved'",
       params![now, pr_id],
     ).map_err(|error| error.to_string())?;
         Ok(())
@@ -528,7 +525,7 @@ impl Database {
         let repo_id: i64 = self
             .conn
             .query_row(
-                "SELECT repo_id FROM pull_requests WHERE id = ?1",
+                "SELECT repo_id FROM pull_requests WHERE id = $1",
                 params![pr_id],
                 |row| row.get(0),
             )
@@ -536,9 +533,9 @@ impl Database {
         self.conn
             .execute(
                 "INSERT INTO pending_actions (type, repo_id, pr_id, review_run_id, status, title, message, created_at)
-       SELECT ?1, ?2, ?3, ?4, 'unseen', ?5, ?6, ?7
+       SELECT $1::TEXT, $2::BIGINT, $3::BIGINT, $4::BIGINT, 'unseen', $5::TEXT, $6::TEXT, $7::BIGINT
        WHERE NOT EXISTS (
-         SELECT 1 FROM pending_actions WHERE type = ?1 AND pr_id = ?3 AND status != 'resolved'
+         SELECT 1 FROM pending_actions WHERE type = $1 AND pr_id = $3 AND status != 'resolved'
        )",
                 params![kind, repo_id, pr_id, run_id, title, message, now],
             )

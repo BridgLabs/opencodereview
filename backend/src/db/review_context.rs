@@ -2,46 +2,46 @@ use super::*;
 
 impl Database {
     pub fn review_run_scope(&self, run_id: i64) -> Result<Option<crate::review::scope::ReviewScope>, String> {
-        match self.conn.query_row("SELECT COALESCE(reviewed_head_sha, head_sha), stacked_base_ref, reviewed_base_sha FROM review_runs WHERE id = ?1 AND stacked_base_ref IS NOT NULL AND reviewed_base_sha IS NOT NULL", params![run_id], |row| Ok(crate::review::scope::ReviewScope { head_sha: row.get(0)?, base_ref: row.get(1)?, base_sha: row.get(2)? })) {
+        match self.conn.query_row("SELECT COALESCE(reviewed_head_sha, head_sha), stacked_base_ref, reviewed_base_sha FROM review_runs WHERE id = $1 AND stacked_base_ref IS NOT NULL AND reviewed_base_sha IS NOT NULL", params![run_id], |row| Ok(crate::review::scope::ReviewScope { head_sha: row.get(0)?, base_ref: row.get(1)?, base_sha: row.get(2)? })) {
             Ok(scope) => Ok(Some(scope)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(pg::Error::QueryReturnedNoRows) => Ok(None),
             Err(error) => Err(error.to_string()),
         }
     }
 
     pub fn last_review_scope(&self, pr_id: i64) -> Result<Option<crate::review::scope::ReviewScope>, String> {
-        let id: Option<i64> = self.conn.query_row("SELECT MAX(id) FROM review_runs WHERE pr_id = ?1 AND review_body IS NOT NULL AND COALESCE((SELECT json_array_length(a.audit_json, '$.evidenceWarnings') FROM review_finding_audits a WHERE a.run_id=review_runs.id),0)=0", params![pr_id], |row| row.get(0)).map_err(|error| error.to_string())?;
+        let id: Option<i64> = self.conn.query_row("SELECT MAX(id) FROM review_runs WHERE pr_id = $1 AND review_body IS NOT NULL AND COALESCE((SELECT json_member_array_length(a.audit_json, 'evidenceWarnings') FROM review_finding_audits a WHERE a.run_id=review_runs.id),0)=0", params![pr_id], |row| row.get(0)).map_err(|error| error.to_string())?;
         id.map(|id| self.review_run_scope(id)).transpose().map(Option::flatten)
     }
 
     pub fn pr_scope(&self, repo_id: i64, number: i64) -> Result<Option<crate::review::scope::ReviewScope>, String> {
-        match self.conn.query_row("SELECT head_sha, base_ref, base_sha FROM pull_requests WHERE repo_id = ?1 AND number = ?2 AND base_ref IS NOT NULL AND base_sha IS NOT NULL", params![repo_id, number], |row| Ok(crate::review::scope::ReviewScope { head_sha: row.get(0)?, base_ref: row.get(1)?, base_sha: row.get(2)? })) {
+        match self.conn.query_row("SELECT head_sha, base_ref, base_sha FROM pull_requests WHERE repo_id = $1 AND number = $2 AND base_ref IS NOT NULL AND base_sha IS NOT NULL", params![repo_id, number], |row| Ok(crate::review::scope::ReviewScope { head_sha: row.get(0)?, base_ref: row.get(1)?, base_sha: row.get(2)? })) {
             Ok(scope) => Ok(Some(scope)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(pg::Error::QueryReturnedNoRows) => Ok(None),
             Err(error) => Err(error.to_string()),
         }
     }
 
     pub fn invalidate_review_scope(&self, pr_id: i64, keep_run: Option<i64>, reason: &str) -> Result<(), String> {
         let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
-        self.conn.execute("UPDATE pull_requests SET last_decision_sha = NULL, review_scope_revision = review_scope_revision + 1, status_reason = ?2, updated_at = ?3 WHERE id = ?1", params![pr_id, reason, now_millis()]).map_err(|error| error.to_string())?;
+        self.conn.execute("UPDATE pull_requests SET last_decision_sha = NULL, review_scope_revision = review_scope_revision + 1, status_reason = $2, updated_at = $3 WHERE id = $1", params![pr_id, reason, now_millis()]).map_err(|error| error.to_string())?;
         if let Some(run_id) = keep_run {
-            self.conn.execute("UPDATE review_runs SET review_scope_revision = (SELECT review_scope_revision FROM pull_requests WHERE id = ?1) WHERE id = ?2 AND pr_id = ?1 AND status IN ('pending','running')", params![pr_id, run_id]).map_err(|error| error.to_string())?;
+            self.conn.execute("UPDATE review_runs SET review_scope_revision = (SELECT review_scope_revision FROM pull_requests WHERE id = $1) WHERE id = $2 AND pr_id = $1 AND status IN ('pending','running')", params![pr_id, run_id]).map_err(|error| error.to_string())?;
         }
-        self.conn.execute("UPDATE review_runs SET status = 'superseded', error_message = ?2, finished_at = COALESCE(finished_at, ?3), updated_at = ?3 WHERE pr_id = ?1 AND (?4 IS NULL OR id != ?4) AND status IN ('pending','running','preview')", params![pr_id, reason, now_millis(), keep_run]).map_err(|error| error.to_string())?;
-        self.conn.execute("UPDATE review_results SET publication_status = 'superseded', error_message = ?2, updated_at = ?3 WHERE pr_id = ?1", params![pr_id, reason, now_millis()]).map_err(|error| error.to_string())?;
+        self.conn.execute("UPDATE review_runs SET status = 'superseded', error_message = $2, finished_at = COALESCE(finished_at, $3), updated_at = $3 WHERE pr_id = $1 AND ($4::BIGINT IS NULL OR id != $4) AND status IN ('pending','running','preview')", params![pr_id, reason, now_millis(), keep_run]).map_err(|error| error.to_string())?;
+        self.conn.execute("UPDATE review_results SET publication_status = 'superseded', error_message = $2, updated_at = $3 WHERE pr_id = $1", params![pr_id, reason, now_millis()]).map_err(|error| error.to_string())?;
         self.resolve_pending_for_pr("review_ready", pr_id)?;
         tx.commit().map_err(|error| error.to_string())
     }
 
     pub fn refresh_review_base(&self, pr_id: i64, scope: &crate::review::scope::ReviewScope) -> Result<bool, String> {
-        self.conn.execute("UPDATE pull_requests SET base_ref = ?2, base_sha = ?3, is_stacked = CASE WHEN default_branch IS NOT NULL AND default_branch != ?2 THEN 1 ELSE 0 END, updated_at = ?4 WHERE id = ?1 AND head_sha = ?5", params![pr_id, scope.base_ref, scope.base_sha, now_millis(), scope.head_sha]).map(|count| count == 1).map_err(|error| error.to_string())
+        self.conn.execute("UPDATE pull_requests SET base_ref = $2, base_sha = $3, is_stacked = CASE WHEN default_branch IS NOT NULL AND default_branch != $2 THEN 1 ELSE 0 END, updated_at = $4 WHERE id = $1 AND head_sha = $5", params![pr_id, scope.base_ref, scope.base_sha, now_millis(), scope.head_sha]).map(|count| count == 1).map_err(|error| error.to_string())
     }
 
     pub fn pr_review_start_state(&self, pr_id: i64) -> Result<(String, String, Option<String>), String> {
         self.conn
             .query_row(
-                "SELECT head_sha, review_lane, last_decision_sha FROM pull_requests WHERE id = ?1",
+                "SELECT head_sha, review_lane, last_decision_sha FROM pull_requests WHERE id = $1",
                 params![pr_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -53,7 +53,7 @@ impl Database {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT head_sha, review_lane, last_decision_sha FROM pull_requests WHERE repo_id = ?1 AND number = ?2",
+                "SELECT head_sha, review_lane, last_decision_sha FROM pull_requests WHERE repo_id = $1 AND number = $2",
             )
             .map_err(|error| error.to_string())?;
         let mut rows = stmt
@@ -76,7 +76,7 @@ impl Database {
         number: i64,
     ) -> Result<Option<(String, String, Option<String>, Option<String>)>, String> {
         let mut stmt = self.conn.prepare(
-      "SELECT head_sha, review_lane, last_decision_sha, status_reason FROM pull_requests WHERE repo_id = ?1 AND number = ?2",
+      "SELECT head_sha, review_lane, last_decision_sha, status_reason FROM pull_requests WHERE repo_id = $1 AND number = $2",
     ).map_err(|error| error.to_string())?;
         let mut rows = stmt
             .query(params![repo_id, number])
@@ -124,7 +124,7 @@ impl Database {
             "SELECT rr.head_sha, rr.review_body, rr.comments_json
              FROM review_results result
              JOIN review_runs rr ON rr.id = result.actionable_run_id
-             WHERE result.pr_id = ?1
+             WHERE result.pr_id = $1
                AND result.effective_state = 'awaiting_action'
                AND rr.review_body IS NOT NULL",
             params![pr_id],
@@ -137,16 +137,16 @@ impl Database {
             },
         ) {
             Ok(value) => return context(value).map(Some),
-            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(pg::Error::QueryReturnedNoRows) => {}
             Err(error) => return Err(error.to_string()),
         }
         match self.conn.query_row(
-            "SELECT head_sha, review_body, comments_json FROM review_runs WHERE pr_id = ?1 AND review_body IS NOT NULL AND status IN ('preview','superseded') ORDER BY id DESC LIMIT 1",
+            "SELECT head_sha, review_body, comments_json FROM review_runs WHERE pr_id = $1 AND review_body IS NOT NULL AND status IN ('preview','superseded') ORDER BY id DESC LIMIT 1",
             params![pr_id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?)),
         ) {
             Ok(value) => context(value).map(Some),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(pg::Error::QueryReturnedNoRows) => Ok(None),
             Err(error) => Err(error.to_string()),
         }
     }
@@ -155,12 +155,12 @@ impl Database {
     /// Used to scope an incremental re-review to just the delta since then.
     pub fn last_reviewed_sha(&self, pr_id: i64) -> Result<Option<String>, String> {
         match self.conn.query_row(
-      "SELECT head_sha FROM review_runs WHERE pr_id = ?1 AND review_body IS NOT NULL AND COALESCE((SELECT json_array_length(a.audit_json, '$.evidenceWarnings') FROM review_finding_audits a WHERE a.run_id=review_runs.id),0)=0 ORDER BY id DESC LIMIT 1",
+      "SELECT head_sha FROM review_runs WHERE pr_id = $1 AND review_body IS NOT NULL AND COALESCE((SELECT json_member_array_length(a.audit_json, 'evidenceWarnings') FROM review_finding_audits a WHERE a.run_id=review_runs.id),0)=0 ORDER BY id DESC LIMIT 1",
       params![pr_id],
       |row| row.get::<_, String>(0),
     ) {
       Ok(sha) => Ok(Some(sha)),
-      Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+      Err(pg::Error::QueryReturnedNoRows) => Ok(None),
       Err(error) => Err(error.to_string()),
     }
     }
@@ -172,14 +172,14 @@ impl Database {
         reprocess: bool,
     ) -> Result<(bool, bool), String> {
         self.conn.query_row(
-            "UPDATE pull_requests SET force_full_next_review = force_full_next_review OR ?2,
-             reprocess_next_review = reprocess_next_review OR ?3,
-             review_scope_revision = review_scope_revision + CASE WHEN force_full_next_review OR reprocess_next_review OR ?2 OR ?3 THEN 1 ELSE 0 END
-             WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM review_runs WHERE pr_id = ?1 AND status = 'posting')
+            "UPDATE pull_requests SET force_full_next_review = (force_full_next_review <> 0 OR $2::BOOLEAN)::INT,
+             reprocess_next_review = (reprocess_next_review <> 0 OR $3::BOOLEAN)::INT,
+             review_scope_revision = review_scope_revision + CASE WHEN force_full_next_review <> 0 OR reprocess_next_review <> 0 OR $2 OR $3 THEN 1 ELSE 0 END
+             WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM review_runs WHERE pr_id = $1 AND status = 'posting')
              RETURNING force_full_next_review, reprocess_next_review",
             params![pr_id, force_full, reprocess], |row| Ok((row.get(0)?, row.get(1)?)),
         ).map_err(|error| match error {
-            rusqlite::Error::QueryReturnedNoRows => "PR unavailable or a review is already being published".into(),
+            pg::Error::QueryReturnedNoRows => "PR unavailable or a review is already being published".into(),
             error => error.to_string(),
         })
     }
@@ -187,8 +187,8 @@ impl Database {
     pub fn restore_review_intent(&self, pr_id: i64, force_full: bool, reprocess: bool) -> Result<(), String> {
         self.conn
             .execute(
-                "UPDATE pull_requests SET force_full_next_review = force_full_next_review OR ?2,
-             reprocess_next_review = reprocess_next_review OR ?3 WHERE id = ?1 AND LOWER(state) = 'open'",
+                "UPDATE pull_requests SET force_full_next_review = (force_full_next_review <> 0 OR $2::BOOLEAN)::INT,
+             reprocess_next_review = (reprocess_next_review <> 0 OR $3::BOOLEAN)::INT WHERE id = $1 AND LOWER(state) = 'open'",
                 params![pr_id, force_full, reprocess],
             )
             .map_err(|error| error.to_string())?;
@@ -198,8 +198,8 @@ impl Database {
     pub fn set_reprocess_next_review(&self, pr_id: i64, reprocess: bool) -> Result<(), String> {
         self.conn
             .execute(
-                "UPDATE pull_requests SET reprocess_next_review = ?2 WHERE id = ?1",
-                params![pr_id, reprocess],
+                "UPDATE pull_requests SET reprocess_next_review = $2 WHERE id = $1",
+                params![pr_id, i64::from(reprocess)],
             )
             .map_err(|error| error.to_string())?;
         Ok(())
@@ -210,7 +210,7 @@ impl Database {
         let requested = self
             .conn
             .query_row(
-                "SELECT reprocess_next_review FROM pull_requests WHERE id = ?1",
+                "SELECT reprocess_next_review FROM pull_requests WHERE id = $1",
                 [pr_id],
                 |row| row.get(0),
             )
@@ -230,7 +230,7 @@ impl Database {
             .query_row(
                 "SELECT rr.id, rr.pr_id, COALESCE(rr.reviewed_head_sha, rr.head_sha), snapshot.manifest_json
              FROM review_context_snapshots snapshot JOIN review_runs rr ON rr.id = snapshot.review_run_id
-             WHERE rr.pr_id = ?1 AND snapshot.pr_id = ?1 AND rr.id < ?2 AND snapshot.changed_count > 0
+             WHERE rr.pr_id = $1 AND snapshot.pr_id = $1 AND rr.id < $2 AND snapshot.changed_count > 0
              ORDER BY rr.id DESC, snapshot.id DESC LIMIT 1",
                 params![pr_id, before_run],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
@@ -252,8 +252,8 @@ impl Database {
     pub fn set_force_full_next_review(&self, pr_id: i64, force_full: bool) -> Result<(), String> {
         self.conn
             .execute(
-                "UPDATE pull_requests SET force_full_next_review = ?1, updated_at = ?2 WHERE id = ?3",
-                params![if force_full { 1 } else { 0 }, now_millis(), pr_id],
+                "UPDATE pull_requests SET force_full_next_review = $1, updated_at = $2 WHERE id = $3",
+                params![i64::from(force_full), now_millis(), pr_id],
             )
             .map_err(|error| error.to_string())?;
         Ok(())
@@ -263,7 +263,7 @@ impl Database {
         let force_full = self
             .conn
             .query_row(
-                "SELECT force_full_next_review FROM pull_requests WHERE id = ?1",
+                "SELECT force_full_next_review FROM pull_requests WHERE id = $1",
                 params![pr_id],
                 |row| row.get::<_, i64>(0),
             )
@@ -280,7 +280,7 @@ impl Database {
             .conn
             .prepare(
                 "SELECT gh_id, path, line, is_resolved, is_outdated, comment_count, last_author, last_at, comments_json
-       FROM review_threads WHERE pr_id = ?1 ORDER BY is_resolved ASC, last_at DESC",
+       FROM review_threads WHERE pr_id = $1 ORDER BY is_resolved ASC, last_at DESC",
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
@@ -319,17 +319,13 @@ impl Database {
         let mut packages: Vec<ContextPackage> = Vec::new();
         let mut package_paths: HashSet<String> = HashSet::new();
         if !changed_paths.is_empty() {
-            let placeholders = vec!["?"; changed_paths.len()].join(",");
-            let sql = format!(
-                "SELECT DISTINCT p.package_path, p.name, p.kind
+            let sql = "SELECT DISTINCT p.package_path, p.name, p.kind
          FROM repo_index_files f JOIN repo_index_packages p ON p.id = f.package_id
-         WHERE f.repo_id = ? AND f.path IN ({placeholders})"
-            );
-            let mut stmt = self.conn.prepare(&sql).map_err(|error| error.to_string())?;
-            let mut binds: Vec<String> = vec![repo_id.to_string()];
-            binds.extend(changed_paths.iter().cloned());
+         WHERE f.repo_id = $1 AND f.path = ANY($2)";
+            let mut stmt = self.conn.prepare(sql).map_err(|error| error.to_string())?;
+            let changed_paths_list: Vec<&str> = changed_paths.iter().map(String::as_str).collect();
             let rows = stmt
-                .query_map(params_from_iter(binds.iter()), |row| {
+                .query_map(params![repo_id, changed_paths_list], |row| {
                     Ok(ContextPackage {
                         package_path: row.get(0)?,
                         name: row.get(1)?,
@@ -348,18 +344,14 @@ impl Database {
         // Tests of the owning packages; only the ones tied to the change are kept below.
         let mut test_files: Vec<String> = Vec::new();
         if !package_paths.is_empty() {
-            let placeholders = vec!["?"; package_paths.len()].join(",");
-            let sql = format!(
-                "SELECT f.path FROM repo_index_files f JOIN repo_index_packages p ON p.id = f.package_id
-         WHERE f.repo_id = ? AND p.package_path IN ({placeholders})
-           AND (f.path LIKE '%.test.%' OR f.path LIKE '%.spec.%')
-         ORDER BY f.path ASC LIMIT 2000"
-            );
-            let mut stmt = self.conn.prepare(&sql).map_err(|error| error.to_string())?;
-            let mut binds: Vec<String> = vec![repo_id.to_string()];
-            binds.extend(package_paths.iter().cloned());
+            let sql = "SELECT f.path FROM repo_index_files f JOIN repo_index_packages p ON p.id = f.package_id
+         WHERE f.repo_id = $1 AND p.package_path = ANY($2)
+           AND (f.path ILIKE '%.test.%' OR f.path ILIKE '%.spec.%')
+         ORDER BY f.path ASC LIMIT 2000";
+            let mut stmt = self.conn.prepare(sql).map_err(|error| error.to_string())?;
+            let package_paths_list: Vec<&str> = package_paths.iter().map(String::as_str).collect();
             let rows = stmt
-                .query_map(params_from_iter(binds.iter()), |row| row.get::<_, String>(0))
+                .query_map(params![repo_id, package_paths_list], |row| row.get::<_, String>(0))
                 .map_err(|error| error.to_string())?;
             for path in rows {
                 test_files.push(path.map_err(|error| error.to_string())?);
@@ -400,17 +392,13 @@ impl Database {
         let candidate_paths: Vec<String> = candidates.keys().cloned().collect();
         let mut candidate_packages: HashMap<String, Option<String>> = HashMap::new();
         if !candidate_paths.is_empty() {
-            let placeholders = vec!["?"; candidate_paths.len()].join(",");
-            let sql = format!(
-                "SELECT f.path, p.package_path
+            let sql = "SELECT f.path, p.package_path
          FROM repo_index_files f LEFT JOIN repo_index_packages p ON p.id = f.package_id
-         WHERE f.repo_id = ? AND f.path IN ({placeholders})"
-            );
-            let mut stmt = self.conn.prepare(&sql).map_err(|error| error.to_string())?;
-            let mut binds: Vec<String> = vec![repo_id.to_string()];
-            binds.extend(candidate_paths.iter().cloned());
+         WHERE f.repo_id = $1 AND f.path = ANY($2)";
+            let mut stmt = self.conn.prepare(sql).map_err(|error| error.to_string())?;
+            let candidate_paths_list: Vec<&str> = candidate_paths.iter().map(String::as_str).collect();
             let rows = stmt
-                .query_map(params_from_iter(binds.iter()), |row| {
+                .query_map(params![repo_id, candidate_paths_list], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
                 })
                 .map_err(|error| error.to_string())?;
@@ -466,17 +454,13 @@ impl Database {
         let mut dependent_packages: Vec<String> = Vec::new();
         let names: Vec<String> = packages.iter().map(|p| p.name.clone()).collect();
         if !names.is_empty() {
-            let placeholders = vec!["?"; names.len()].join(",");
-            let sql = format!(
-                "SELECT DISTINCT p.package_path FROM repo_index_pkg_deps d
+            let sql = "SELECT DISTINCT p.package_path FROM repo_index_pkg_deps d
          JOIN repo_index_packages p ON p.id = d.from_package_id
-         WHERE d.repo_id = ? AND d.to_package_name IN ({placeholders})"
-            );
-            let mut stmt = self.conn.prepare(&sql).map_err(|error| error.to_string())?;
-            let mut binds: Vec<String> = vec![repo_id.to_string()];
-            binds.extend(names.iter().cloned());
+         WHERE d.repo_id = $1 AND d.to_package_name = ANY($2)";
+            let mut stmt = self.conn.prepare(sql).map_err(|error| error.to_string())?;
+            let names_list: Vec<&str> = names.iter().map(String::as_str).collect();
             let rows = stmt
-                .query_map(params_from_iter(binds.iter()), |row| row.get::<_, String>(0))
+                .query_map(params![repo_id, names_list], |row| row.get::<_, String>(0))
                 .map_err(|error| error.to_string())?;
             for path in rows {
                 let path = path.map_err(|error| error.to_string())?;
@@ -519,7 +503,7 @@ impl Database {
         self.conn
             .query_row(
                 "SELECT pr.repo_id, r.full_name, pr.number, pr.head_sha
-       FROM pull_requests pr JOIN repos r ON r.id = pr.repo_id WHERE pr.id = ?1",
+       FROM pull_requests pr JOIN repos r ON r.id = pr.repo_id WHERE pr.id = $1",
                 params![pr_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
@@ -529,7 +513,7 @@ impl Database {
     pub fn pr_author(&self, pr_id: i64) -> Result<String, String> {
         self.conn
             .query_row(
-                "SELECT author FROM pull_requests WHERE id = ?1",
+                "SELECT author FROM pull_requests WHERE id = $1",
                 params![pr_id],
                 |row| row.get(0),
             )
@@ -539,7 +523,7 @@ impl Database {
     pub fn pr_decided_by(&self, pr_id: i64) -> Result<Option<String>, String> {
         self.conn
             .query_row(
-                "SELECT decided_by FROM pull_requests WHERE id = ?1",
+                "SELECT decided_by FROM pull_requests WHERE id = $1",
                 params![pr_id],
                 |row| row.get(0),
             )
@@ -559,12 +543,12 @@ impl Database {
         related_count: i64,
     ) -> Result<i64, String> {
         let now = now_millis();
-        self.conn.execute(
+        self.conn.query_row(
       "INSERT INTO review_context_snapshots (repo_id, pr_id, review_run_id, head_sha, base_sha, dir_path, manifest_json, changed_count, related_count, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id",
       params![repo_id, pr_id, review_run_id, head_sha, base_sha, dir_path, manifest_json, changed_count, related_count, now],
-    ).map_err(|error| error.to_string())?;
-        Ok(self.conn.last_insert_rowid())
+      |row| row.get(0),
+    ).map_err(|error| error.to_string())
     }
 
     /// The most recent persisted context pack for a PR (what the index contributed),
@@ -573,7 +557,7 @@ impl Database {
         let manifest: Option<String> = self
             .conn
             .query_row(
-                "SELECT manifest_json FROM review_context_snapshots WHERE pr_id = ?1 ORDER BY id DESC LIMIT 1",
+                "SELECT manifest_json FROM review_context_snapshots WHERE pr_id = $1 ORDER BY id DESC LIMIT 1",
                 params![pr_id],
                 |row| row.get(0),
             )
@@ -588,7 +572,7 @@ impl Database {
         let manifest: Option<String> = self
             .conn
             .query_row(
-                "SELECT manifest_json FROM review_context_snapshots WHERE review_run_id = ?1 ORDER BY id DESC LIMIT 1",
+                "SELECT manifest_json FROM review_context_snapshots WHERE review_run_id = $1 ORDER BY id DESC LIMIT 1",
                 params![review_run_id],
                 |row| row.get(0),
             )
@@ -606,18 +590,18 @@ impl Database {
         if changed_paths.is_empty() {
             return Ok(Vec::new());
         }
-        let placeholders = vec!["?"; changed_paths.len()].join(",");
         let sql = format!(
             "SELECT DISTINCT {select_col} FROM repo_index_edges
-       WHERE repo_id = ? AND resolved = 1 AND {select_col} IS NOT NULL
-         AND {match_col} IN ({placeholders})
+       WHERE repo_id = $1 AND resolved = 1 AND {select_col} IS NOT NULL
+         AND {match_col} = ANY($2)
        ORDER BY {select_col} ASC"
         );
         let mut stmt = self.conn.prepare(&sql).map_err(|error| error.to_string())?;
-        let mut binds: Vec<String> = vec![repo_id.to_string()];
-        binds.extend(changed_paths.iter().cloned());
+        let changed_paths_list: Vec<&str> = changed_paths.iter().map(String::as_str).collect();
         let rows = stmt
-            .query_map(params_from_iter(binds.iter()), |row| row.get::<_, Option<String>>(0))
+            .query_map(params![repo_id, changed_paths_list], |row| {
+                row.get::<_, Option<String>>(0)
+            })
             .map_err(|error| error.to_string())?;
         let mut paths = Vec::new();
         for path in rows {

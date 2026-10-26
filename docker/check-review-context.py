@@ -132,7 +132,7 @@ def main():
                 run_env.extend(["-e", "OCR_DIAGNOSTIC_REPLAN_BASE_SYNC=true"])
             if args.reprocess_scope:
                 run_env.extend(["-e", "OCR_DIAGNOSTIC_REPROCESS=true"])
-            export = command("docker", "exec", *run_env, "-e", "OCR_DIAGNOSTIC_DB=/data/opencodereview.sqlite", "-e", "OCR_DIAGNOSTIC_REPOSITORY=" + args.repository, "-e", "OCR_DIAGNOSTIC_PR=" + str(args.pr), args.container, installed, "review::usage_tests::export_read_only_review_context_fixture", "--exact", "--ignored", "--nocapture", "--test-threads=1")
+            export = command("docker", "exec", *run_env, "-e", "OCR_DIAGNOSTIC_REPOSITORY=" + args.repository, "-e", "OCR_DIAGNOSTIC_PR=" + str(args.pr), args.container, installed, "review::usage_tests::export_read_only_review_context_fixture", "--exact", "--ignored", "--nocapture", "--test-threads=1")
             fixture = marked_json(export.stdout, "READ_ONLY_REVIEW_FIXTURE ")
             if args.preflight_model:
                 print(json.dumps({"recordedModel": fixture.get("model"), "preflightModel": args.preflight_model, "modelCalls": 0}), flush=True)
@@ -143,7 +143,7 @@ def main():
             pr = json.loads(command("docker", "exec", args.container, "gh", "api", f"repos/{args.repository}/pulls/{args.pr}", "--jq", "{head: .head.sha, title: .title, body: .body}").stdout)
             packet = json.dumps({"fixture": fixture, "pr": pr})
             if args.hydrate_pinned_dependencies:
-                hydration = command("docker", "exec", "-i", *run_env, "-e", "OCR_DIAGNOSTIC_DB=/data/opencodereview.sqlite", "-e", "OCR_DIAGNOSTIC_REPOS=/data/repos", args.container, installed, "review::usage_tests::hydrate_pinned_review_dependencies_without_inference", "--exact", "--ignored", "--nocapture", "--test-threads=1", input=packet, timeout=600)
+                hydration = command("docker", "exec", "-i", *run_env, "-e", "OCR_DIAGNOSTIC_REPOS=/data/repos", args.container, installed, "review::usage_tests::hydrate_pinned_review_dependencies_without_inference", "--exact", "--ignored", "--nocapture", "--test-threads=1", input=packet, timeout=600)
                 hydration_result = marked_json(hydration.stdout, "PINNED_DEPENDENCY_HYDRATION ")
                 print(json.dumps(hydration_result), flush=True)
                 if "authorizedDependencies" in hydration_result:

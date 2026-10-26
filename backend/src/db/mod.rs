@@ -1,9 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::PathBuf;
-use std::time::Duration;
 
-use rusqlite::{params, params_from_iter, Connection, OpenFlags, OptionalExtension};
+use pg::{params, Conn, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -27,9 +24,9 @@ mod review_usage;
 mod settings;
 mod skills;
 pub use accounts::AiAccount;
-pub use handle::Db;
+pub(crate) use handle::ARCHIVE_GATE_KEY;
+pub use handle::{ArchiveGate, Db, OperationalSnapshot};
 
-pub(super) use migrations::MIGRATIONS;
 #[cfg(test)]
 pub(crate) use queue_acknowledgements::QUEUE_POST_SETTLE_MS;
 pub(crate) use review_results::result_marker_key;
@@ -737,8 +734,8 @@ pub struct RepoIndexWrite {
 }
 
 pub struct Database {
-    conn: Connection,
-    path: PathBuf,
+    conn: Conn,
+    db: Db,
 }
 
 fn parent_dir(path: &str) -> Option<String> {
@@ -868,7 +865,7 @@ fn hash_text(value: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-fn review_result_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewResult> {
+fn review_result_from_row(row: &pg::Row) -> Result<ReviewResult, pg::Error> {
     Ok(ReviewResult {
         id: row.get(0)?,
         pr_id: row.get(1)?,
@@ -923,3 +920,7 @@ const REVIEW_LANES: &[(&str, &str)] = &[
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "concurrency_tests.rs"]
+mod concurrency_tests;
