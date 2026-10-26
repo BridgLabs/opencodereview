@@ -21,6 +21,9 @@ pub type Param<'a> = &'a (dyn ToSql + Sync);
 pub enum Error {
     /// `query_row` found no row, as `rusqlite::Error::QueryReturnedNoRows`.
     QueryReturnedNoRows,
+    /// A statement failed earlier in this transaction. Postgres had already aborted it, so the
+    /// commit rolled back instead and nothing was saved.
+    TransactionAborted,
     Postgres(postgres::Error),
     Pool(String),
 }
@@ -52,6 +55,9 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::QueryReturnedNoRows => f.write_str("Query returned no rows"),
+            Error::TransactionAborted => {
+                f.write_str("database transaction aborted by an earlier failed statement; nothing was saved")
+            }
             Error::Pool(message) => write!(f, "database unavailable: {message}"),
             Error::Postgres(error) => match error.as_db_error() {
                 Some(db) => write!(f, "database error {}: {}", db.code().code(), db.message()),
@@ -171,6 +177,9 @@ pub struct Conn {
     client: RefCell<Pooled>,
     depth: Cell<u32>,
     changes: Cell<u64>,
+    /// The transaction depth at which a statement failed. Postgres aborts the transaction on any
+    /// failed statement (SQLite does not); only rolling back that level or an outer one recovers.
+    aborted_at: Cell<Option<u32>>,
 }
 
 impl Conn {
@@ -179,18 +188,28 @@ impl Conn {
             client: RefCell::new(client),
             depth: Cell::new(0),
             changes: Cell::new(0),
+            aborted_at: Cell::new(None),
         }
     }
 
+    /// Every statement goes through here, so a failure inside a transaction is remembered.
+    fn run<T>(&self, f: impl FnOnce(&mut postgres::Client) -> Result<T, postgres::Error>) -> Result<T, Error> {
+        let result = f(&mut self.client.borrow_mut());
+        if result.is_err() && self.depth.get() > 0 && self.aborted_at.get().is_none() {
+            self.aborted_at.set(Some(self.depth.get()));
+        }
+        result.map_err(Error::from)
+    }
+
     pub fn execute<P: Params>(&self, sql: &str, params: P) -> Result<usize, Error> {
-        let changed = params.with_params(|params| self.client.borrow_mut().execute(sql, params))?;
+        let changed = params.with_params(|params| self.run(|client| client.execute(sql, params)))?;
         self.changes.set(changed);
         Ok(changed as usize)
     }
 
     /// Runs statements without parameters, separated by `;`.
     pub fn execute_batch(&self, sql: &str) -> Result<(), Error> {
-        self.client.borrow_mut().batch_execute(sql).map_err(Error::from)
+        self.run(|client| client.batch_execute(sql))
     }
 
     pub fn query_row<P, T, F>(&self, sql: &str, params: P, f: F) -> Result<T, Error>
@@ -198,7 +217,7 @@ impl Conn {
         P: Params,
         F: FnOnce(&Row) -> Result<T, Error>,
     {
-        let row = params.with_params(|params| self.client.borrow_mut().query_opt(sql, params))?;
+        let row = params.with_params(|params| self.run(|client| client.query_opt(sql, params)))?;
         match row {
             Some(row) => f(&Row(row)),
             None => Err(Error::QueryReturnedNoRows),
@@ -206,7 +225,7 @@ impl Conn {
     }
 
     pub fn prepare(&self, sql: &str) -> Result<Statement<'_>, Error> {
-        let statement = self.client.borrow_mut().prepare(sql)?;
+        let statement = self.run(|client| client.prepare(sql))?;
         Ok(Statement { conn: self, statement })
     }
 
@@ -288,6 +307,11 @@ impl Transaction<'_> {
         self.done = true;
         self.conn.depth.set(self.depth);
         if self.depth == 0 {
+            // On an aborted transaction Postgres answers COMMIT with a rollback and no error.
+            if self.conn.aborted_at.take().is_some() {
+                self.conn.execute_batch("ROLLBACK")?;
+                return Err(Error::TransactionAborted);
+            }
             self.conn.execute_batch("COMMIT")
         } else {
             self.conn.execute_batch(&format!("RELEASE SAVEPOINT sp{}", self.depth))
@@ -302,13 +326,18 @@ impl Transaction<'_> {
     fn finish_rollback(&self) -> Result<(), Error> {
         self.conn.depth.set(self.depth);
         if self.depth == 0 {
-            self.conn.execute_batch("ROLLBACK")
+            self.conn.execute_batch("ROLLBACK")?;
         } else {
             self.conn.execute_batch(&format!(
                 "ROLLBACK TO SAVEPOINT sp{0}; RELEASE SAVEPOINT sp{0}",
                 self.depth
-            ))
+            ))?;
         }
+        // Rolling back this level undoes a failure inside it, not one in an enclosing level.
+        if self.conn.aborted_at.get().is_some_and(|level| level > self.depth) {
+            self.conn.aborted_at.set(None);
+        }
+        Ok(())
     }
 }
 
@@ -335,13 +364,13 @@ pub struct Statement<'c> {
 
 impl Statement<'_> {
     pub fn execute<P: Params>(&mut self, params: P) -> Result<usize, Error> {
-        let changed = params.with_params(|params| self.conn.client.borrow_mut().execute(&self.statement, params))?;
+        let changed = params.with_params(|params| self.conn.run(|client| client.execute(&self.statement, params)))?;
         self.conn.changes.set(changed);
         Ok(changed as usize)
     }
 
     pub fn query<P: Params>(&mut self, params: P) -> Result<Rows, Error> {
-        let rows = params.with_params(|params| self.conn.client.borrow_mut().query(&self.statement, params))?;
+        let rows = params.with_params(|params| self.conn.run(|client| client.query(&self.statement, params)))?;
         Ok(Rows {
             rows: rows.into_iter().map(Row).collect(),
             next: 0,
@@ -365,7 +394,7 @@ impl Statement<'_> {
         P: Params,
         F: FnOnce(&Row) -> Result<T, Error>,
     {
-        let row = params.with_params(|params| self.conn.client.borrow_mut().query_opt(&self.statement, params))?;
+        let row = params.with_params(|params| self.conn.run(|client| client.query_opt(&self.statement, params)))?;
         match row {
             Some(row) => f(&Row(row)),
             None => Err(Error::QueryReturnedNoRows),
