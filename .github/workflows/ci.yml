@@ -184,16 +184,38 @@ jobs:
       image: rust:1.98.1-bookworm@sha256:9a73a5088750b4c95158ab26629c854c3d6fc4b173cb7bc8079ad252d8ed7bfa
       # All four CPUs of the hosted runner: compiling and the tests run in parallel.
       options: --cpus 4 --memory 8g --memory-swap 8g --pids-limit 1024
+    # Database tests clone a migrated template database per test on this server.
+    services:
+      postgres:
+        image: postgres:17@sha256:ae69c452f483507a6b99fb654cf93aad7fe156ffd2c56247707eef4e36d3c12b
+        env:
+          POSTGRES_PASSWORD: ci-only
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 30
     defaults:
       run:
         shell: bash
     env:
       CARGO_INCREMENTAL: "0"
+      OCR_TEST_DATABASE_URL: postgres://ocr_test:ci-only@postgres:5432/postgres
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # Tests run as a role that may create databases but is not a superuser, so a migration that
+      # quietly needs superuser fails here rather than in a deployment.
+      - name: Create the test database role
+        env:
+          PGPASSWORD: ci-only
+        run: |
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends postgresql-client >/dev/null
+          psql -h postgres -U postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE ocr_test LOGIN CREATEDB PASSWORD 'ci-only'"
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
