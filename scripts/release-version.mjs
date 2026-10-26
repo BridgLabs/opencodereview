@@ -8,7 +8,8 @@
 //
 // feat → minor, fix/perf/revert → patch, `!` or BREAKING CHANGE → major (minor before 1.0). Other
 // types (build, chore, ci, docs, refactor, style, test) release nothing on their own, and neither
-// do the `release:` commits this workflow makes. The first release is 0.1.0.
+// do the `release:` commits this workflow makes. The first release is 0.1.0. RELEASE_BUMP=patch,
+// minor or major raises the bump to at least that level, even with nothing releasable.
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 
@@ -37,14 +38,15 @@ const fragments = existsSync("changelog.d")
 const rank = (commit) =>
   commit.breaking ? 3 : commit.type === "feat" ? 2 : ["fix", "perf", "revert"].includes(commit.type) ? 1 : 0;
 // Release notes written by a pull request mean users see a change, whatever the commit type.
-const bump = Math.max(0, fragments.length ? 1 : 0, ...commits.map(rank));
+const forced = { patch: 1, minor: 2, major: 3 }[process.env.RELEASE_BUMP] ?? 0;
+const bump = Math.max(forced, fragments.length ? 1 : 0, ...commits.map(rank));
 if (!bump) process.exit(0);
 
 let version = "0.1.0";
 if (last) {
   let [major, minor, patch] = last.slice(1).split(".").map(Number);
   // Before 1.0 a breaking change moves the minor version, as the project is not stable yet.
-  const level = major === 0 && bump === 3 ? 2 : bump;
+  const level = major === 0 && bump === 3 && forced < 3 ? 2 : bump;
   if (level === 3) [major, minor, patch] = [major + 1, 0, 0];
   else if (level === 2) [minor, patch] = [minor + 1, 0];
   else patch += 1;

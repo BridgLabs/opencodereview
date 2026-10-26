@@ -1,45 +1,45 @@
 name: Release
 
-# Every merge to main that changes what users run is released, with no manual step:
+# A release is a button: Actions → Release → Run workflow. Everything merged since the last tag
+# ships together as one version, so several pull requests make one release.
 #   1. scripts/release-version.mjs picks the next version from the Conventional Commits since the
 #      last tag (feat → minor, fix/perf → patch, breaking → major), or stops when there is nothing
-#      to release.
+#      to release. The bump input can raise it.
 #   2. The changelog.d notes move into CHANGELOG.md, package.json takes the version, and the
 #      workflow pushes a `release: vX.Y.Z` commit and the `vX.Y.Z` tag to main with the
 #      RELEASE_DEPLOY_KEY deploy key, which the ruleset lets bypass the pull request rule.
 #   3. The server, runner and web images are built for amd64 and arm64 and published to ghcr.io
 #      as X.Y.Z and latest, and the GitHub release takes the version's CHANGELOG.md section.
-# Releases start once the repository is public. Run the workflow by hand to release earlier, or
-# leave dry-run on to see the next version and build the server and web images without publishing.
+# Turn dry-run on to see the next version and build the server and web images without publishing.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
+      bump:
+        description: Version bump; auto reads it from the commits
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
       dry-run:
         description: Show the next version and build without publishing, tagging or committing
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: read
 
-# One release at a time, in merge order: a later merge waits instead of racing for the same version.
+# One release at a time: a second run waits instead of racing for the same version.
 concurrency:
   group: release
   cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io/bridglabs
-  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run }}
+  DRY_RUN: ${{ inputs.dry-run }}
 
 jobs:
   prepare:
     name: Version and tag
-    if: >-
-      github.repository == 'BridgLabs/opencodereview' &&
-      (github.event_name == 'workflow_dispatch' || !github.event.repository.private) &&
-      !startsWith(github.event.head_commit.message, 'release: ')
+    if: github.repository == 'BridgLabs/opencodereview' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -62,6 +62,8 @@ jobs:
 
       - name: Next version
         id: version
+        env:
+          RELEASE_BUMP: ${{ inputs.bump }}
         run: |
           version=$(node scripts/release-version.mjs notes)
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -171,7 +173,7 @@ jobs:
   publish:
     name: Publish multi-arch tags and release
     needs: [prepare, images]
-    if: needs.prepare.outputs.version != '' && !(github.event_name == 'workflow_dispatch' && inputs.dry-run)
+    if: needs.prepare.outputs.version != '' && !inputs.dry-run
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
