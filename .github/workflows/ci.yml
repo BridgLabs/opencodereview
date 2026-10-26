@@ -281,8 +281,7 @@ jobs:
           prefix-key: v4-rust-ci
           save-if: ${{ matrix.shard == 1 }}
 
-      # Most of a test's time is spent waiting on Postgres and git, so four threads keep two CPUs
-      # busy. The binaries and doc tests hold no tests today; the first shard runs them anyway.
+      # The binaries and doc tests hold no tests today; the first shard runs them anyway.
       - name: Test
         run: |
           tests=()
@@ -295,7 +294,7 @@ jobs:
             exit 1
           fi
           echo "Shard $SHARD/$SHARDS: ${#tests[@]} tests"
-          cargo test --lib --locked -- --exact --test-threads 4 "${tests[@]}"
+          cargo test --lib --locked -- --exact "${tests[@]}"
           if [ "$SHARD" -eq 1 ]; then
             cargo test --workspace --bins --locked
             cargo test --workspace --doc --locked
