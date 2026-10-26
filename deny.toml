@@ -1,5 +1,5 @@
 # cargo-deny checks the Rust dependency graph in CI: known vulnerabilities and unmaintained crates
-# (RustSec), licenses that cannot ship inside a PolyForm Small Business product, duplicate or
+# (RustSec), licenses that cannot ship inside an FSL-1.1-ALv2 product, duplicate or
 # wildcard versions, and crates from anywhere but crates.io.
 
 [graph]

@@ -1,12 +1,12 @@
 # OpenCodeReview Contributor Assignment Agreement
 
-Version: 1.0
+Version: 1.1
 
-Date: 2026-10-25
+Date: 2026-10-26
 
 This agreement is between you and BRIDG LABS LTDA, the company that maintains OpenCodeReview ("the Maintainer", "we", "us"). It applies to each Contribution that you give to the Project. Read all of it before you sign. If you do not agree, do not send a Contribution.
 
-OpenCodeReview is free under the PolyForm Small Business License 1.0.0 and sold under commercial licenses to larger companies. To offer both, the Maintainer must own the copyright in all of the code, so this agreement assigns it.
+OpenCodeReview is free under the Functional Source License 1.1, Apache 2.0 Future License, and the Maintainer also offers it under commercial licenses for uses that license does not allow. To offer both, the Maintainer must own the copyright in all of the code, so this agreement assigns it.
 
 ## 1. Definitions
 
