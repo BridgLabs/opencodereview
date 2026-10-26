@@ -101,7 +101,7 @@ pub(crate) fn poll_author_commands(
     eligible: &HashMap<i64, (i64, String)>,
     resolve: impl FnMut(i64) -> Result<Option<(i64, String)>, String>,
 ) -> Result<(), String> {
-    let db = Database::open_at(state.config.db_path.clone())?;
+    let db = state.config.db.open()?;
     scan_activation_pages_with_lookup(
         &db,
         repo,

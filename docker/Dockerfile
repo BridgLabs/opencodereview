@@ -106,7 +106,6 @@ COPY --from=server /app/assets ./assets
 COPY --from=server /usr/local/bin/ocr-server /usr/local/bin/ocr-server
 ENV OCR_BIND=0.0.0.0:8787 \
   OCR_DATA_DIR=/data \
-  OCR_DB_PATH=/data/opencodereview.sqlite \
   OCR_REPOS_DIR=/data/repos
 VOLUME ["/data"]
 EXPOSE 8787

@@ -204,7 +204,7 @@ impl Database {
         }
         self.conn
             .execute(
-                "INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, strftime('%s','now') * 1000)
+                "INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, (EXTRACT(EPOCH FROM now()) * 1000)::BIGINT)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
                 params![key, value],
             )
@@ -371,7 +371,7 @@ impl Database {
     pub fn setting(&self, key: &str) -> Result<Option<String>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT value FROM settings WHERE key = ?1")
+            .prepare("SELECT value FROM settings WHERE key = $1")
             .map_err(|error| error.to_string())?;
         let mut rows = stmt.query(params![key]).map_err(|error| error.to_string())?;
         match rows.next().map_err(|error| error.to_string())? {
@@ -383,7 +383,7 @@ impl Database {
     pub(super) fn ensure_setting_default(&self, key: &str, value: &str) -> Result<(), String> {
         self.conn
             .execute(
-                "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?1, ?2, strftime('%s','now') * 1000)",
+                "INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, (EXTRACT(EPOCH FROM now()) * 1000)::BIGINT) ON CONFLICT DO NOTHING",
                 params![key, value],
             )
             .map_err(|error| error.to_string())?;
@@ -393,7 +393,7 @@ impl Database {
     pub(crate) fn save_setting_value(&self, key: &str, value: &str) -> Result<(), String> {
         self.conn
             .execute(
-                "INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, strftime('%s','now') * 1000)
+                "INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, (EXTRACT(EPOCH FROM now()) * 1000)::BIGINT)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
                 params![key, value],
             )
@@ -405,7 +405,7 @@ impl Database {
         let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
         for (key, value) in values {
             tx.execute(
-                "INSERT INTO settings (key, value, updated_at) VALUES (?1, ?2, strftime('%s','now') * 1000)
+                "INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, (EXTRACT(EPOCH FROM now()) * 1000)::BIGINT)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
                 params![key, value],
             )

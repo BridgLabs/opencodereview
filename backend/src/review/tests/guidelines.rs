@@ -46,16 +46,9 @@ fn convention_files_are_selected_at_the_pinned_base() {
     let mut inputs = review_inputs("auto", 20, 5);
     inputs.repo_path = repo.clone();
     inputs.base_ref = base.clone();
-    let (plan, _) = super::build_snapshot_context_plan(
-        &inputs,
-        &["entry.ts".into()],
-        &head,
-        &base,
-        &root,
-        &cancel,
-        &mut |_, _| {},
-    )
-    .unwrap();
+    let (plan, _) =
+        super::build_snapshot_context_plan(&inputs, &["entry.ts".into()], &head, &base, &cancel, &mut |_, _| {})
+            .unwrap();
     assert_eq!(plan.convention_files, ["REVIEW.md", "README.md"]);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -68,16 +61,9 @@ fn review_guidelines_reach_the_context_with_base_bytes() {
     let mut inputs = review_inputs("auto", 20, 5);
     inputs.repo_path = repo.clone();
     inputs.base_ref = base.clone();
-    let (plan, _) = super::build_snapshot_context_plan(
-        &inputs,
-        &["entry.ts".into()],
-        &head,
-        &base,
-        &root,
-        &cancel,
-        &mut |_, _| {},
-    )
-    .unwrap();
+    let (plan, _) =
+        super::build_snapshot_context_plan(&inputs, &["entry.ts".into()], &head, &base, &cancel, &mut |_, _| {})
+            .unwrap();
     let context = root.join("context");
     super::materialize_files(
         &repo,
@@ -125,16 +111,9 @@ fn missing_convention_documents_are_optional() {
     let mut inputs = review_inputs("auto", 20, 5);
     inputs.repo_path = repo.clone();
     inputs.base_ref = base.clone();
-    let (plan, _) = super::build_snapshot_context_plan(
-        &inputs,
-        &["entry.ts".into()],
-        &base,
-        &base,
-        &root,
-        &cancel,
-        &mut |_, _| {},
-    )
-    .unwrap();
+    let (plan, _) =
+        super::build_snapshot_context_plan(&inputs, &["entry.ts".into()], &base, &base, &cancel, &mut |_, _| {})
+            .unwrap();
     let context = root.join("context");
     super::materialize_files(
         &repo,

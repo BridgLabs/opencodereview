@@ -69,13 +69,13 @@ pub(crate) fn start_review_job_with_intent(
             db.set_pr_lane(pr_id, "queued", Some("Waiting for a free review slot"))
         })?;
         drop(active_jobs);
-        spawn_queue_acknowledgements(state.config.db_path.clone());
+        spawn_queue_acknowledgements(state.config.db.clone());
         return Ok(());
     }
     let (repo_id, full_name, number, head_sha) = with_db_raw(state, |db| db.pr_review_coords(pr_id))?;
     let repo = with_db_raw(state, |db| db.repo_by_id(repo_id))?;
     let model = crate::providers::claude::MODEL.to_string();
-    let (last_reviewed_sha, unresolved_review, skill_content, db_path, run_id) = with_db_raw(state, |db| {
+    let (last_reviewed_sha, unresolved_review, skill_content, db_handle, run_id) = with_db_raw(state, |db| {
         let last_reviewed_sha = if force_full {
             None
         } else {
@@ -99,7 +99,7 @@ pub(crate) fn start_review_job_with_intent(
             last_reviewed_sha,
             unresolved_review,
             db.active_skill_content(),
-            db.path(),
+            db.handle(),
             run_id,
         ))
     })?;
@@ -118,7 +118,7 @@ pub(crate) fn start_review_job_with_intent(
         },
     );
     drop(active_jobs);
-    spawn_queue_acknowledgements(state.config.db_path.clone());
+    spawn_queue_acknowledgements(state.config.db.clone());
     let state = state.clone();
     thread::spawn(move || {
         let _archive_lease = state.archive_leases.acquire(run_id);
@@ -203,12 +203,13 @@ pub(crate) fn start_review_job_with_intent(
                 review_deep_threshold: settings.review_deep_threshold.max(2) as usize,
                 review_chunk_size: settings.review_chunk_size.clamp(2, 20) as usize,
                 review_parallel_chunks: settings.review_parallel_chunks.clamp(1, 20) as usize,
-                db_path: db_path.clone(),
+                db_handle: Some(db_handle.clone()),
+                archive_dir: state.config.archive_dir(),
             };
             Ok(inputs)
         })();
         match preparation {
-            Ok(inputs) => run_review_job(db_path, state.review_jobs.clone(), inputs, cancel, superseded),
+            Ok(inputs) => run_review_job(db_handle, state.review_jobs.clone(), inputs, cancel, superseded),
             Err(error) => {
                 let _ = with_db_raw(&state, |db| {
                     let active = db

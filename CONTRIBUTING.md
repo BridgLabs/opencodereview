@@ -75,7 +75,7 @@ python3 -B docker/test-web-proxy.py
 
 If you changed the runner, egress or Dockerfiles, build the images and run `python3 -u docker/runner-smoke.py` (fake inference, no credentials needed).
 
-Do not include real AI calls in tests. Never commit credentials, tokens, `.env` files or SQLite databases, and keep test fixtures free of real customer or repository data.
+Do not include real AI calls in tests. Never commit credentials, tokens, `.env` files or database files and dumps, and keep test fixtures free of real customer or repository data.
 
 ## Commit messages
 

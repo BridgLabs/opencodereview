@@ -39,6 +39,8 @@ pub enum Error {
     Excluded(Exclusion),
     #[error("Frozen evidence preparation failed")]
     Preparation,
+    #[error("Review archives still use the SQLite index; run `ocr-server import-sqlite` before starting the server")]
+    UnimportedIndex,
     #[error("cancelled")]
     Cancelled,
 }
@@ -853,6 +855,12 @@ mod transfer;
 pub use transfer::{transfer_manifest, validate_blob, Incoming};
 mod store;
 pub use store::{ArchiveStore, STORE_QUOTA};
+
+/// Where frozen review archives live under the server's data directory. The server and the
+/// `archive-retention` command both resolve it here, so they always agree.
+pub fn archive_dir(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join("review-archives")
+}
 mod stage;
 pub use stage::Stage;
 

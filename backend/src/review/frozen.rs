@@ -52,10 +52,8 @@ pub fn capture(
         true,
         cancel,
     )?;
-    let parent = Path::new(&inputs.db_path)
-        .parent()
-        .ok_or("Review storage unavailable")?;
-    let mut store = ArchiveStore::open(&parent.join("review-archives")).map_err(|e| e.to_string())?;
+    let db = inputs.db_handle.as_ref().ok_or("Review storage unavailable")?;
+    let mut store = ArchiveStore::open(&inputs.archive_dir, db).map_err(|e| e.to_string())?;
     store
         .deposit_and_link(&archive, &format!("review:{}", inputs.run_id))
         .map_err(|e| e.to_string())?;
@@ -82,7 +80,7 @@ pub fn prompt(inputs: &ReviewInputs, context: &Path, files: &[String], output: &
         )
     };
     let suffix = format!("{}{availability}\nConvention evidence may cite only repository-relative paths present under {}/conventions; do not prefix them with `context/` or `conventions/`, and do not cite other archive documents as conventions.\n", frozen.archive.protocol(), context.display());
-    let completion = if inputs.db_path.is_empty() {
+    let completion = if inputs.db_handle.is_none() {
         ""
     } else {
         "\nOperational review completion: review every assigned primary file using the frozen evidence and report supported findings. If supporting evidence remains unavailable or insufficient, record it in missingEvidence with the affected assigned path and the exact supporting reference when known. Complete the remaining checks and return the report. OpenCodeReview preserves these limitations as warnings, separate from findings; such a review is not fully evidenced. Missing primary coverage, invalid citations and invalid anchors still fail validation. Never invent a supporting reference or a finding to explain a limitation.\n"
@@ -153,7 +151,7 @@ pub fn materialize(
         Some(frozen) => {
             let resolver = crate::review::evidence::EvidenceResolver::frozen(context, &frozen.archive);
             let diff = assigned_diff(&frozen.archive, files, diff);
-            if inputs.db_path.is_empty() {
+            if inputs.db_handle.is_none() {
                 resolver
                     .materialize(report, files, head, &diff, summary, comments)
                     .map(|_| Vec::new())
@@ -474,7 +472,7 @@ pub(super) fn execute(
             )?;
             let (model, effort) = engine_for(inputs, &account.provider);
             runner::set_engine(&mut request, &model, &effort)?;
-            if !inputs.db_path.is_empty() {
+            if inputs.db_handle.is_some() {
                 let label = crate::providers::engines::label(&account.provider, &model, &effort);
                 let _ = accounts_db(inputs).and_then(|db| db.set_review_run_model(inputs.run_id, &label));
             }
@@ -554,13 +552,13 @@ pub(super) fn execute(
 }
 
 fn accounts_db(inputs: &ReviewInputs) -> Result<Database, String> {
-    Database::open_at(PathBuf::from(&inputs.db_path))
+    inputs.open_db()
 }
 
 /// The model and effort `provider` reviews with, read for each stage so a change in the app
 /// reaches the next stage. Diagnostics, which have no database, use the defaults.
 fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, String) {
-    if inputs.db_path.is_empty() {
+    if inputs.db_handle.is_none() {
         return crate::providers::engines::default_engine(provider);
     }
     accounts_db(inputs)

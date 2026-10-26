@@ -9,7 +9,9 @@ fn temp_db() -> Database {
         std::process::id(),
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
-    let db = Database::open_at(root.join("test.sqlite")).expect("open db");
+    let db = crate::db::Db::for_test_at(root.join("test.sqlite"))
+        .open()
+        .expect("open db");
     db.ensure_temp_repo_for_index(1, "acme/api").expect("repo");
     db.conn
         .execute(
@@ -149,7 +151,7 @@ fn due_queue_acknowledgements_selects_open_pending_and_any_retiring() {
     assert_eq!(due[0].status, "retiring");
     db.conn
         .execute(
-            "UPDATE queue_acknowledgements SET next_attempt_at = ?1 WHERE pr_id = 1",
+            "UPDATE queue_acknowledgements SET next_attempt_at = $1 WHERE pr_id = 1",
             params![now + 60_000],
         )
         .unwrap();
