@@ -203,8 +203,23 @@ fn usage_report_totals_reconcile_across_every_breakdown() {
         (200, 20, 0, 0),
         (day(2), day(2) + 30_000),
     );
+    // Its audit kept a finding and a question (kind read from the body); a discarded candidate
+    // and one inherited from an earlier run do not count.
+    db.conn
+        .execute(
+            "INSERT INTO review_finding_audits (run_id, audit_json, updated_at) VALUES ($1, $2, 1)",
+            params![
+                superseded,
+                r#"{"candidates":[
+                  {"kind":"finding","origin":"chunk","aiDecision":"kept","body":"[Finding] C"},
+                  {"kind":"","origin":"final","aiDecision":"kept","body":"**[Question] E**"},
+                  {"kind":"finding","origin":"chunk","aiDecision":"discarded","body":"[Finding] F"},
+                  {"kind":"finding","origin":"inherited","aiDecision":"kept","body":"[Finding] G"}]}"#
+            ],
+        )
+        .expect("audit");
 
-    let legacy = seed.run(pr2, "posted", day(1), Some(r#"[{"body":"[Finding] D"}]"#), (30, 3));
+    let legacy = seed.run(pr2, "approved", day(1), Some(r#"[{"body":"[Finding] D"}]"#), (30, 3));
     db.set_run_model_usage(legacy, pr2, &[("claude-sonnet".into(), 30, 3, 0, 0)])
         .expect("model usage");
 
@@ -220,6 +235,8 @@ fn usage_report_totals_reconcile_across_every_breakdown() {
     assert_eq!((totals.runs, totals.prs), (4, 2));
     // Only published runs count, and the superseded run never was.
     assert_eq!((totals.findings, totals.questions), (2, 1));
+    // Found counts every run's kept findings, published or not.
+    assert_eq!((totals.findings_found, totals.questions_found), (3, 2));
     assert_eq!(totals.overhead_tokens, 220);
     assert_eq!(totals.runs_without_usage, 1);
     assert_eq!((totals.reused_chunks, totals.chunks), (1, 2));
@@ -234,6 +251,7 @@ fn usage_report_totals_reconcile_across_every_breakdown() {
     assert_eq!(report.by_day.iter().map(|day| day.runs).sum::<i64>(), 4);
     assert_eq!(sum_tokens(&report.by_repo), totals.usage.tokens);
     assert_eq!(report.by_repo[0].findings, Some(2));
+    assert_eq!(report.by_repo[0].findings_found, Some(3));
 
     for breakdown in [&report.by_model, &report.by_account, &report.by_provider] {
         assert_eq!(sum_tokens(breakdown), totals.usage.tokens);
@@ -264,6 +282,7 @@ fn usage_report_totals_reconcile_across_every_breakdown() {
     assert_eq!((page.total, page.next_offset), (2, Some(1)));
     let top = &page.items[0];
     assert_eq!((top.pr_id, top.usage.tokens, top.runs, top.findings), (pr1, 357, 2, 1));
+    assert_eq!(top.findings_found, 2);
     assert_eq!(
         top.strip
             .iter()
@@ -287,6 +306,10 @@ fn usage_report_totals_reconcile_across_every_breakdown() {
     );
     assert_eq!((runs[1].reused_chunks, runs[1].chunks), (1, 2));
     assert!(runs[0].accounts.is_empty());
+    assert_eq!(
+        (runs[0].findings, runs[0].findings_found, runs[0].questions_found),
+        (0, 1, 1)
+    );
     let lost_run = db.pr_usage_runs(pr2, &filter(30)).expect("runs");
     assert!(
         !lost_run
@@ -369,6 +392,7 @@ fn usage_days_are_the_viewers_calendar_days() {
 fn run_outcomes_and_calendar_dates() {
     assert_eq!(run_outcome("queued", false), "running");
     assert_eq!(run_outcome("resolved", false), "posted");
+    assert_eq!(run_outcome("approved", false), "posted");
     assert_eq!(run_outcome("preview", false), "preview");
     assert_eq!(run_outcome("preview", true), "posted");
     assert_eq!(run_outcome("superseded", true), "superseded");

@@ -87,6 +87,29 @@ pub fn point_counts(comments_json: Option<&str>) -> (i64, i64) {
         })
 }
 
+/// (findings, questions) among the candidates a finding audit kept: neither discarded by the AI
+/// nor inherited from an earlier run. `None` when the audit is not readable.
+pub fn candidate_counts(audit_json: &str) -> Option<(i64, i64)> {
+    let audit = serde_json::from_str::<Value>(audit_json).ok()?;
+    let candidates = audit.get("candidates")?.as_array()?;
+    Some(
+        candidates
+            .iter()
+            .filter(|candidate| candidate["origin"] != "inherited" && candidate["aiDecision"] != "discarded")
+            .fold((0, 0), |(findings, questions), candidate| {
+                let kind = match candidate["kind"].as_str() {
+                    Some(kind) if !kind.is_empty() => kind,
+                    _ => point_kind(candidate["body"].as_str().unwrap_or_default()),
+                };
+                match kind {
+                    "question" => (findings, questions + 1),
+                    "mixed" => (findings + 1, questions + 1),
+                    _ => (findings + 1, questions),
+                }
+            }),
+    )
+}
+
 pub(crate) fn auto_post_event(mode: &str, comments_json: Option<&str>, body: Option<&str>) -> Option<&'static str> {
     match mode {
         "request_changes" if actionable(comments_json, body) => Some("REQUEST_CHANGES"),

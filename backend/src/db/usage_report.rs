@@ -97,8 +97,12 @@ pub struct UsageTotals {
     pub usage: UsageTokens,
     pub runs: i64,
     pub prs: i64,
+    /// Findings and questions in published reviews.
     pub findings: i64,
     pub questions: i64,
+    /// Findings and questions the review kept, published or not.
+    pub findings_found: i64,
+    pub questions_found: i64,
     pub median_duration_ms: Option<i64>,
     pub reused_chunks: i64,
     pub chunks: i64,
@@ -125,6 +129,7 @@ pub struct UsageGroupRow {
     pub usage: UsageTokens,
     pub runs: i64,
     pub findings: Option<i64>,
+    pub findings_found: Option<i64>,
     pub median_duration_ms: Option<i64>,
 }
 
@@ -171,6 +176,7 @@ pub struct UsagePrRow {
     pub usage: UsageTokens,
     pub runs: i64,
     pub findings: i64,
+    pub findings_found: i64,
     pub median_duration_ms: Option<i64>,
     pub last_run_at: i64,
     pub strip: Vec<UsageStripRun>,
@@ -197,6 +203,8 @@ pub struct UsageRun {
     pub usage: UsageTokens,
     pub findings: i64,
     pub questions: i64,
+    pub findings_found: i64,
+    pub questions_found: i64,
     pub models: Vec<String>,
     pub accounts: Vec<String>,
     pub reused_chunks: i64,
@@ -224,6 +232,8 @@ struct RunRow {
     duration_ms: Option<i64>,
     findings: i64,
     questions: i64,
+    findings_found: i64,
+    questions_found: i64,
     chunks: i64,
     reused_chunks: i64,
 }
@@ -249,7 +259,7 @@ struct Attribution {
 pub(crate) fn run_outcome(status: &str, published: bool) -> &'static str {
     match status {
         "pending" | "queued" | "running" | "posting" | "cancelling" => "running",
-        "posted" | "resolved" => "posted",
+        "posted" | "approved" | "resolved" => "posted",
         "superseded" => "superseded",
         "failed" => "failed",
         "cancelled" => "cancelled",
@@ -364,7 +374,7 @@ impl Database {
             .prepare(
                 "SELECT r.id, r.pr_id, p.repo_id, repos.full_name, p.number, p.title, p.url, r.status,
                         COALESCE(r.reviewed_head_sha, r.head_sha), r.created_at,
-                        (r.status IN ('posted', 'resolved') OR EXISTS (
+                        (r.status IN ('posted', 'approved', 'resolved') OR EXISTS (
                            SELECT 1 FROM review_results rr WHERE rr.run_id = r.id AND rr.posted_at IS NOT NULL)) AS published,
                         r.comments_json,
                         r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_creation_tokens,
@@ -372,7 +382,8 @@ impl Database {
                         COALESCE(st.input_tokens, 0), COALESCE(st.output_tokens, 0),
                         COALESCE(st.cache_read_tokens, 0), COALESCE(st.cache_creation_tokens, 0),
                         st.first_start, st.last_end, COALESCE(st.unfinished, 0),
-                        COALESCE(st.chunks, 0), COALESCE(st.reused_chunks, 0)
+                        COALESCE(st.chunks, 0), COALESCE(st.reused_chunks, 0),
+                        (SELECT a.audit_json FROM review_finding_audits a WHERE a.run_id = r.id)
                  FROM review_runs r
                  JOIN pull_requests p ON p.id = r.pr_id
                  JOIN repos ON repos.id = p.repo_id
@@ -416,11 +427,15 @@ impl Database {
                     (Some(start), Some(end)) if unfinished == 0 && outcome != "running" => Some((end - start).max(0)),
                     _ => None,
                 };
-                let (findings, questions) = if published {
-                    crate::review::findings::point_counts(comments_json.as_deref())
-                } else {
-                    (0, 0)
-                };
+                let audit_json: Option<String> = row.get(27)?;
+                let selected = crate::review::findings::point_counts(comments_json.as_deref());
+                let (findings, questions) = if published { selected } else { (0, 0) };
+                // What the review kept, published or not: its finding audit when it has one,
+                // otherwise the comments it selected.
+                let (findings_found, questions_found) = audit_json
+                    .as_deref()
+                    .and_then(crate::review::findings::candidate_counts)
+                    .unwrap_or(selected);
                 Ok(RunRow {
                     id: row.get(0)?,
                     pr_id: row.get(1)?,
@@ -441,6 +456,8 @@ impl Database {
                     duration_ms,
                     findings,
                     questions,
+                    findings_found,
+                    questions_found,
                     chunks: row.get(25)?,
                     reused_chunks: row.get(26)?,
                 })
@@ -541,6 +558,8 @@ impl Database {
             totals.runs += 1;
             totals.findings += run.findings;
             totals.questions += run.questions;
+            totals.findings_found += run.findings_found;
+            totals.questions_found += run.questions_found;
             totals.chunks += run.chunks;
             totals.reused_chunks += run.reused_chunks;
             if run.is_overhead() {
@@ -578,29 +597,29 @@ impl Database {
             }
         }
 
-        let mut repos: BTreeMap<i64, (String, UsageTokens, i64, i64, Vec<i64>)> = BTreeMap::new();
+        let mut repos: BTreeMap<i64, (String, UsageTokens, i64, i64, i64, Vec<i64>)> = BTreeMap::new();
         for run in &runs {
             let entry = repos
                 .entry(run.repo_id)
-                .or_insert_with(|| (run.repo.clone(), UsageTokens::default(), 0, 0, Vec::new()));
+                .or_insert_with(|| (run.repo.clone(), UsageTokens::default(), 0, 0, 0, Vec::new()));
             entry.1.add(run.usage);
             entry.2 += 1;
             entry.3 += run.findings;
-            entry.4.extend(run.duration_ms);
+            entry.4 += run.findings_found;
+            entry.5.extend(run.duration_ms);
         }
-        let by_repo = sorted_groups(
-            repos
-                .into_iter()
-                .map(|(id, (label, usage, count, findings, durations))| UsageGroupRow {
-                    key: id.to_string(),
-                    label,
-                    provider: None,
-                    usage,
-                    runs: count,
-                    findings: Some(findings),
-                    median_duration_ms: median(durations),
-                }),
-        );
+        let by_repo = sorted_groups(repos.into_iter().map(
+            |(id, (label, usage, count, findings, found, durations))| UsageGroupRow {
+                key: id.to_string(),
+                label,
+                provider: None,
+                usage,
+                runs: count,
+                findings: Some(findings),
+                findings_found: Some(found),
+                median_duration_ms: median(durations),
+            },
+        ));
 
         let by_model = attributed_groups(&runs, &attributions, |row| {
             Some((row.model.clone(), row.model.clone(), row.provider.clone()))
@@ -654,6 +673,7 @@ impl Database {
                     usage,
                     runs: runs.len() as i64,
                     findings: runs.iter().map(|run| run.findings).sum(),
+                    findings_found: runs.iter().map(|run| run.findings_found).sum(),
                     median_duration_ms: median(runs.iter().filter_map(|run| run.duration_ms).collect()),
                     last_run_at: runs.iter().map(|run| run.created_at).max().unwrap_or_default(),
                     strip: runs
@@ -714,6 +734,8 @@ impl Database {
                     usage: run.usage,
                     findings: run.findings,
                     questions: run.questions,
+                    findings_found: run.findings_found,
+                    questions_found: run.questions_found,
                     models,
                     accounts,
                     reused_chunks: run.reused_chunks,
@@ -771,6 +793,7 @@ fn attributed_groups(
             usage,
             runs: runs.len() as i64,
             findings: None,
+            findings_found: None,
             median_duration_ms: None,
         })
         .collect();
@@ -781,6 +804,7 @@ fn attributed_groups(
         usage: unattributed.0,
         runs: unattributed.1.len() as i64,
         findings: None,
+        findings_found: None,
         median_duration_ms: None,
     });
     sorted_groups(rows)
