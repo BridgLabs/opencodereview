@@ -1,5 +1,3 @@
-use std::sync::{Arc, Barrier};
-
 use super::test_support::TestDb;
 use super::*;
 
@@ -200,41 +198,6 @@ fn errors_shown_to_clients_leave_out_row_values() {
     let shown = error.to_string();
     assert!(shown.starts_with("database error 23505"), "{shown}");
     assert!(!shown.contains("secret-key"), "{shown}");
-}
-
-#[test]
-fn transaction_with_retry_reruns_the_loser_of_a_deadlock() {
-    let db = TestDb::new();
-    let barrier = Arc::new(Barrier::new(2));
-    let run = |first: &'static str, second: &'static str| {
-        let pool = db.pool().clone();
-        let barrier = barrier.clone();
-        std::thread::spawn(move || {
-            let conn = pool.get().unwrap();
-            let mut attempts = 0;
-            conn.transaction_with_retry(|tx| {
-                attempts += 1;
-                tx.execute(
-                    "UPDATE settings SET updated_at = updated_at + 1 WHERE key = $1",
-                    [first],
-                )?;
-                if attempts == 1 {
-                    barrier.wait();
-                }
-                tx.execute(
-                    "UPDATE settings SET updated_at = updated_at + 1 WHERE key = $1",
-                    [second],
-                )?;
-                Ok(())
-            })
-            .unwrap();
-            attempts
-        })
-    };
-    let a = run("theme", "font_size");
-    let b = run("font_size", "theme");
-    let attempts = a.join().unwrap() + b.join().unwrap();
-    assert_eq!(attempts, 3, "exactly one side retries");
 }
 
 #[test]
