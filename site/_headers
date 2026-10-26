@@ -20,9 +20,7 @@
 /site.webmanifest
   Content-Type: application/manifest+json
 
-# Share images and icons change name (or ?v=) when they change, so they can be cached for long.
+# Link previews fetch the share image with ?v=, which is bumped when it changes; a day is enough for the
+# rest. Other images keep the default revalidation because their URLs carry no version.
 /og.png
   Cache-Control: public, max-age=86400
-
-/*.webp
-  Cache-Control: public, max-age=604800
