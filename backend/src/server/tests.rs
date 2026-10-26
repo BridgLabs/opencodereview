@@ -31,6 +31,7 @@ fn transport_contract_preserves_public_routes_and_json_errors() {
     let mut request = Request {
         method: "POST".to_string(),
         path: "/settings".to_string(),
+        query: String::new(),
         origin: None,
         authorization: None,
         content_type: Some("application/json; charset=utf-8".to_string()),
@@ -38,6 +39,13 @@ fn transport_contract_preserves_public_routes_and_json_errors() {
         body: Vec::new(),
     };
     assert!(has_json_content_type(&request));
+    request.query = "days=90&repo=12&tz=-180&name=a%2Fb+c&bad=%zz".into();
+    assert_eq!(query_param(&request, "days").as_deref(), Some("90"));
+    assert_eq!(query_param(&request, "tz").as_deref(), Some("-180"));
+    assert_eq!(query_param(&request, "name").as_deref(), Some("a/b c"));
+    assert_eq!(query_param(&request, "bad").as_deref(), Some("%zz"));
+    assert_eq!(query_param(&request, "missing"), None);
+    request.query.clear();
     request.content_type = Some("text/plain".to_string());
     assert!(!has_json_content_type(&request));
 
@@ -835,6 +843,7 @@ fn skip_decision_leaves_attention_and_survives_restore() {
     let request = Request {
         method: "POST".into(),
         path: format!("/reviews/{pr_id}/decide"),
+        query: String::new(),
         origin: None,
         authorization: None,
         content_type: Some("application/json".into()),

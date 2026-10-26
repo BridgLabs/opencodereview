@@ -301,3 +301,50 @@ fn process_exists(pid: i32) -> bool {
     let signalled = unsafe { libc::kill(pid, 0) } == 0;
     signalled || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
+
+/// A database migrated only through `version`, for testing an upgrade from it. It is built from
+/// nothing rather than cloned from the template, and dropped afterwards rather than reused.
+pub(crate) struct UpgradeDb {
+    name: String,
+    admin: postgres::Config,
+}
+
+impl UpgradeDb {
+    pub(crate) fn at_version(version: i64) -> Self {
+        let admin = admin_config();
+        let name = database_name("ocr_upgrade");
+        connect(&admin)
+            .batch_execute(&format!("CREATE DATABASE {name}"))
+            .expect("create upgrade test database");
+        let db = Self { name, admin };
+        let mut client = db.client();
+        client
+            .batch_execute(
+                "CREATE TABLE schema_migrations (
+                   version BIGINT PRIMARY KEY,
+                   applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                 )",
+            )
+            .expect("schema_migrations");
+        for (applied, sql) in MIGRATIONS.iter().filter(|(applied, _)| *applied <= version) {
+            let mut tx = client.transaction().expect("begin migration");
+            tx.batch_execute(sql).expect("apply migration");
+            tx.execute("INSERT INTO schema_migrations (version) VALUES ($1)", &[applied])
+                .expect("record migration");
+            tx.commit().expect("commit migration");
+        }
+        db
+    }
+
+    pub(crate) fn client(&self) -> postgres::Client {
+        let mut config = self.admin.clone();
+        config.dbname(&self.name);
+        connect(&config)
+    }
+}
+
+impl Drop for UpgradeDb {
+    fn drop(&mut self) {
+        let _ = connect(&self.admin).batch_execute(&format!("DROP DATABASE IF EXISTS {} WITH (FORCE)", self.name));
+    }
+}

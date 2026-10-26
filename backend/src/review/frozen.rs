@@ -498,6 +498,7 @@ pub(super) fn execute(
                 },
             )
         };
+        record_attempt(inputs, paths, &account);
         let error = match result {
             Ok(()) => {
                 if account.provider == "claude" {
@@ -528,13 +529,8 @@ pub(super) fn execute(
             return Err(message.to_string());
         }
         if paths.transcript.exists() {
-            fs::rename(
-                paths.transcript,
-                paths
-                    .transcript
-                    .with_file_name(format!("transcript.failover-{}.json", tried.len())),
-            )
-            .map_err(|error| error.to_string())?;
+            fs::rename(paths.transcript, next_failover_transcript(paths.transcript))
+                .map_err(|error| error.to_string())?;
         }
         progress(
             &crate::review::progress::execution_phase(
@@ -549,6 +545,36 @@ pub(super) fn execute(
             ),
         );
     }
+}
+
+/// Attributes what one execution spent to the account it ran on, before a failover renames its
+/// transcript, so every execution of a stage is recorded once. Diagnostics have no database.
+fn record_attempt(inputs: &ReviewInputs, paths: &SpawnPaths, account: &crate::db::AiAccount) {
+    if inputs.db_handle.is_none() {
+        return;
+    }
+    let usage = super::usage::parse_transcript_usage_single(paths.transcript);
+    if usage.by_model.is_empty() {
+        return;
+    }
+    if let Ok(db) = accounts_db(inputs) {
+        let _ = db.insert_usage_attempts(
+            inputs.run_id,
+            inputs.pr_id,
+            paths.progress_phase,
+            account,
+            &usage.by_model,
+        );
+    }
+}
+
+/// The first unused `transcript.failover-N.json`. A stage whose output is repaired runs `execute`
+/// again with a fresh failover count, so numbering by that count would overwrite an earlier file.
+pub(super) fn next_failover_transcript(transcript: &Path) -> PathBuf {
+    (1..)
+        .map(|attempt| transcript.with_file_name(format!("transcript.failover-{attempt}.json")))
+        .find(|path| !path.exists())
+        .expect("an unused failover transcript name")
 }
 
 fn accounts_db(inputs: &ReviewInputs) -> Result<Database, String> {

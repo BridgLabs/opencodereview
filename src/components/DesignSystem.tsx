@@ -1,5 +1,5 @@
 import { Link, type LinkProps } from "@tanstack/react-router";
-import { MoreHorizontal, MoreVertical } from "lucide-react";
+import { Check, ChevronDown, MoreHorizontal, MoreVertical } from "lucide-react";
 import {
   type ButtonHTMLAttributes,
   type HTMLAttributes,
@@ -63,6 +63,8 @@ export type DSMenuItem = {
   hint?: string;
   tone?: "danger";
   disabled?: boolean;
+  /** Set on every item to make the menu a single choice: items become radios and the chosen one is checked. */
+  selected?: boolean;
   onSelect: () => void;
 };
 
@@ -73,6 +75,7 @@ export function DSMenu({
   vertical = false,
   size = "icon",
   text,
+  chevron = false,
 }: {
   label: string;
   items: DSMenuItem[];
@@ -80,6 +83,8 @@ export function DSMenu({
   vertical?: boolean;
   size?: "icon" | "iconSm";
   text?: string;
+  /** A select-style trigger: the text followed by a chevron instead of the "more" dots. */
+  chevron?: boolean;
 }) {
   const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -111,7 +116,7 @@ export function DSMenu({
     const rect = button.current?.getBoundingClientRect();
     setPosition(position || !rect ? null : { top: rect.bottom + 6, right: window.innerWidth - rect.right });
   };
-  const Icon = vertical ? MoreVertical : MoreHorizontal;
+  const Icon = chevron ? ChevronDown : vertical ? MoreVertical : MoreHorizontal;
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: only stops clicks bubbling to a clickable parent row; the button inside handles interaction
     // biome-ignore lint/a11y/useKeyWithClickEvents: same as above, there is no click action to mirror on the keyboard
@@ -139,10 +144,12 @@ export function DSMenu({
             className="fixed z-50 flex min-w-56 flex-col gap-0.5 rounded-2xl border border-line-strong bg-surface-muted p-1.5 shadow-pop"
           >
             {items.map((item) => (
+              // biome-ignore lint/a11y/useAriaPropsSupportedByRole: aria-checked is only set on menuitemradio items, which support it
               <button
                 key={item.label}
                 type="button"
-                role="menuitem"
+                role={item.selected === undefined ? "menuitem" : "menuitemradio"}
+                aria-checked={item.selected}
                 disabled={item.disabled}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -154,7 +161,11 @@ export function DSMenu({
                   item.tone === "danger" ? "text-danger" : "text-fg",
                 )}
               >
-                {item.icon}
+                {item.selected === undefined ? (
+                  item.icon
+                ) : (
+                  <Check className={item.selected ? "text-fg" : "invisible"} aria-hidden="true" />
+                )}
                 <span className="flex min-w-0 flex-col">
                   <span className="font-medium">{item.label}</span>
                   {item.hint && <span className="text-caption text-fg-subtle">{item.hint}</span>}

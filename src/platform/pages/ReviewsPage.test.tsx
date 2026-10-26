@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { NuqsTestingAdapter } from "nuqs/adapters/testing";
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -112,7 +113,9 @@ describe("review processes toggle", () => {
       await act(async () =>
         root.render(
           <QueryClientProvider client={client}>
-            <ReviewsPage />
+            <NuqsTestingAdapter>
+              <ReviewsPage />
+            </NuqsTestingAdapter>
           </QueryClientProvider>,
         ),
       );
@@ -153,7 +156,9 @@ describe("review processes toggle", () => {
       await act(async () =>
         root.render(
           <QueryClientProvider client={client}>
-            <ReviewsPage />
+            <NuqsTestingAdapter>
+              <ReviewsPage />
+            </NuqsTestingAdapter>
           </QueryClientProvider>,
         ),
       );
@@ -234,7 +239,9 @@ describe("review processes toggle", () => {
       await act(async () =>
         root.render(
           <QueryClientProvider client={client}>
-            <ReviewsPage />
+            <NuqsTestingAdapter>
+              <ReviewsPage />
+            </NuqsTestingAdapter>
           </QueryClientProvider>,
         ),
       );
@@ -292,7 +299,9 @@ describe("review processes toggle", () => {
       await act(async () =>
         root.render(
           <QueryClientProvider client={client}>
-            <ReviewsPage />
+            <NuqsTestingAdapter>
+              <ReviewsPage />
+            </NuqsTestingAdapter>
           </QueryClientProvider>,
         ),
       );
@@ -355,4 +364,50 @@ describe("review processes toggle", () => {
       vi.unstubAllGlobals();
     }
   });
+});
+
+it("selects the pull request a ?pr= link names, then drops the link from the URL", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+  const client = new QueryClient({ defaultOptions: { queries: { enabled: false, retry: false } } });
+  const card = (id: number, title: string, lane: string) => ({
+    id,
+    number: 40 + id,
+    repoFullName: "example/repo",
+    title,
+    author: "developer",
+    lane,
+    headSha: `head-${id}`,
+    updatedAt: Date.now() - id,
+  });
+  client.setQueryData(
+    ["reviews", "board"],
+    [{ items: [card(1, "First in line", "manual_required"), card(2, "Linked from usage", "ready")] }],
+  );
+  const onUrlUpdate = vi.fn();
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <NuqsTestingAdapter searchParams="?pr=2" onUrlUpdate={onUrlUpdate}>
+            <ReviewsPage />
+          </NuqsTestingAdapter>
+        </QueryClientProvider>,
+      ),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    const pressed = [...container.querySelectorAll('button[aria-pressed="true"]')].map((button) => button.textContent);
+    expect(pressed).toHaveLength(1);
+    expect(pressed[0]).toContain("Linked from usage");
+    expect(onUrlUpdate).toHaveBeenCalled();
+    expect(onUrlUpdate.mock.lastCall?.[0].searchParams.has("pr")).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+    client.clear();
+    vi.unstubAllGlobals();
+  }
 });

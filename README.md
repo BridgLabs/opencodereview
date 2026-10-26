@@ -17,6 +17,7 @@ OpenCodeReview watches the repositories you pick, reviews each pull request with
 - **Your own AI.** Reviews run on the Claude Code CLI (Claude Opus 5.5, medium effort), the Codex CLI or the Gemini CLI, signed in with your Claude, ChatGPT or Google account, or on OpenCode with its free models or your OpenCode Go key. There is no OpenCodeReview account.
 - **Several accounts with failover.** Connect more than one account, of any provider, and order them. When an account hits its usage limit, the review continues on the next one, and the limited account comes back after its window resets. Settings shows how much of each Claude and ChatGPT plan is left.
 - **Codebase indexing.** Each selected repository is indexed locally: file metadata, a package and import graph, and lightweight symbols. Reviews get the callers, dependencies and tests of the changed code, plus your convention files (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `REVIEW.md` and others).
+- **Usage.** See the tokens reviews used by day, pull request, repository, model and account, with findings, time and cache reuse. A pull request opens into each of its runs.
 - **Review skills.** The review methodology is a Markdown skill you can edit, version and roll back in the app.
 - **Evidence-checked findings.** Every finding must quote the exact code it is about and anchor to a changed line. Reports that fail validation are never published as clean.
 - **Incremental and stacked PRs.** New pushes review only what changed since the last review; stacked PRs are reviewed against their immediate base.

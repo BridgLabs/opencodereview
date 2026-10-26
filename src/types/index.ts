@@ -1,3 +1,4 @@
 export * from "./indexing";
 export * from "./reviews";
 export * from "./settings";
+export * from "./usage";

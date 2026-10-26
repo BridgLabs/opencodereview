@@ -442,6 +442,9 @@ fn build_snapshot_context_plan(
 }
 
 #[cfg(test)]
+#[path = "tests/failover_usage.rs"]
+mod failover_usage_tests;
+#[cfg(test)]
 #[path = "tests/guidelines.rs"]
 mod guidelines_tests;
 #[cfg(test)]
