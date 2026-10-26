@@ -85,7 +85,7 @@ export function PlatformLayout() {
     );
   return (
     <div className="flex h-dvh min-w-0 flex-col overflow-hidden bg-rail text-fg">
-      <header data-topbar className="flex h-11 flex-none items-center gap-3 pr-4 pl-3">
+      <header data-topbar className="flex h-11 flex-none items-center gap-3 pr-2 pl-3">
         <Link
           to="/platform/reviews"
           className="inline-flex h-8 flex-none items-center gap-2 rounded-lg px-1.5 text-small font-semibold text-fg no-underline transition-colors hover:bg-surface/80 [&_.brand-mark]:size-6!"
