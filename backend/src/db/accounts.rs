@@ -175,9 +175,16 @@ impl Database {
 
     /// Drops accounts and engine choices of providers the app no longer runs, such as Gemini and
     /// OpenCode, including ones an import of an older database brings back.
-    pub fn remove_unsupported_ai_accounts(&self) -> Result<(), String> {
-        self.conn
-            .execute("DELETE FROM ai_accounts WHERE provider NOT IN ('claude', 'codex')", [])
+    /// Returns the ids of the accounts it removed.
+    pub fn remove_unsupported_ai_accounts(&self) -> Result<Vec<i64>, String> {
+        let mut statement = self
+            .conn
+            .prepare("DELETE FROM ai_accounts WHERE provider NOT IN ('claude', 'codex') RETURNING id")
+            .map_err(|error| error.to_string())?;
+        let removed = statement
+            .query_map([], |row| row.get::<_, i64>(0))
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?;
         self.conn
             .execute(
@@ -185,7 +192,7 @@ impl Database {
                 [],
             )
             .map_err(|error| error.to_string())?;
-        Ok(())
+        Ok(removed)
     }
 
     /// A fresh sign-in clears any recorded failure.

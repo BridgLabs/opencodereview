@@ -97,25 +97,20 @@ pub(crate) fn has_credential(provider: &str, id: i64) -> bool {
     }
 }
 
-/// Removes accounts of providers the app no longer runs, then every credential directory whose
-/// account is gone.
+/// Removes accounts of providers the app no longer runs, with their credentials. Only those
+/// accounts' directories go: a database that is still empty, such as one waiting for a SQLite
+/// import, must not cost the other accounts their sign-ins.
 pub(crate) fn remove_unsupported(db: &Database) -> Result<(), String> {
-    db.remove_unsupported_ai_accounts()?;
-    let kept = db
-        .list_ai_accounts()?
-        .into_iter()
-        .map(|account| account.id)
-        .collect::<Vec<_>>();
-    let orphans = stored_ids()
-        .into_iter()
-        .filter(|id| !kept.contains(id))
-        .collect::<Vec<_>>();
-    if orphans.is_empty() {
+    let removed = db.remove_unsupported_ai_accounts()?;
+    if removed.is_empty() {
         return Ok(());
     }
-    for id in orphans {
-        fs::remove_dir_all(root().join(id.to_string()))
-            .map_err(|_| "Could not remove the credentials of a removed account".to_string())?;
+    for id in removed {
+        match fs::remove_dir_all(root().join(id.to_string())) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("Could not remove the credentials of a removed account".into()),
+        }
     }
     sandbox_sync::sync_app_auth()
 }

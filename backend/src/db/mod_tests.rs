@@ -2063,7 +2063,10 @@ fn accounts_of_removed_providers_are_dropped() {
     db.save_setting_value("review_engine_gemini", r#"{"model":"pro","effort":""}"#)
         .unwrap();
     db.save_review_engine("claude", "claude-sonnet-5-5", "high").unwrap();
-    db.remove_unsupported_ai_accounts().unwrap();
+    let removed = db.remove_unsupported_ai_accounts().unwrap();
+    assert_eq!(removed.len(), 1);
+    assert!(!removed.contains(&claude.id));
+    assert!(db.remove_unsupported_ai_accounts().unwrap().is_empty());
     let accounts = db.list_ai_accounts().unwrap();
     assert_eq!(
         accounts.iter().map(|account| account.id).collect::<Vec<_>>(),
