@@ -53,16 +53,20 @@ export function ProviderGlyph({ provider }: { provider: Provider }) {
   );
 }
 
-function relative(ms: number) {
+export function relative(ms: number) {
   const minutes = Math.max(1, Math.round(Math.abs(ms) / 60_000));
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
   return minutes % 60 ? `${hours} h ${minutes % 60} min` : `${hours} h`;
 }
 
-/** The account the next review starts on: the first ready one, as the server picks it. */
+/** The account the next review starts on, as the server picks it: the first ready one of the first
+ * usable account's provider, then of the other providers. */
 export function nextAccountId(accounts: AiAccount[], now = Date.now()) {
-  return accounts.find((account) => accountHealth(account, now) === "ready")?.id;
+  const usable = accounts.filter((account) => account.enabled && account.status !== "auth_failed" && account.signedIn);
+  const preferred = usable[0]?.provider;
+  const ready = usable.filter((account) => accountHealth(account, now) === "ready");
+  return (ready.find((account) => account.provider === preferred) ?? ready[0])?.id;
 }
 
 export function windowName(minutes: number | null) {
@@ -369,7 +373,7 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
           <h2 className="text-small font-semibold text-fg">Accounts</h2>
           <p className="mt-0.5 max-w-2xl text-caption text-fg-subtle">
             New reviews start on the account marked Next review. When it hits its usage limit, they continue on the next
-            account in this list.
+            account of the same provider, and only then on another provider's.
           </p>
         </div>
         {!signIn && provider && accounts.length > 0 && (

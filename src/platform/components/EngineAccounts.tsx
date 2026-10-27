@@ -10,15 +10,18 @@ import {
   ProviderGlyph,
   percentLeft,
   providerName,
+  relative,
   usageQuery,
 } from "./AccountsPanel";
 
 type Provider = AiAccount["provider"];
 
-/** What a row says about an account: how much is left, or why it can't take reviews now. */
-function accountNote(account: AiAccount, left: number | null) {
-  const health = accountHealth(account);
-  if (health === "signed-out" || health === "resting") return accountStatusText(account);
+/** What a row says about an account, kept short beside its name: how much is left, or why it
+ * can't take reviews now. The full status is in the row's tooltip. */
+function accountNote(account: AiAccount, left: number | null, now = Date.now()) {
+  const health = accountHealth(account, now);
+  if (health === "signed-out") return "Signed out";
+  if (health === "resting") return `Resets in ${relative((account.limitedUntil ?? now) - now)}`;
   if (health === "paused") return left === null ? "Paused" : `Paused · ${left}% left`;
   return left === null ? "" : `${left}% left`;
 }
@@ -51,6 +54,7 @@ export function AccountChoices({
             type="button"
             role="radio"
             aria-checked={selected}
+            title={accountStatusText(account)}
             disabled={busy || unavailable}
             className="flex h-10 w-full flex-none cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-small text-fg transition-colors hover:bg-surface-muted/60 disabled:cursor-not-allowed disabled:opacity-60"
             onClick={() => !selected && onChoose(account)}
@@ -63,7 +67,7 @@ export function AccountChoices({
             >
               {selected && <Check className="size-3" strokeWidth={3} />}
             </span>
-            <span className="min-w-0 flex-1 truncate">{account.label}</span>
+            <span className="min-w-16 flex-1 truncate">{account.label}</span>
             <span
               className={cx(
                 "flex-none text-caption tabular-nums",

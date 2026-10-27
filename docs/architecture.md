@@ -39,7 +39,7 @@ Volumes: `ocr-data` (database, repository cache, index, review archives, setting
 
 ## Accounts and failover
 
-Settings → Accounts holds Claude and ChatGPT accounts in one priority order. Each review stage uses the first account that is enabled, signed in and not resting. When a stage hits a usage limit, that account rests until the reset time reported by the provider (or one hour when none is given) and the same stage runs again on the next account, across providers. A rejected sign-in marks the account as needing attention. Settings shows each account's remaining plan usage and the top bar shows it for the account the next review uses, refreshed every five minutes.
+Settings → Accounts holds Claude and ChatGPT accounts in one priority order. Each review stage uses the first account that is enabled, signed in and not resting, trying the first account's provider before the other: a limit moves reviews to that provider's other accounts before another provider's. When a stage hits a usage limit, that account rests until the reset time reported by the provider (or one hour when none is given) and the same stage runs again on the next account. A rejected sign-in marks the account as needing attention. Settings shows each account's remaining plan usage and the top bar shows it for the account the next review uses, refreshed every five minutes.
 
 ## Backend
 

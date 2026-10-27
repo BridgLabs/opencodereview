@@ -166,7 +166,8 @@ it("switches to another account of the provider, resuming a paused one and skipp
     expect(radio("Bruno").textContent).toContain("3% left");
     expect(radio("Brito").textContent).toContain("Paused · 100% left");
     expect(radio("Bruna").disabled).toBe(true);
-    expect(radio("Bruna").textContent).toContain("Usage limit reached");
+    expect(radio("Bruna").textContent).toContain("Resets in 1 h");
+    expect(radio("Bruna").title).toContain("Usage limit reached");
     await act(async () => radio("Brito").click());
     expect(setupApi.updateAccount).toHaveBeenCalledWith(2, { enabled: true });
     expect(setupApi.reorderAccounts).toHaveBeenCalledWith([2, 1, 3]);

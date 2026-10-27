@@ -255,6 +255,13 @@ it("marks the account the next review starts on and summarizes what is left", ()
     ),
   ).toBe(3);
   expect(nextAccountId([account(1, { signedIn: false })], now)).toBeUndefined();
+  // A limit moves reviews to the first account's provider's other accounts before another provider's.
+  expect(
+    nextAccountId(
+      [account(1, { status: "limited", limitedUntil: now + 60_000 }), account(2, { provider: "codex" }), account(3)],
+      now,
+    ),
+  ).toBe(3);
   expect([windowName(300), windowName(10_080), windowName(1440), windowName(null)]).toEqual([
     "5-hour",
     "Weekly",

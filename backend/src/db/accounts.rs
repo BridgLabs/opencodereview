@@ -132,15 +132,20 @@ impl Database {
     }
 
     /// Next account to try: enabled, signed in, not resting, by priority. Accounts whose rest has
-    /// elapsed count as available again.
+    /// elapsed count as available again. The first usable account's provider goes first, so a
+    /// limit moves reviews to that provider's other accounts before another provider's.
     pub fn pick_ai_account(&self, excluded: &[i64]) -> Result<Option<AiAccount>, String> {
         let now = now_millis();
-        Ok(self.list_ai_accounts()?.into_iter().find(|account| {
-            account.enabled
-                && account.status != "auth_failed"
-                && account.limited_until.is_none_or(|until| until <= now)
-                && !excluded.contains(&account.id)
-        }))
+        let mut accounts = self.list_ai_accounts()?;
+        accounts.retain(|account| account.enabled && account.status != "auth_failed");
+        let Some(preferred) = accounts.first().map(|account| account.provider.clone()) else {
+            return Ok(None);
+        };
+        // A stable sort keeps the priority order inside each group.
+        accounts.sort_by_key(|account| account.provider != preferred);
+        Ok(accounts
+            .into_iter()
+            .find(|account| account.limited_until.is_none_or(|until| until <= now) && !excluded.contains(&account.id)))
     }
 
     /// Earliest moment a resting account becomes available again.

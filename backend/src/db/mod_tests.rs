@@ -2088,11 +2088,15 @@ fn ai_accounts_are_picked_by_priority_and_rest_after_limits() {
     let codex = db.create_ai_account("codex", "Codex").unwrap();
     assert_eq!(db.pick_ai_account(&[]).unwrap().unwrap().id, first.id);
     assert_eq!(db.pick_ai_account(&[first.id]).unwrap().unwrap().id, second.id);
-    // Providers share one priority order, so a Claude limit falls through to Codex.
+    // Once every Claude account is used up, reviews fall through to Codex.
     assert_eq!(
         db.pick_ai_account(&[first.id, second.id]).unwrap().unwrap().id,
         codex.id
     );
+    // The first account's provider is used up before another provider, whatever their order.
+    db.reorder_ai_accounts(&[first.id, codex.id, second.id]).unwrap();
+    assert_eq!(db.pick_ai_account(&[first.id]).unwrap().unwrap().id, second.id);
+    db.reorder_ai_accounts(&[first.id, second.id, codex.id]).unwrap();
 
     let until = db.mark_ai_account_limited(first.id, None, "limit").unwrap();
     assert!(until > now_millis());
