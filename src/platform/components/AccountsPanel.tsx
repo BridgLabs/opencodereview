@@ -16,7 +16,7 @@ import { formatError } from "../lib/utils";
 
 export const ACCOUNTS_QUERY_KEY = ["accounts"] as const;
 const USAGE_QUERY_KEY = ["accounts", "usage"] as const;
-const usageQuery = {
+export const usageQuery = {
   queryKey: USAGE_QUERY_KEY,
   queryFn: () => setupApi.accountUsage(),
   staleTime: 60_000,
@@ -114,7 +114,7 @@ export function windowName(minutes: number | null) {
       : `${minutes}-min`;
 }
 
-const percentLeft = (window: UsageWindow) => Math.max(0, Math.min(100, Math.round(100 - window.usedPercent)));
+export const percentLeft = (window: UsageWindow) => Math.max(0, Math.min(100, Math.round(100 - window.usedPercent)));
 
 export function usageSummary(usage?: AccountUsage) {
   return (
@@ -122,7 +122,7 @@ export function usageSummary(usage?: AccountUsage) {
   );
 }
 
-function resetText(resetsAt: UsageWindow["resetsAt"], now = Date.now()) {
+export function resetText(resetsAt: UsageWindow["resetsAt"], now = Date.now()) {
   const at = resetsAt === null ? NaN : new Date(resetsAt).getTime();
   return Number.isFinite(at) && at > now ? `resets in ${relative(at - now)}` : "";
 }

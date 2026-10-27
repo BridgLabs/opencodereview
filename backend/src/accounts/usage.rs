@@ -147,20 +147,48 @@ pub(crate) fn codex_windows(result: &Value) -> Vec<Value> {
 
 fn claude(id: i64) -> Result<Vec<Value>, String> {
     let token = fs::read_to_string(crate::accounts::claude_token_path(id)).map_err(|_| "Not signed in")?;
-    let response = reqwest::blocking::Client::builder()
+    let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
-        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    let response = client
         .get("https://api.anthropic.com/api/oauth/usage")
         .bearer_auth(token.trim())
         .header("anthropic-beta", "oauth-2025-04-20")
         .send()
         .map_err(|_| "Claude usage is unavailable right now")?;
-    if !response.status().is_success() {
+    if response.status().is_success() {
+        let body: Value = response.json().map_err(|_| "Claude returned unreadable usage")?;
+        return Ok(claude_windows(&body));
+    }
+    // `claude setup-token` sign-ins can't read the usage endpoint, but every reply carries the windows.
+    let response = client
+        .post("https://api.anthropic.com/v1/messages")
+        .bearer_auth(token.trim())
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .header("anthropic-version", "2023-06-01")
+        .json(&json!({
+            "model": "claude-haiku-5-5",
+            "max_tokens": 1,
+            "system": "You are Claude Code, Anthropic's official CLI for Claude.",
+            "messages": [{ "role": "user", "content": "hi" }],
+        }))
+        .send()
+        .map_err(|_| "Claude usage is unavailable right now")?;
+    let windows = header_windows(|name| response.headers().get(name)?.to_str().ok().map(str::to_string));
+    if windows.is_empty() {
         return Err("Claude shares this sign-in's usage after its next review".into());
     }
-    let body: Value = response.json().map_err(|_| "Claude returned unreadable usage")?;
-    Ok(claude_windows(&body))
+    Ok(windows)
+}
+
+/// Claude's `anthropic-ratelimit-unified-*` reply headers: utilization as a fraction, resets in epoch seconds.
+pub(crate) fn header_windows(header: impl Fn(&str) -> Option<String>) -> Vec<Value> {
+    [("5h", 300), ("7d", 10_080)].iter().filter_map(|(key, minutes)| {
+        let used = header(&format!("anthropic-ratelimit-unified-{key}-utilization"))?.parse::<f64>().ok()?;
+        let resets = header(&format!("anthropic-ratelimit-unified-{key}-reset")).and_then(|at| at.parse::<i64>().ok());
+        Some(json!({ "windowMins": minutes, "usedPercent": used * 100.0, "resetsAt": resets.map(|seconds| seconds * 1000) }))
+    }).collect()
 }
 
 /// Asks `codex app-server` in a private copy of the account's home, then keeps any refreshed sign-in.
@@ -262,6 +290,19 @@ mod tests {
         assert_eq!(
             codex,
             vec![json!({ "windowMins": 300, "usedPercent": 7.0, "resetsAt": 1_761_360_000_000_i64 })]
+        );
+    }
+
+    #[test]
+    fn claude_reply_headers_report_their_windows() {
+        let headers = HashMap::from([
+            ("anthropic-ratelimit-unified-5h-utilization", "0.42"),
+            ("anthropic-ratelimit-unified-5h-reset", "1793124600"),
+            ("anthropic-ratelimit-unified-7d-utilization", "bad"),
+        ]);
+        assert_eq!(
+            header_windows(|name| headers.get(name).map(|value| value.to_string())),
+            vec![json!({ "windowMins": 300, "usedPercent": 42.0, "resetsAt": 1_793_124_600_000_i64 })]
         );
     }
 

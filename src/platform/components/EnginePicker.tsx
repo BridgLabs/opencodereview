@@ -6,6 +6,7 @@ import { cx } from "../../components/DesignSystem";
 import { setupApi } from "../../services/setupApi";
 import type { AiAccount } from "../../types";
 import { ACCOUNTS_QUERY_KEY, nextAccountId, ProviderGlyph, providerName } from "./AccountsPanel";
+import { AccountUsageBar } from "./AccountUsageBar";
 
 export const ENGINES_QUERY_KEY = ["review-engines"] as const;
 
@@ -74,7 +75,8 @@ export function EnginePicker() {
     return same.length > 1 ? same.indexOf(account) + 1 : null;
   };
   return (
-    <div ref={root} className="relative ml-auto">
+    <div ref={root} className="relative ml-auto flex items-center gap-3">
+      <AccountUsageBar account={next} />
       <button
         type="button"
         aria-haspopup="dialog"
