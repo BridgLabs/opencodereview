@@ -56,6 +56,7 @@ def resolve():
         "CLAUDE_CLI_SHA256_AMD64": manifest["platforms"]["linux-x64"]["checksum"],
         "CODEX_CLI_VERSION": codex,
         "CODEX_CLI_SHA256_AMD64": sha256(f"https://github.com/openai/codex/releases/download/rust-v{codex}/codex-x86_64-unknown-linux-musl.tar.gz"),
+        "CODEX_CODE_MODE_HOST_SHA256_AMD64": sha256(f"https://github.com/openai/codex/releases/download/rust-v{codex}/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz"),
         "GEMINI_CLI_VERSION": gemini,
         "GEMINI_CLI_SHA256": sha256(f"https://registry.npmjs.org/@google/gemini-cli/-/gemini-cli-{gemini}.tgz"),
         "OPENCODE_CLI_VERSION": opencode,

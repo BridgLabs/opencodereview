@@ -15,7 +15,6 @@ const DISABLED_FEATURES: &[&str] = &[
     "browser_use_external",
     "browser_use_full_cdp_access",
     "computer_use",
-    "code_mode_host",
     "image_generation",
     "multi_agent",
     "plugins",
