@@ -65,6 +65,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  localStorage.clear();
   for (const [name, descriptor] of dialogMethods) {
     if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
     else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
@@ -245,15 +246,10 @@ describe("review processes toggle", () => {
           </QueryClientProvider>,
         ),
       );
-      const groups = [...container.querySelectorAll<HTMLElement>(".review-process-date-group")];
-      expect(groups).toHaveLength(2);
-      expect(groups.map((group) => group.querySelector("h4")?.textContent)).toEqual(["TODAY", "EARLIER"]);
+      const needsYou = container.querySelector<HTMLElement>('[data-section="needs_you"]')!;
       expect(
-        [...groups[0].querySelectorAll<HTMLElement>(".review-process-item-pr-title")].map((item) => item.textContent),
-      ).toEqual(["Newest today", "Older today"]);
-      expect(
-        [...groups[1].querySelectorAll<HTMLElement>(".review-process-item-pr-title")].map((item) => item.textContent),
-      ).toEqual(["Yesterday"]);
+        [...needsYou.querySelectorAll<HTMLElement>(".review-process-item-pr-title")].map((item) => item.textContent),
+      ).toEqual(["Newest today", "Older today", "Yesterday"]);
     } finally {
       await act(async () => root.unmount());
       client.clear();
@@ -306,13 +302,9 @@ describe("review processes toggle", () => {
         ),
       );
       const panel = container.querySelector<HTMLElement>("#review-processes")!;
-      const needsYouTab = [...panel.querySelectorAll<HTMLButtonElement>(".review-process-column-tab")].find((tab) =>
-        tab.textContent?.startsWith("Needs you"),
-      )!;
-      await act(async () => needsYouTab.click());
-      const list = () => panel.querySelector<HTMLElement>(".review-process-column-items")!;
-      expect(list().textContent).toContain("Skip this review");
-      expect(list().textContent).toContain("Still needs review");
+      const section = (id: string) => panel.querySelector<HTMLElement>(`[data-section="${id}"]`)!;
+      expect(section("needs_you").textContent).toContain("Skip this review");
+      expect(section("needs_you").textContent).toContain("Still needs review");
       client.setQueryData(
         ["reviews", "board"],
         [
@@ -345,18 +337,16 @@ describe("review processes toggle", () => {
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
-      const updatedNeedsYouTab = [...panel.querySelectorAll<HTMLButtonElement>(".review-process-column-tab")].find(
-        (tab) => tab.textContent?.startsWith("Needs you"),
-      )!;
-      expect(updatedNeedsYouTab.textContent).toContain("1");
-      expect(list().textContent).not.toContain("Skip this review");
-      expect(list().textContent).toContain("Still needs review");
-      const ignoredTab = [...panel.querySelectorAll<HTMLButtonElement>(".review-process-column-tab")].find((tab) =>
-        tab.textContent?.startsWith("Drafts and skipped"),
-      )!;
-      await act(async () => ignoredTab.click());
-      expect(list().textContent).toContain("Skip this review");
-      expect(list().textContent).toContain("Skipped");
+      expect(section("needs_you").querySelector(".review-section-count")?.textContent).toBe("1");
+      expect(section("needs_you").textContent).not.toContain("Skip this review");
+      expect(section("needs_you").textContent).toContain("Still needs review");
+      const ignored = section("ignored");
+      expect(ignored.querySelector(".review-section-count")?.textContent).toBe("1");
+      // History sections start collapsed, unless they hold the selected PR.
+      if (!ignored.querySelector(".review-section-items"))
+        await act(async () => ignored.querySelector<HTMLButtonElement>(".review-section-toggle")!.click());
+      expect(ignored.textContent).toContain("Skip this review");
+      expect(ignored.textContent).toContain("Skipped");
       expect(setupApi.decideReview).not.toHaveBeenCalled();
     } finally {
       await act(async () => root.unmount());

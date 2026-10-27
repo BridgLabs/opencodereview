@@ -66,6 +66,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  localStorage.clear();
   for (const [name, descriptor] of dialogMethods) {
     if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
     else Reflect.deleteProperty(HTMLDialogElement.prototype, name);
@@ -496,15 +497,16 @@ describe("review result decisions", () => {
         const panel = container.querySelector<HTMLElement>("#review-processes")!;
         expect(panel.hidden).toBe(!wide);
         if (populated) {
-          expect(panel.querySelector(".review-process-column-switcher")).not.toBeNull();
-          expect(panel.querySelector(".review-process-column-tab.is-active")?.textContent).toContain("Needs you");
-          expect(panel.querySelector(".review-section-toggle")).toBeNull();
-          const completedTab = [...panel.querySelectorAll<HTMLButtonElement>(".review-process-column-tab")].find(
-            (tab) => tab.textContent?.startsWith("Completed"),
-          );
-          expect(completedTab).not.toBeNull();
-          await act(async () => completedTab!.click());
-          expect(panel.querySelector(".review-process-column-tab.is-active")?.textContent).toContain("Completed");
+          expect(
+            [...panel.querySelectorAll<HTMLElement>(".review-section")].map((section) => section.dataset.section),
+          ).toEqual(["needs_you", "ai_working", "outposts", "ignored", "archive"]);
+          const toggle = (id: string) =>
+            panel.querySelector<HTMLButtonElement>(`[data-section="${id}"] .review-section-toggle`)!;
+          expect(toggle("needs_you").getAttribute("aria-expanded")).toBe("true");
+          expect(toggle("archive").disabled).toBe(true);
+          expect(toggle("outposts").getAttribute("aria-expanded")).toBe("false");
+          await act(async () => toggle("outposts").click());
+          expect(toggle("outposts").getAttribute("aria-expanded")).toBe("true");
           expect(panel.querySelector(".review-process-filters")).toBeNull();
           await act(async () => panel.querySelector<HTMLButtonElement>('button[aria-label="Filter reviews"]')!.click());
           const filters = panel.querySelectorAll<HTMLButtonElement>(
@@ -531,7 +533,6 @@ describe("review result decisions", () => {
           expect(personOption).not.toBeNull();
           expect(personOption!.querySelector(".settings-multiselect-option-icon")?.textContent).toBe("R");
           await act(async () => personOption!.click());
-          expect(panel.querySelector(".review-process-column-tab.is-active")?.textContent).toContain("Needs you");
           expect(panel.querySelector(".review-process-item")?.textContent).toContain("Other review");
           await act(async () => filters[1].click());
           const repositoryDialog = panel.querySelector<HTMLDialogElement>("dialog[open]");
