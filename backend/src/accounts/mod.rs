@@ -97,22 +97,38 @@ pub(crate) fn has_credential(provider: &str, id: i64) -> bool {
     }
 }
 
-/// Removes accounts of providers the app no longer runs, with their credentials. Only those
-/// accounts' directories go: a database that is still empty, such as one waiting for a SQLite
-/// import, must not cost the other accounts their sign-ins.
+/// Removes accounts of providers the app no longer runs, and their sign-ins. The sign-ins are found
+/// by their provider folder, not by the removed rows: a database that is still empty, such as one
+/// waiting for a SQLite import, must not cost other accounts their sign-ins, and a folder that
+/// could not be removed is tried again on the next start.
 pub(crate) fn remove_unsupported(db: &Database) -> Result<(), String> {
-    let removed = db.remove_unsupported_ai_accounts()?;
-    if removed.is_empty() {
-        return Ok(());
+    db.remove_unsupported_ai_accounts()?;
+    if remove_unsupported_sign_ins(&root())? {
+        sandbox_sync::sync_app_auth()?;
     }
-    for id in removed {
-        match fs::remove_dir_all(root().join(id.to_string())) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err("Could not remove the credentials of a removed account".into()),
+    Ok(())
+}
+
+/// Deletes the Gemini and OpenCode folders under `root`, and each account folder they leave
+/// empty. Returns whether it deleted any.
+fn remove_unsupported_sign_ins(root: &std::path::Path) -> Result<bool, String> {
+    let mut removed = false;
+    let Ok(entries) = fs::read_dir(root) else {
+        return Ok(false);
+    };
+    for account in entries.flatten().map(|entry| entry.path()) {
+        for provider in ["gemini", "opencode"] {
+            match fs::remove_dir_all(account.join(provider)) {
+                Ok(()) => {
+                    removed = true;
+                    let _ = fs::remove_dir(&account);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => return Err("Could not remove the sign-in of a removed account".into()),
+            }
         }
     }
-    sandbox_sync::sync_app_auth()
+    Ok(removed)
 }
 
 /// Installs from before multiple accounts kept one token at the app path; it becomes the first
@@ -133,4 +149,26 @@ pub(crate) fn adopt_legacy_token(db: &Database) -> Result<(), String> {
     store_claude_token(account.id, &token)?;
     fs::remove_file(&legacy).map_err(|_| "Could not retire the previous Claude token location".to_string())?;
     sandbox_sync::sync_app_auth()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn only_removed_providers_lose_their_sign_ins() {
+        let root = std::env::temp_dir().join(format!("ocr-unsupported-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for path in ["1/claude", "2/codex", "3/gemini", "4/opencode"] {
+            std::fs::create_dir_all(root.join(path)).unwrap();
+            std::fs::write(root.join(path).join("secret"), "x").unwrap();
+        }
+        assert!(super::remove_unsupported_sign_ins(&root).unwrap());
+        assert!(root.join("1/claude/secret").exists());
+        assert!(root.join("2/codex/secret").exists());
+        assert!(!root.join("3").exists());
+        assert!(!root.join("4").exists());
+        // Nothing left to remove, and a missing root is not an error.
+        assert!(!super::remove_unsupported_sign_ins(&root).unwrap());
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(!super::remove_unsupported_sign_ins(&root).unwrap());
+    }
 }
