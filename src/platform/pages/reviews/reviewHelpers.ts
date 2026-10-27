@@ -4,8 +4,6 @@ import { formatError } from "../../lib/utils";
 
 export type ReviewDecision = "approve_post" | "request_changes" | "comment" | "mark_reviewed" | "skip";
 
-type ReviewDateGroup = { id: "today" | "earlier"; title: "TODAY" | "EARLIER"; items: ReviewCard[] };
-
 export function itemTime(value: number, now: number) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
@@ -15,27 +13,13 @@ export function itemTime(value: number, now: number) {
     : date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-export function reviewDateGroups(items: ReviewCard[], now: number): ReviewDateGroup[] {
+/** Most recently updated first; cards without a usable time sink to the bottom. */
+export function byRecent(items: ReviewCard[]) {
   const timestamp = (card: ReviewCard) => {
     const value = Number(card.updatedAt);
     return Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
   };
-  const sorted = [...items].sort((a, b) => timestamp(b) - timestamp(a) || b.id - a.id);
-  const current = new Date(now);
-  const isToday = (value: number) => {
-    const date = new Date(value);
-    return (
-      Number.isFinite(date.getTime()) &&
-      date.getFullYear() === current.getFullYear() &&
-      date.getMonth() === current.getMonth() &&
-      date.getDate() === current.getDate()
-    );
-  };
-  const groups: ReviewDateGroup[] = [
-    { id: "today", title: "TODAY", items: sorted.filter((card) => isToday(timestamp(card))) },
-    { id: "earlier", title: "EARLIER", items: sorted.filter((card) => !isToday(timestamp(card))) },
-  ];
-  return groups.filter((group) => group.items.length > 0);
+  return [...items].sort((a, b) => timestamp(b) - timestamp(a) || b.id - a.id);
 }
 
 export function streamStatusLabel(state: string) {

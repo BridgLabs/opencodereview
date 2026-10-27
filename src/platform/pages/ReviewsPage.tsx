@@ -43,18 +43,37 @@ import {
 import { formatError, required } from "../lib/utils";
 import { Avatar } from "./reviews/Avatar";
 import { ReviewDetail } from "./reviews/ReviewDetail";
-import { ReviewProcessColumns } from "./reviews/ReviewProcessColumns";
+import { type ReviewSection, ReviewSections } from "./reviews/ReviewSections";
 import { parseComments, type ReviewDecision, reviewError, streamStatusLabel } from "./reviews/reviewHelpers";
 import { useReviewSelection } from "./reviews/useReviewSelection";
 
 const ReviewFlow = lazy(() => import("../components/ReviewFlow").then((module) => ({ default: module.ReviewFlow })));
 
-const sections = [
-  { id: "ai_working", title: "AI reviewing", lanes: ["reviewing", "queued", "open"] },
-  { id: "needs_you", title: "Needs you", lanes: ["manual_required", "ready", "failed", "needs_setup"] },
-  { id: "outposts", title: "Completed", lanes: ["reviewed_cleanly", "auto_posted", "posted", "approved"] },
-  { id: "ignored", title: "Drafts and skipped", lanes: ["draft", "auto_skipped", "skipped", "size_skipped"] },
-  { id: "archive", title: "Closed and merged", lanes: ["closed", "merged"] },
+// Fixed order, most urgent first, so a section never moves when another empties or fills.
+const sections: ReviewSection[] = [
+  {
+    id: "needs_you",
+    title: "Needs you",
+    lanes: ["manual_required", "ready", "failed", "needs_setup"],
+    defaultOpen: true,
+    attention: true,
+  },
+  { id: "ai_working", title: "AI reviewing", lanes: ["reviewing", "queued", "open"], defaultOpen: true },
+  {
+    id: "outposts",
+    title: "Completed",
+    lanes: ["reviewed_cleanly", "auto_posted", "posted", "approved"],
+    defaultOpen: false,
+    history: true,
+  },
+  {
+    id: "ignored",
+    title: "Drafts and skipped",
+    lanes: ["draft", "auto_skipped", "skipped", "size_skipped"],
+    defaultOpen: false,
+    history: true,
+  },
+  { id: "archive", title: "Closed and merged", lanes: ["closed", "merged"], defaultOpen: false, history: true },
 ];
 
 export function ReviewsPage() {
@@ -72,7 +91,6 @@ export function ReviewsPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedAuthors, setSelectedAuthors] = useState<Set<string>>(new Set());
   const [selectedRepositories, setSelectedRepositories] = useState<Set<string>>(new Set());
-  const [activeProcessColumn, setActiveProcessColumn] = useState(0);
   const [now, setNow] = useState(Date.now());
   const boardQuery = useQuery({
     queryKey: ["reviews", "board"],
@@ -411,20 +429,6 @@ export function ReviewsPage() {
         : nextPollSeconds <= 0
           ? "Ready to poll"
           : `Next poll in ${nextPollSeconds}s`;
-  const processColumns = useMemo(
-    () =>
-      sections
-        .map((section) => ({ ...section, items: filteredItems.filter((item) => section.lanes.includes(item.lane)) }))
-        .filter((section) => section.items.length > 0),
-    [filteredItems],
-  );
-  useEffect(() => {
-    setActiveProcessColumn((current) => Math.min(current, Math.max(0, processColumns.length - 1)));
-  }, [processColumns.length]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: query is a trigger: go back to the first column when the search changes
-  useEffect(() => {
-    setActiveProcessColumn(0);
-  }, [query]);
   const streamLabel = streamStatusLabel(runQuery.streamState);
   return (
     <>
@@ -563,14 +567,14 @@ export function ReviewsPage() {
                 {query ? "No pull requests match your search." : "Poll GitHub to find pull requests."}
               </DSEmptyState>
             ) : (
-              <ReviewProcessColumns
+              <ReviewSections
                 compact={listWidth.compact}
-                columns={processColumns}
-                activeIndex={activeProcessColumn}
+                sections={sections}
+                items={filteredItems}
+                expandAll={filtersActive}
                 selectedId={monitoringId}
                 attentionPrIds={attentionPrIds}
                 now={now}
-                onActiveIndexChange={setActiveProcessColumn}
                 onSelect={(card) => {
                   setMonitoringId(card.id);
                   dispatchWorkspace({
