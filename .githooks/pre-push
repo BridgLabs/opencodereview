@@ -1,0 +1,22 @@
+#!/bin/sh
+# Warns before a branch reaches a pull request without its release notes, which the Changelog
+# workflow requires (changelog.d/README.md). It never stops the push: a branch may still be a draft,
+# or get the no-changelog label. `pnpm install` enables this hook (core.hooksPath=.githooks).
+set -eu
+
+zero=0000000000000000000000000000000000000000
+git rev-parse --verify --quiet origin/main >/dev/null || exit 0
+
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  branch=${remote_ref#refs/heads/}
+  [ "$branch" = "$remote_ref" ] || [ "$branch" = main ] && continue
+  notes="changelog.d/$(printf '%s' "$branch" | tr / -).md"
+  base=$(git merge-base origin/main "$local_sha" 2>/dev/null) || continue
+  if ! git diff --name-only --diff-filter=ACMR "$base" "$local_sha" |
+    grep -vFx changelog.d/README.md |
+    grep -Eq '^(changelog\.d/.+\.md|CHANGELOG\.md)$'; then
+    echo "warning: $branch has no release notes. Write them in $notes (see changelog.d/README.md)," >&2
+    echo "  or add the no-changelog label to its pull request when users see no change." >&2
+  fi
+done

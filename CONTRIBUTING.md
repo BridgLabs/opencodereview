@@ -42,7 +42,7 @@ pnpm debug:web                     # optional: hot-reload frontend against the D
 
 Use pnpm only. Do not commit `package-lock.json`, `yarn.lock` or `bun.lock`. More detail is in [docs/development.md](docs/development.md).
 
-`pnpm install` turns on the pre-commit hook in `.githooks/`. On each commit it formats the staged files with Biome and rustfmt, validates staged release notes, and type-checks when TypeScript is staged. CI runs everything else.
+`pnpm install` turns on the hooks in `.githooks/`. On each commit, pre-commit formats the staged files with Biome and rustfmt, validates staged release notes, and type-checks when TypeScript is staged. On each push, pre-push warns when the branch has no release notes in `changelog.d/`, which the Changelog workflow requires. CI runs everything else.
 
 ## Checks
 
