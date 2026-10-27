@@ -31,7 +31,7 @@ export interface Settings {
 
 export interface AiAccount {
   id: number;
-  provider: "claude" | "codex" | "gemini" | "opencode";
+  provider: "claude" | "codex";
   label: string;
   priority: number;
   enabled: boolean;

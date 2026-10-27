@@ -1,13 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, KeyRound, LogIn, Pencil, Play, Plus, Smartphone, Trash2 } from "lucide-react";
 import { useState } from "react";
-import {
-  ClaudeSignIn,
-  ClaudeTokenSignIn,
-  CodexSignIn,
-  GeminiSignIn,
-  OpencodeKeySignIn,
-} from "../../components/AccessConnect";
+import { ClaudeSignIn, ClaudeTokenSignIn, CodexSignIn } from "../../components/AccessConnect";
 import { BrandLoading } from "../../components/BrandLoading";
 import { cx, DSButton, DSError, DSInput, DSMenu, DSSwitchIndicator } from "../../components/DesignSystem";
 import { setupApi } from "../../services/setupApi";
@@ -36,42 +30,10 @@ type Provider = AiAccount["provider"];
 export const providerName: Record<Provider, string> = {
   claude: "Claude",
   codex: "ChatGPT",
-  gemini: "Gemini",
-  opencode: "OpenCode",
 };
 
-/** Claude's asterisk, Codex's knot, Gemini's sparkle or OpenCode's brackets. */
+/** Claude's asterisk or Codex's knot. */
 export function ProviderGlyph({ provider }: { provider: Provider }) {
-  if (provider === "opencode")
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        className="size-4 text-fg"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.9}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M8.5 6.5 3.5 12l5 5.5M15.5 6.5l5 5.5-5 5.5" />
-      </svg>
-    );
-  if (provider === "gemini")
-    return (
-      <svg viewBox="0 0 24 24" className="size-4" aria-hidden="true">
-        <defs>
-          <linearGradient id="gemini-sparkle" x1="4" y1="20" x2="20" y2="4" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#4f8df5" />
-            <stop offset="1" stopColor="#a87ffb" />
-          </linearGradient>
-        </defs>
-        <path
-          d="M12 2c.6 5.4 4.6 9.4 10 10-5.4.6-9.4 4.6-10 10-.6-5.4-4.6-9.4-10-10 5.4-.6 9.4-4.6 10-10Z"
-          fill="url(#gemini-sparkle)"
-        />
-      </svg>
-    );
   return provider === "codex" ? (
     <svg
       viewBox="0 0 24 24"
@@ -453,18 +415,6 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
                 onSelect: () => setSignIn({ provider: "codex" }),
               },
               {
-                label: "Gemini",
-                hint: "Google account",
-                icon: <ProviderGlyph provider="gemini" />,
-                onSelect: () => setSignIn({ provider: "gemini" }),
-              },
-              {
-                label: "OpenCode",
-                hint: "Free models, or an OpenCode Go key",
-                icon: <ProviderGlyph provider="opencode" />,
-                onSelect: () => setSignIn({ provider: "opencode" }),
-              },
-              {
                 label: "Claude with a token",
                 hint: "From claude setup-token on another computer",
                 icon: <KeyRound />,
@@ -510,14 +460,6 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
               <DSButton onClick={() => setSignIn({ provider: "codex" })}>
                 <Plus className="size-3.5" />
                 Add ChatGPT account
-              </DSButton>
-              <DSButton onClick={() => setSignIn({ provider: "gemini" })}>
-                <Plus className="size-3.5" />
-                Add Gemini account
-              </DSButton>
-              <DSButton onClick={() => setSignIn({ provider: "opencode" })}>
-                <Plus className="size-3.5" />
-                Add OpenCode
               </DSButton>
             </div>
           </div>
@@ -567,32 +509,12 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
             <h3 className="mb-3 text-small font-semibold text-fg">
               {signIn.accountId
                 ? `Sign in again to “${accounts.find((account) => account.id === signIn.accountId)?.label ?? providerName[signIn.provider]}”`
-                : signIn.provider === "opencode"
-                  ? "Add OpenCode"
-                  : `Add a ${providerName[signIn.provider]} account`}
+                : `Add a ${providerName[signIn.provider]} account`}
             </h3>
             {signIn.provider === "codex" ? (
               <CodexSignIn
                 accountId={signIn.accountId}
                 mode={signIn.code ? "device" : "browser"}
-                onDone={() => {
-                  setSignIn(null);
-                  refresh();
-                }}
-                onCancel={() => setSignIn(null)}
-              />
-            ) : signIn.provider === "gemini" ? (
-              <GeminiSignIn
-                accountId={signIn.accountId}
-                onDone={() => {
-                  setSignIn(null);
-                  refresh();
-                }}
-                onCancel={() => setSignIn(null)}
-              />
-            ) : signIn.provider === "opencode" ? (
-              <OpencodeKeySignIn
-                accountId={signIn.accountId}
                 onDone={() => {
                   setSignIn(null);
                   refresh();

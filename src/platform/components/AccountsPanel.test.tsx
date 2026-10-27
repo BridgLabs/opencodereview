@@ -28,11 +28,6 @@ vi.mock("../../services/setupApi", () => ({
     codexAuthStart: vi.fn(),
     codexAuthEvents: vi.fn(),
     codexAuthCancel: vi.fn(),
-    geminiAuthStart: vi.fn(),
-    geminiAuthEvents: vi.fn(),
-    geminiAuthInput: vi.fn(),
-    geminiAuthCancel: vi.fn(),
-    opencodeKeySave: vi.fn(),
   },
 }));
 
@@ -211,80 +206,6 @@ it("adds a ChatGPT account with a one-time code from the add menu", async () => 
     await vi.waitFor(() =>
       expect(container.querySelector('[aria-label="Codex sign-in code"]')?.textContent).toBe("7KQ2-9XWPL"),
     );
-  } finally {
-    await unmount();
-  }
-});
-
-it("adds a Gemini account by pasting the code Google shows", async () => {
-  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(1)]);
-  vi.mocked(setupApi.geminiAuthStart).mockResolvedValue(undefined);
-  vi.mocked(setupApi.geminiAuthInput).mockResolvedValue({ ok: true });
-  vi.mocked(setupApi.geminiAuthEvents).mockResolvedValue({
-    running: true,
-    events: [{ kind: "prompt", url: "https://accounts.google.com/o/oauth2/v2/auth?state=s" }],
-  });
-  const { container, unmount } = await renderPanel();
-  try {
-    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Add account"]')!.click());
-    const item = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((entry) =>
-      entry.textContent?.startsWith("Gemini"),
-    )!;
-    expect(item.textContent).toContain("Google account");
-    expect(item.textContent).not.toMatch(/free/i);
-    await act(async () => item.click());
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    expect(setupApi.geminiAuthStart).toHaveBeenCalledWith(undefined);
-    await vi.waitFor(() =>
-      expect(
-        container.querySelector<HTMLAnchorElement>("a[href='https://accounts.google.com/o/oauth2/v2/auth?state=s']")
-          ?.textContent,
-      ).toBe("Open Gemini sign-in"),
-    );
-    expect(container.textContent).toContain("Add a Gemini account");
-    const input = container.querySelector<HTMLInputElement>('input[aria-label="Gemini authentication code"]')!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "4/fixture-code");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () =>
-      [...container.querySelectorAll("button")].find((button) => button.textContent === "Connect")!.click(),
-    );
-    expect(setupApi.geminiAuthInput).toHaveBeenCalledWith("4/fixture-code");
-  } finally {
-    await unmount();
-  }
-});
-
-it("adds OpenCode with a Go key from the menu", async () => {
-  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(1)]);
-  vi.mocked(setupApi.opencodeKeySave).mockResolvedValue({ ok: true });
-  const { container, unmount } = await renderPanel();
-  const menu = async (label: string) => {
-    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Add account"]')!.click());
-    await act(async () =>
-      [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-        .find((entry) => entry.textContent?.startsWith(label))!
-        .click(),
-    );
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-  };
-  try {
-    await menu("OpenCode");
-    expect(container.textContent).toContain("Add OpenCode");
-    const key = container.querySelector<HTMLInputElement>('input[aria-label="OpenCode Go key"]')!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(key, "sk-opencode-fixture-key");
-      key.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () =>
-      [...container.querySelectorAll("button")].find((button) => button.textContent === "Save key")!.click(),
-    );
-    expect(setupApi.opencodeKeySave).toHaveBeenCalledWith("sk-opencode-fixture-key", undefined);
   } finally {
     await unmount();
   }

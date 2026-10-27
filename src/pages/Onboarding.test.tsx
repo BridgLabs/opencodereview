@@ -26,11 +26,6 @@ vi.mock("../services/setupApi", () => ({
     codexAuthStart: vi.fn(),
     codexAuthEvents: vi.fn(),
     codexAuthCancel: vi.fn(),
-    geminiAuthStart: vi.fn(),
-    geminiAuthEvents: vi.fn(),
-    geminiAuthInput: vi.fn(),
-    geminiAuthCancel: vi.fn(),
-    opencodeKeySave: vi.fn(),
     refreshWorkspaces: vi.fn(),
     listWorkspaceRepos: vi.fn(),
     saveSelectedWorkspaces: vi.fn(),
@@ -93,15 +88,9 @@ const provider = (change: Partial<AiProvider>): AiProvider => ({
   label: null,
   ...change,
 });
-const providers = (
-  claude: Partial<AiProvider> = {},
-  codex: Partial<AiProvider> = {},
-  gemini: Partial<AiProvider> = {},
-) => [
+const providers = (claude: Partial<AiProvider> = {}, codex: Partial<AiProvider> = {}) => [
   provider(claude),
   provider({ provider: "codex", name: "ChatGPT", version: "0.163.0", ...codex }),
-  provider({ provider: "gemini", name: "Gemini", version: "0.63.0", ...gemini }),
-  provider({ provider: "opencode", name: "OpenCode", version: "1.18.35" }),
 ];
 
 let client: QueryClient;
@@ -244,64 +233,6 @@ describe("onboarding", () => {
     expect(setupApi.claudeAuthCancel).toHaveBeenCalled();
     expect(button("Cancel")).toBeUndefined();
     expect(row().querySelector("button")?.textContent).toBe("Connect");
-  });
-
-  it("offers Gemini with a Google account and signs in with the code Google shows", async () => {
-    vi.mocked(setupApi.aiProviders).mockResolvedValue(providers());
-    vi.mocked(setupApi.geminiAuthStart).mockResolvedValue(undefined);
-    vi.mocked(setupApi.geminiAuthCancel).mockResolvedValue({ running: false });
-    vi.mocked(setupApi.geminiAuthEvents).mockResolvedValue({
-      running: true,
-      events: [{ kind: "prompt", url: "https://accounts.google.com/o/oauth2/v2/auth?state=s" }],
-    });
-    await render(status({ auth: github, nextStep: 2 }));
-    const row = () => container.querySelector('[aria-label="Gemini"]')!;
-    await vi.waitFor(() => expect(row().textContent).toContain("Google account"));
-    expect(row().textContent).not.toMatch(/free/i);
-    expect(row().querySelector('button[aria-label="More Gemini options"]')).toBeNull();
-    await act(async () => row().querySelector<HTMLButtonElement>("button")!.click());
-    await settle();
-    expect(setupApi.geminiAuthStart).toHaveBeenCalledWith(undefined);
-    await vi.waitFor(() =>
-      expect(row().querySelector("a")?.getAttribute("href")).toBe(
-        "https://accounts.google.com/o/oauth2/v2/auth?state=s",
-      ),
-    );
-    await act(async () => button("Cancel")!.click());
-    await settle();
-    expect(setupApi.geminiAuthCancel).toHaveBeenCalled();
-    expect(button("Cancel")).toBeUndefined();
-  });
-
-  it("connects OpenCode with an OpenCode Go key, or with no key for the free models", async () => {
-    vi.mocked(setupApi.aiProviders).mockResolvedValue(providers());
-    vi.mocked(setupApi.opencodeKeySave).mockResolvedValue({ ok: true });
-    await render(status({ auth: github, nextStep: 2 }));
-    const row = () => container.querySelector('[aria-label="OpenCode"]')!;
-    await vi.waitFor(() => expect(row().textContent).toContain("Free models, or your Go key"));
-    await act(async () => row().querySelector<HTMLButtonElement>("button")!.click());
-    expect(row().textContent).toContain("Free models need no account. A key unlocks the paid Go models.");
-    expect(row().querySelector("select")).toBeNull();
-    expect(button("Save key")?.disabled).toBe(true);
-    const key = row().querySelector<HTMLInputElement>('input[aria-label="OpenCode Go key"]')!;
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(key, "sk-opencode-fixture-key");
-      key.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => button("Save key")!.click());
-    await settle();
-    expect(setupApi.opencodeKeySave).toHaveBeenCalledWith("sk-opencode-fixture-key", undefined);
-    await act(async () => row().querySelector<HTMLButtonElement>("button")!.click());
-    vi.mocked(setupApi.aiProviders).mockResolvedValue(
-      providers({}, {}, {}).map((item) =>
-        item.provider === "opencode" ? { ...item, accounts: 1, ready: 1, label: "OpenCode free models" } : item,
-      ),
-    );
-    await act(async () => button("Use free models")!.click());
-    await settle();
-    expect(setupApi.opencodeKeySave).toHaveBeenLastCalledWith(undefined, undefined);
-    await vi.waitFor(() => expect(row().textContent).toContain("Connected"));
-    expect(button("Continue")?.disabled).toBe(false);
   });
 
   it("lets Claude sign in with a pasted setup token", async () => {

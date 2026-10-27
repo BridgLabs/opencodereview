@@ -51,14 +51,6 @@ const engines: ReviewEngine[] = [
     label: "ChatGPT · Codex default · medium",
     models: [{ id: "default", label: "Codex default", efforts: ["low", "medium"], defaultEffort: "medium" }],
   },
-  {
-    provider: "gemini",
-    name: "Gemini",
-    model: "auto",
-    effort: "",
-    label: "Gemini · Auto",
-    models: [{ id: "auto", label: "Auto", efforts: [], defaultEffort: "" }],
-  },
 ];
 
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));

@@ -81,8 +81,6 @@ it("lists connected providers in review order and opens one to set its model, ef
     );
     expect(button("ChatGPT").textContent).toContain("Next review");
     expect(button("ChatGPT").textContent).toContain("2 accounts · Model 1 · medium");
-    expect(container.textContent).toContain("Other providers");
-    expect(button("Gemini")).toBeDefined();
 
     await act(async () => button("Claude").click());
     await settle();

@@ -16,11 +16,6 @@ import { http } from "./setupApiTransport";
 let githubFlowSecret: string | null = sessionStorage.getItem("ocr.githubFlowSecret");
 let claudeFlowSecret: string | null = sessionStorage.getItem("ocr.claudeFlowSecret");
 let codexFlowSecret: string | null = sessionStorage.getItem("ocr.codexFlowSecret");
-let geminiFlowSecret: string | null = sessionStorage.getItem("ocr.geminiFlowSecret");
-const geminiHeaders = () => ({
-  "content-type": "application/json",
-  ...(geminiFlowSecret ? { "x-flow-secret": geminiFlowSecret } : {}),
-});
 export const setupApiAccess = {
   githubAuthStatus: () => http<GitHubAuthStatus>("/auth/github/status"),
   githubAuthStart: async (action: "login" | "refresh" = "login") => {
@@ -128,46 +123,6 @@ export const setupApiAccess = {
     if (codexFlowSecret) headers["x-flow-secret"] = codexFlowSecret;
     return http<{ running: boolean }>("/auth/codex/cancel", { method: "POST", headers, body: JSON.stringify({}) });
   },
-  geminiAuthStart: async (accountId?: number) => {
-    await http<{ running: boolean }>("/auth/gemini/cancel", {
-      method: "POST",
-      headers: geminiHeaders(),
-      body: JSON.stringify({}),
-    }).catch(() => undefined);
-    geminiFlowSecret = null;
-    sessionStorage.removeItem("ocr.geminiFlowSecret");
-    const result = await http<{ running: boolean; flowSecret?: string }>("/auth/gemini/start", {
-      method: "POST",
-      body: JSON.stringify(accountId ? { accountId } : {}),
-    });
-    if (result.flowSecret) {
-      geminiFlowSecret = result.flowSecret;
-      sessionStorage.setItem("ocr.geminiFlowSecret", result.flowSecret);
-    }
-  },
-  geminiAuthEvents: () =>
-    http<{
-      running: boolean;
-      events: Array<{ kind: string; code?: string; url?: string; success?: boolean; message?: string }>;
-    }>("/auth/gemini/events", { headers: geminiHeaders() }),
-  geminiAuthInput: (input: string) =>
-    http<{ ok: boolean }>("/auth/gemini/input", {
-      method: "POST",
-      headers: geminiHeaders(),
-      body: JSON.stringify({ input }),
-    }),
-  geminiAuthCancel: () =>
-    http<{ running: boolean }>("/auth/gemini/cancel", {
-      method: "POST",
-      headers: geminiHeaders(),
-      body: JSON.stringify({}),
-    }),
-  /** Saves an OpenCode Go key, or the free models when `key` is left out. */
-  opencodeKeySave: (key?: string, accountId?: number) =>
-    http<{ ok: boolean }>("/auth/opencode/key", {
-      method: "POST",
-      body: JSON.stringify({ ...(key ? { key } : {}), ...(accountId ? { accountId } : {}) }),
-    }),
   githubAuthLogout: () => http<{ ok: boolean }>("/auth/github/logout", { method: "POST", body: JSON.stringify({}) }),
   getSettings: () => http<Settings>("/settings"),
   saveSettingsBatch: (payload: {

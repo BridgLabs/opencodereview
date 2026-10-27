@@ -37,7 +37,8 @@ describe("usage formatting", () => {
       "claude",
       "codex",
     ]);
-    expect(isProvider("gemini")).toBe(true);
+    expect(isProvider("codex")).toBe(true);
+    expect(isProvider("gemini")).toBe(false);
     expect(isProvider("other")).toBe(false);
     expect(isProvider(null)).toBe(false);
   });
