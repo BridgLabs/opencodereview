@@ -1,4 +1,9 @@
 ### Added
 
-- Show a ring for each account in the side rail with how much of its plan is left, so you can see
-  usage without opening Settings. Hover a ring for each window and when it resets.
+- Show how much of the selected account's plan is left next to the model picker in the top bar, one
+  bar per window. Hover a bar to see when it resets.
+
+### Fixed
+
+- Show Claude usage for accounts signed in with `claude setup-token`. Before, those accounts showed
+  no usage until their next review.

@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
 import { BrandMark } from "../../components/BrandMark";
 import { setupApi } from "../../services/setupApi";
 import { reviewNeedsAttention } from "../lib/reviewFlow";
-import { AccountUsageRail } from "./AccountUsageRail";
 import { EnginePicker } from "./EnginePicker";
 
 const railItem = "group relative grid size-10 flex-none place-items-center rounded-xl no-underline transition-colors";
@@ -110,7 +109,6 @@ export function PlatformLayout() {
             />
           ))}
           <div className="mt-auto flex flex-col items-center gap-1.5">
-            <AccountUsageRail />
             <RailLink to="/platform/settings" label="Settings" icon={SettingsIcon} />
           </div>
         </nav>
