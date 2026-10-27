@@ -26,9 +26,7 @@ use comment_activation::*;
 mod accounts;
 mod claude_auth;
 mod codex_auth;
-mod gemini_auth;
 mod indexing;
-mod opencode_auth;
 mod polling;
 mod publication;
 mod queue_acknowledgements;
@@ -43,10 +41,8 @@ mod workspace;
 pub(crate) use accounts::*;
 pub(crate) use claude_auth::*;
 pub(crate) use codex_auth::*;
-pub(crate) use gemini_auth::*;
 pub(crate) use http::*;
 pub(crate) use indexing::*;
-pub(crate) use opencode_auth::*;
 pub(crate) use polling::*;
 pub(crate) use publication::*;
 pub(crate) use queue_acknowledgements::*;
@@ -259,6 +255,7 @@ pub fn run(mut config: ServerConfig) -> Result<(), String> {
     // Only work whose instance is gone: other instances sharing the database keep theirs.
     db.reconcile_interrupted_jobs()?;
     db.reap_snapshot_indexes()?;
+    crate::accounts::remove_unsupported(&db)?;
     crate::accounts::adopt_legacy_token(&db)?;
     drop(db);
     cleanup_runtime_artifacts();

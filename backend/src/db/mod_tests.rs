@@ -2051,6 +2051,32 @@ fn terminal_pr_state_removes_needs_you_pending_actions() {
 }
 
 #[test]
+fn accounts_of_removed_providers_are_dropped() {
+    let db = Db::for_test().open().unwrap();
+    let claude = db.create_ai_account("claude", "Work").unwrap();
+    db.conn
+        .execute(
+            "INSERT INTO ai_accounts (provider, label, priority, created_at, updated_at) VALUES ('gemini', 'Old', 9, 0, 0)",
+            [],
+        )
+        .unwrap();
+    db.save_setting_value("review_engine_gemini", r#"{"model":"pro","effort":""}"#)
+        .unwrap();
+    db.save_review_engine("claude", "claude-sonnet-5-5", "high").unwrap();
+    db.remove_unsupported_ai_accounts().unwrap();
+    let accounts = db.list_ai_accounts().unwrap();
+    assert_eq!(
+        accounts.iter().map(|account| account.id).collect::<Vec<_>>(),
+        vec![claude.id]
+    );
+    assert_eq!(db.setting("review_engine_gemini").unwrap(), None);
+    assert_eq!(
+        db.review_engine("claude").unwrap(),
+        ("claude-sonnet-5-5".to_string(), "high".to_string())
+    );
+}
+
+#[test]
 fn ai_accounts_are_picked_by_priority_and_rest_after_limits() {
     let db = Db::for_test().open().unwrap();
     assert!(db.pick_ai_account(&[]).unwrap().is_none());
@@ -2139,9 +2165,12 @@ fn review_engines_default_per_provider_and_reject_unknown_choices() {
     assert!(db.save_review_engine("codex", "gpt-5.5", "ultra").is_err());
     assert!(db.save_review_engine("gemini", "claude-opus-5-5", "").is_err());
     // A choice the app no longer offers falls back to the provider's default.
-    db.save_setting_value("review_engine_gemini", r#"{"model":"gone","effort":""}"#)
+    db.save_setting_value("review_engine_codex", r#"{"model":"gone","effort":""}"#)
         .unwrap();
-    assert_eq!(db.review_engine("gemini").unwrap(), ("auto".to_string(), String::new()));
+    assert_eq!(
+        db.review_engine("codex").unwrap(),
+        ("default".to_string(), "medium".to_string())
+    );
 }
 
 #[test]

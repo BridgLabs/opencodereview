@@ -32,16 +32,6 @@ const CODEX: &[EngineModel] = &[
     model("gpt-5.6-luna", "GPT-5.6 Luna", CODEX_EFFORTS_MAX, "medium"),
     model("gpt-5.5", "GPT-5.5", CODEX_EFFORTS_XHIGH, "medium"),
 ];
-/// The Gemini CLI's model aliases; it has no reasoning-effort flag.
-const GEMINI: &[EngineModel] = &[
-    model("auto", "Auto", &[], ""),
-    model("pro", "Pro", &[], ""),
-    model("flash", "Flash", &[], ""),
-    model("flash-lite", "Flash Lite", &[], ""),
-];
-/// OpenCode's model belongs to each account: a free model or the Go key's model.
-const OPENCODE: &[EngineModel] = &[model("account", "Set by the account", &[], "")];
-
 const fn model(
     id: &'static str,
     label: &'static str,
@@ -56,19 +46,12 @@ const fn model(
     }
 }
 
-pub(crate) const PROVIDERS: &[(&str, &str)] = &[
-    ("claude", "Claude"),
-    ("codex", "ChatGPT"),
-    ("gemini", "Gemini"),
-    ("opencode", "OpenCode"),
-];
+pub(crate) const PROVIDERS: &[(&str, &str)] = &[("claude", "Claude"), ("codex", "ChatGPT")];
 
 pub(crate) fn models(provider: &str) -> &'static [EngineModel] {
     match provider {
         "claude" => CLAUDE,
         "codex" => CODEX,
-        "gemini" => GEMINI,
-        "opencode" => OPENCODE,
         _ => &[],
     }
 }
@@ -142,13 +125,10 @@ mod tests {
         );
         assert!(resolve("claude", "gpt-5.5", "medium").is_err());
         assert!(resolve("codex", "gpt-5.5", "ultra").is_err());
-        assert!(resolve("gemini", "pro", "high").is_err());
-        assert_eq!(resolve("gemini", "pro", "").unwrap().1, "");
     }
 
     #[test]
     fn labels_name_the_provider_model_and_effort() {
         assert_eq!(label("claude", "claude-opus-5-5", "high"), "Claude · Opus 5.5 · high");
-        assert_eq!(label("gemini", "flash", ""), "Gemini · Flash");
     }
 }

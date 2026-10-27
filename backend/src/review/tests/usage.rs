@@ -2353,38 +2353,3 @@ fn codex_turn_usage_counts_cached_input_separately() {
     );
     assert_eq!(usage.model.as_deref(), Some("codex"));
 }
-
-#[test]
-fn gemini_result_stats_count_cached_input_separately() {
-    let raw = "{\"type\":\"init\",\"model\":\"auto\"}\n{\"type\":\"result\",\"status\":\"success\",\"stats\":{\"total_tokens\":1500,\"input_tokens\":1200,\"output_tokens\":300,\"cached\":200,\"input\":1000,\"models\":{\"gemini-2.5-pro\":{\"total_tokens\":1500,\"input_tokens\":1200,\"output_tokens\":300,\"cached\":200,\"input\":1000}}}}\n";
-    let mut per_model = std::collections::HashMap::new();
-    collect_usage(&super::transcript_events(raw).unwrap(), &mut per_model);
-    let usage = finalize_usage(per_model);
-    assert_eq!(
-        (usage.input_tokens, usage.cache_read_tokens, usage.output_tokens),
-        (1000, 200, 300)
-    );
-    assert_eq!(usage.model.as_deref(), Some("gemini-2-5-pro"));
-}
-
-#[test]
-fn opencode_step_finish_events_sum_tokens() {
-    let raw = [
-        r#"{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":800,"output":150,"reasoning":50,"cache":{"read":120,"write":30}},"cost":0.01}}"#,
-        r#"{"type":"text","part":{"type":"text","text":"{}"}}"#,
-        r#"{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":200,"output":100,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0.002}}"#,
-    ].join("\n");
-    let mut per_model = std::collections::HashMap::new();
-    collect_usage(&super::transcript_events(&raw).unwrap(), &mut per_model);
-    let usage = finalize_usage(per_model);
-    assert_eq!(
-        (
-            usage.input_tokens,
-            usage.output_tokens,
-            usage.cache_read_tokens,
-            usage.cache_creation_tokens
-        ),
-        (1000, 300, 120, 30)
-    );
-    assert_eq!(usage.model.as_deref(), Some("opencode"));
-}

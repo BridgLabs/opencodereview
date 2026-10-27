@@ -273,12 +273,8 @@ pub(crate) fn run_outcome(status: &str, published: bool) -> &'static str {
 fn provider_of_model(model: &str) -> Option<&'static str> {
     if model.starts_with("claude") {
         Some("claude")
-    } else if model.starts_with("gemini") {
-        Some("gemini")
     } else if model == "codex" || model.starts_with("gpt-") {
         Some("codex")
-    } else if model == "opencode" {
-        Some("opencode")
     } else {
         None
     }

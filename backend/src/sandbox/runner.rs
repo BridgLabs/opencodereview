@@ -25,14 +25,7 @@ const CODEX_CLI: &str = "/opt/codex/bin/codex";
 const TRANSCRIPT: &str = "/scratch/transcript.jsonl";
 /// Codex keeps its home, sign-in and final message here, owned by the model UID.
 const CODEX_HOME: &str = "/scratch/session/codex";
-const NODE: &str = "/opt/node/bin/node";
-const GEMINI_CLI: &str = "/opt/gemini/bundle/gemini.js";
-/// Gemini keeps its home, sign-in and policy here, owned by the model UID.
-const GEMINI_HOME: &str = "/scratch/session/gemini";
-const OPENCODE_CLI: &str = "/opt/opencode/bin/opencode";
-/// OpenCode keeps its XDG homes and configuration here; its Go key, if any, arrives in the environment.
-const OPENCODE_HOME: &str = "/scratch/session/opencode";
-const PROVIDERS: &[&str] = &["claude", "codex", "gemini", "opencode"];
+const PROVIDERS: &[&str] = &["claude", "codex"];
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "operation", deny_unknown_fields)]
@@ -77,7 +70,7 @@ enum Response {
     Ready,
     Started,
     Pulse,
-    /// `credential` is a Codex or Gemini sign-in the CLI refreshed during the stage, for the broker to keep.
+    /// `credential` is a Codex sign-in the CLI refreshed during the stage, for the broker to keep.
     Finished {
         report: Option<String>,
         decisions: Option<String>,
@@ -329,12 +322,10 @@ fn validate(request: &Request) -> Result<(), String> {
         }
         for name in files.keys() {
             safe_path(name)?;
-            if name.split('/').any(|part| {
-                matches!(
-                    part,
-                    ".devin" | ".agents" | ".claude" | ".gemini" | ".opencode" | ".git"
-                )
-            }) {
+            if name
+                .split('/')
+                .any(|part| matches!(part, ".devin" | ".agents" | ".claude" | ".git"))
+            {
                 return Err("Executable configuration is not snapshot evidence".into());
             }
         }
@@ -449,10 +440,8 @@ fn exchange(
                 credential,
             } if running => {
                 if let (Some(credential), Request::Run { account, provider, .. }) = (credential, request) {
-                    match provider.as_str() {
-                        "codex" => crate::accounts::store_codex_auth(*account, &credential)?,
-                        "gemini" => crate::accounts::store_gemini_auth(*account, &credential)?,
-                        _ => {}
+                    if provider == "codex" {
+                        crate::accounts::store_codex_auth(*account, &credential)?;
                     }
                 }
                 for (path, value, limit) in [
@@ -564,143 +553,6 @@ fn codex_session(account: i64, model: &str, effort: &str) -> Result<(Command, St
             model,
             effort,
         ));
-    Ok((command, auth))
-}
-
-/// A Gemini execution on `account`, with its sign-in copied into a home only the model UID owns.
-/// Returns the command and the sign-in it started from.
-#[cfg(unix)]
-fn gemini_session(account: i64, model: &str) -> Result<(Command, String), String> {
-    let auth_root = std::env::var("OCR_RUNNER_AUTH_ROOT").unwrap_or_else(|_| "/claude-auth/app-managed".into());
-    let auth = read_output(
-        &Path::new(&auth_root).join(format!("accounts/{account}/gemini/oauth_creds.json")),
-        crate::providers::gemini::MAX_AUTH_BYTES as u64,
-    )
-    .ok()
-    .flatten()
-    .filter(|raw| crate::providers::gemini::validate_auth(raw).is_ok())
-    .ok_or_else(|| crate::providers::claude::Failure::Auth.encode())?;
-    let home = Path::new(GEMINI_HOME);
-    let config = home.join(".gemini");
-    private_dir(Path::new(SESSION), 0o755)?;
-    for directory in [home, config.as_path()] {
-        private_dir(directory, 0o700)?;
-        std::os::unix::fs::chown(directory, Some(UID), Some(UID)).map_err(|e| e.to_string())?;
-    }
-    // The CLI rewrites its sign-in when it refreshes the access token, so that file is the model
-    // UID's; settings and policy stay read-only.
-    let mut settings = crate::providers::gemini::settings();
-    settings["advanced"] = serde_json::json!({ "autoConfigureMemory": false });
-    for (name, contents, mode, owned) in [
-        (config.join("oauth_creds.json"), auth.clone(), 0o600, true),
-        (config.join("settings.json"), settings.to_string(), 0o444, false),
-        (
-            home.join("policy.toml"),
-            crate::providers::gemini::POLICY.to_string(),
-            0o444,
-            false,
-        ),
-    ] {
-        fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .mode(mode)
-            .open(&name)
-            .and_then(|mut file| file.write_all(contents.as_bytes()))
-            .map_err(|e| e.to_string())?;
-        if owned {
-            std::os::unix::fs::chown(&name, Some(UID), Some(UID)).map_err(|e| e.to_string())?;
-        }
-    }
-    let mut command = Command::new(NODE);
-    let proxy = std::env::var("OCR_RUNNER_PROXY").unwrap_or_else(|_| "http://review-egress:8790".into());
-    command
-        .env_clear()
-        .env("PATH", "/opt/node/bin:/usr/local/bin:/usr/bin:/bin")
-        .env("HOME", home)
-        .env("TMPDIR", "/tmp")
-        .env("HTTPS_PROXY", &proxy)
-        .env("HTTP_PROXY", &proxy)
-        .env("NO_COLOR", "1")
-        .env("NO_BROWSER", "true")
-        .env("GEMINI_CLI_NO_RELAUNCH", "true")
-        .current_dir("/work")
-        .uid(UID)
-        .gid(UID)
-        .process_group(0)
-        .args(["--max-old-space-size=1024", GEMINI_CLI])
-        .args(crate::providers::gemini::exec_args(&home.join("policy.toml"), model));
-    Ok((command, auth))
-}
-
-/// Writes `contents` to a new file with `mode`, owned by the model UID when `owned`.
-#[cfg(unix)]
-fn session_file(path: &Path, contents: &str, mode: u32, owned: bool) -> Result<(), String> {
-    fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .mode(mode)
-        .open(path)
-        .and_then(|mut file| file.write_all(contents.as_bytes()))
-        .map_err(|e| e.to_string())?;
-    if owned {
-        std::os::unix::fs::chown(path, Some(UID), Some(UID)).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-/// An OpenCode execution on `account`: its OpenCode Go key, if any, goes in the environment and its homes are
-/// private to the model UID. Returns the command and the account it started from.
-#[cfg(unix)]
-fn opencode_session(account: i64) -> Result<(Command, String), String> {
-    let auth_root = std::env::var("OCR_RUNNER_AUTH_ROOT").unwrap_or_else(|_| "/claude-auth/app-managed".into());
-    let auth = read_output(
-        &Path::new(&auth_root).join(format!("accounts/{account}/opencode/auth.json")),
-        crate::providers::opencode::MAX_AUTH_BYTES as u64,
-    )
-    .ok()
-    .flatten()
-    .ok_or_else(|| crate::providers::claude::Failure::Auth.encode())?;
-    let (provider, key, model) =
-        crate::providers::opencode::parts(&auth).ok_or_else(|| crate::providers::claude::Failure::Auth.encode())?;
-    let home = Path::new(OPENCODE_HOME);
-    private_dir(Path::new(SESSION), 0o755)?;
-    for name in ["", "data", "config", "cache", "state"] {
-        let directory = home.join(name);
-        private_dir(&directory, 0o700)?;
-        std::os::unix::fs::chown(&directory, Some(UID), Some(UID)).map_err(|e| e.to_string())?;
-    }
-    let config = home.join("opencode.json");
-    session_file(
-        &config,
-        &crate::providers::opencode::config(&model).to_string(),
-        0o444,
-        false,
-    )?;
-    let mut command = Command::new(OPENCODE_CLI);
-    let proxy = std::env::var("OCR_RUNNER_PROXY").unwrap_or_else(|_| "http://review-egress:8790".into());
-    command
-        .env_clear()
-        .env("PATH", "/opt/opencode/bin:/usr/local/bin:/usr/bin:/bin")
-        .env("HOME", home)
-        .env("TMPDIR", "/tmp")
-        .env("XDG_DATA_HOME", home.join("data"))
-        .env("XDG_CONFIG_HOME", home.join("config"))
-        .env("XDG_CACHE_HOME", home.join("cache"))
-        .env("XDG_STATE_HOME", home.join("state"))
-        .env("HTTPS_PROXY", &proxy)
-        .env("HTTP_PROXY", &proxy)
-        .env("NO_COLOR", "1")
-        .env("OPENCODE_CONFIG", &config)
-        .envs(crate::providers::opencode::QUIET_ENV.iter().copied())
-        .current_dir("/work")
-        .uid(UID)
-        .gid(UID)
-        .process_group(0)
-        .args(crate::providers::opencode::exec_args());
-    if let Some(key) = key {
-        command.env(provider.env, key);
-    }
     Ok((command, auth))
 }
 
@@ -1042,14 +894,6 @@ fn run(
             let (command, auth) = codex_session(account, &model, &effort)?;
             (command, Some(auth))
         }
-        "gemini" => {
-            let (command, auth) = gemini_session(account, &model)?;
-            (command, Some(auth))
-        }
-        "opencode" => {
-            let (command, auth) = opencode_session(account)?;
-            (command, Some(auth))
-        }
         _ => {
             let mut command = session(account)?;
             inference(&mut command, &model, &effort)?;
@@ -1084,29 +928,12 @@ fn run(
                 }
             }
             match child.try_wait() {
-                // OpenCode reports a provider error as an event and still exits 0.
-                Ok(Some(status))
-                    if status.success()
-                        && provider == "opencode"
-                        && !crate::providers::opencode::errors(
-                            &read_output(Path::new(TRANSCRIPT), 32_000_000)?.unwrap_or_default(),
-                        )
-                        .is_empty() =>
-                {
-                    let stderr = read_output(Path::new("/scratch/stderr"), 8_000_000)?.unwrap_or_default();
-                    return Err(crate::providers::opencode::failure(
-                        &read_output(Path::new(TRANSCRIPT), 32_000_000)?.unwrap_or_default(),
-                        &stderr,
-                    ));
-                }
                 Ok(Some(status)) if status.success() => return Ok(()),
                 Ok(Some(_)) => {
                     let stderr = read_output(Path::new("/scratch/stderr"), 8_000_000)?.unwrap_or_default();
                     let stdout = read_output(Path::new(TRANSCRIPT), 32_000_000)?.unwrap_or_default();
                     return Err(match provider.as_str() {
                         "codex" => crate::providers::codex::failure(&stdout, &stderr),
-                        "gemini" => crate::providers::gemini::failure(&stdout, &stderr),
-                        "opencode" => crate::providers::opencode::failure(&stdout, &stderr),
                         _ => crate::providers::claude::failure(&stdout, &stderr),
                     });
                 }
@@ -1137,48 +964,28 @@ fn run(
             },
         );
     };
-    // Codex and Gemini may refresh their sign-in mid-stage; the broker keeps the new one so the
-    // next stage doesn't start from a revoked token. OpenCode's key never changes.
-    let (credential_path, limit, validate, secrets_of): (
-        Option<PathBuf>,
-        usize,
-        fn(&str) -> Result<(), String>,
-        fn(&str) -> Vec<String>,
-    ) = match provider.as_str() {
-        "gemini" => (
-            Some(Path::new(GEMINI_HOME).join(".gemini/oauth_creds.json")),
-            crate::providers::gemini::MAX_AUTH_BYTES,
-            crate::providers::gemini::validate_auth,
-            crate::providers::gemini::secrets,
-        ),
-        "opencode" => (
-            None,
-            crate::providers::opencode::MAX_AUTH_BYTES,
-            crate::providers::opencode::validate_auth,
-            crate::providers::opencode::secrets,
-        ),
-        _ => (
-            Some(Path::new(CODEX_HOME).join("auth.json")),
-            crate::providers::codex::MAX_AUTH_BYTES,
-            crate::providers::codex::validate_auth,
-            crate::providers::codex::secrets,
-        ),
-    };
-    let refreshed = credential_path
-        .and_then(|path| read_output(&path, limit as u64).ok().flatten())
-        .filter(|raw| *raw != auth && validate(raw).is_ok());
-    let secrets = secrets_of(&auth)
+    // Codex may refresh its sign-in mid-stage; the broker keeps the new one so the next stage
+    // doesn't start from a revoked token.
+    let refreshed = read_output(
+        &Path::new(CODEX_HOME).join("auth.json"),
+        crate::providers::codex::MAX_AUTH_BYTES as u64,
+    )
+    .ok()
+    .flatten()
+    .filter(|raw| *raw != auth && crate::providers::codex::validate_auth(raw).is_ok());
+    let secrets = crate::providers::codex::secrets(&auth)
         .into_iter()
-        .chain(refreshed.as_deref().map(secrets_of).unwrap_or_default())
+        .chain(
+            refreshed
+                .as_deref()
+                .map(crate::providers::codex::secrets)
+                .unwrap_or_default(),
+        )
         .collect::<Vec<_>>();
     let result = outcome
         .and_then(|()| {
-            let text = match provider.as_str() {
-                "gemini" => crate::providers::gemini::final_message(transcript.as_deref().unwrap_or_default()),
-                "opencode" => crate::providers::opencode::final_message(transcript.as_deref().unwrap_or_default()),
-                _ => read_output(&Path::new(CODEX_HOME).join("last-message.txt"), 4_000_000)?
-                    .ok_or("Codex final response is missing")?,
-            };
+            let text = read_output(&Path::new(CODEX_HOME).join("last-message.txt"), 4_000_000)?
+                .ok_or("Codex final response is missing")?;
             parse_final_response(&text, true)
         })
         .and_then(|(report, decisions)| {

@@ -1,7 +1,6 @@
 //! Credentials of the AI accounts listed in `ai_accounts`. Each account owns one directory,
 //! `$OCR_DATA_DIR/accounts/<id>/`, holding its provider's credential file:
-//! `claude/oauth-token`, `codex/auth.json`, `gemini/oauth_creds.json` or
-//! `opencode/auth.json`.
+//! `claude/oauth-token` or `codex/auth.json`.
 pub(crate) mod sandbox_sync;
 pub(crate) mod usage;
 
@@ -40,14 +39,6 @@ pub(crate) fn codex_auth_path(id: i64) -> PathBuf {
     root().join(id.to_string()).join("codex/auth.json")
 }
 
-pub(crate) fn gemini_auth_path(id: i64) -> PathBuf {
-    root().join(id.to_string()).join("gemini/oauth_creds.json")
-}
-
-pub(crate) fn opencode_auth_path(id: i64) -> PathBuf {
-    root().join(id.to_string()).join("opencode/auth.json")
-}
-
 pub(crate) fn store_claude_token(id: i64, token: &str) -> Result<(), String> {
     store(&claude_token_path(id), id, token.as_bytes())
 }
@@ -56,18 +47,6 @@ pub(crate) fn store_claude_token(id: i64, token: &str) -> Result<(), String> {
 pub(crate) fn store_codex_auth(id: i64, raw: &str) -> Result<(), String> {
     crate::providers::codex::validate_auth(raw)?;
     store(&codex_auth_path(id), id, raw.as_bytes())
-}
-
-/// Saves a Gemini `oauth_creds.json`, from a sign-in or refreshed by a review stage.
-pub(crate) fn store_gemini_auth(id: i64, raw: &str) -> Result<(), String> {
-    crate::providers::gemini::validate_auth(raw)?;
-    store(&gemini_auth_path(id), id, raw.as_bytes())
-}
-
-/// Saves an OpenCode account's plan, Go key and model.
-pub(crate) fn store_opencode_auth(id: i64, raw: &str) -> Result<(), String> {
-    crate::providers::opencode::validate_auth(raw)?;
-    store(&opencode_auth_path(id), id, raw.as_bytes())
 }
 
 fn store(path: &std::path::Path, id: i64, bytes: &[u8]) -> Result<(), String> {
@@ -114,12 +93,31 @@ pub(crate) fn has_credential(provider: &str, id: i64) -> bool {
         "claude" => crate::providers::claude::read_token(&claude_token_path(id)).is_ok(),
         "codex" => fs::read_to_string(codex_auth_path(id))
             .is_ok_and(|raw| crate::providers::codex::validate_auth(&raw).is_ok()),
-        "gemini" => fs::read_to_string(gemini_auth_path(id))
-            .is_ok_and(|raw| crate::providers::gemini::validate_auth(&raw).is_ok()),
-        "opencode" => fs::read_to_string(opencode_auth_path(id))
-            .is_ok_and(|raw| crate::providers::opencode::validate_auth(&raw).is_ok()),
         _ => false,
     }
+}
+
+/// Removes accounts of providers the app no longer runs, then every credential directory whose
+/// account is gone.
+pub(crate) fn remove_unsupported(db: &Database) -> Result<(), String> {
+    db.remove_unsupported_ai_accounts()?;
+    let kept = db
+        .list_ai_accounts()?
+        .into_iter()
+        .map(|account| account.id)
+        .collect::<Vec<_>>();
+    let orphans = stored_ids()
+        .into_iter()
+        .filter(|id| !kept.contains(id))
+        .collect::<Vec<_>>();
+    if orphans.is_empty() {
+        return Ok(());
+    }
+    for id in orphans {
+        fs::remove_dir_all(root().join(id.to_string()))
+            .map_err(|_| "Could not remove the credentials of a removed account".to_string())?;
+    }
+    sandbox_sync::sync_app_auth()
 }
 
 /// Installs from before multiple accounts kept one token at the app path; it becomes the first

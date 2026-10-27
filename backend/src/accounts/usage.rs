@@ -30,12 +30,6 @@ pub(crate) fn usage(id: i64, provider: &str) -> Value {
             }
         }),
         "codex" => codex(id),
-        // The Gemini CLI reads its quota from the Code Assist API only inside a session.
-        "gemini" => Err(
-            "Gemini doesn't share usage yet; reviews move to the next account when its daily quota runs out"
-                .to_string(),
-        ),
-        "opencode" => Err("OpenCode doesn't share usage; check your OpenCode dashboard".to_string()),
         _ => Err("Unknown provider".to_string()),
     };
     let value = match windows {

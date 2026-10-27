@@ -59,7 +59,7 @@ impl Database {
     }
 
     pub fn create_ai_account(&self, provider: &str, label: &str) -> Result<AiAccount, String> {
-        if !matches!(provider, "claude" | "codex" | "gemini" | "opencode") {
+        if !matches!(provider, "claude" | "codex") {
             return Err("Unsupported account provider".into());
         }
         let label = label.trim();
@@ -170,6 +170,21 @@ impl Database {
 
     pub fn mark_ai_account_auth_failed(&self, id: i64, error: &str) -> Result<(), String> {
         self.conn.execute("UPDATE ai_accounts SET status = 'auth_failed', limited_until = NULL, last_error = $2, updated_at = $3 WHERE id = $1", params![id, error, now_millis()]).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    /// Drops accounts and engine choices of providers the app no longer runs, such as Gemini and
+    /// OpenCode, including ones an import of an older database brings back.
+    pub fn remove_unsupported_ai_accounts(&self) -> Result<(), String> {
+        self.conn
+            .execute("DELETE FROM ai_accounts WHERE provider NOT IN ('claude', 'codex')", [])
+            .map_err(|error| error.to_string())?;
+        self.conn
+            .execute(
+                "DELETE FROM settings WHERE key LIKE 'review_engine_%' AND key NOT IN ('review_engine_claude', 'review_engine_codex')",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
         Ok(())
     }
 
