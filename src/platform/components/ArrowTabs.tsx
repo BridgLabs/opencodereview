@@ -2,7 +2,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { DSButton } from "../../components/DesignSystem";
 
-export interface ArrowTab {
+interface ArrowTab {
   id: string;
   label: string;
   count?: number;

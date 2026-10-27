@@ -59,8 +59,8 @@ const render = (overrides: Partial<typeof props> = {}) =>
       <p>Legacy final output</p>
     </FindingSelection>,
   );
-const tab = (container: HTMLElement, label: string) =>
-  [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) =>
+const chip = (container: HTMLElement, label: string) =>
+  [...container.querySelectorAll<HTMLButtonElement>(".finding-group-chip")].find((button) =>
     button.textContent?.startsWith(label),
   )!;
 const click = async (element: HTMLElement) => act(async () => element.click());
@@ -99,76 +99,62 @@ async function interact(overrides: Partial<typeof props>, test: (container: HTML
   }
 }
 
-describe("tabbed finding selection", () => {
-  it("defaults to eligible findings and renders only the selected panel", () => {
+describe("finding selection groups", () => {
+  it("defaults to eligible findings and renders only that group", () => {
     const html = render();
-    expect(html).toContain('role="tablist"');
+    expect(html).not.toContain('role="tablist"');
     expect(html).toContain('data-finding-group="eligible"');
     expect(html).toContain("Eligible findings");
     expect(html).toContain("Discarded by AI");
     expect(html).toContain("Blocked by validation");
-    expect(html).toContain("Original AI summary");
     expect(html).toContain("kept explanation");
-    expect(html).toContain("<sub>🤖 Automated review by OpenCodeReview</sub>");
     expect(html).not.toContain("discarded explanation");
-    expect(html).not.toContain("Original summary");
     expect(html).not.toContain("Legacy final output");
     expect(html).not.toContain("<select");
   });
 
-  it("navigates with arrows, preserves choices across tabs and keeps blocked findings disabled", async () => {
+  it("shows each finding under its own title, without the GitHub-only lines or redundant tags", () => {
+    const html = render();
+    expect(html).not.toContain("Automated review by OpenCodeReview");
+    expect(html.match(/kept title/g)).toHaveLength(1);
+    expect(html).not.toContain("AI: selected");
+    expect(html).toContain("src/example.ts:1 · Chunk 1");
+    expect(html).not.toContain("· chunk");
+  });
+
+  it("folds the original AI summary below the findings", () => {
+    const html = render();
+    expect(html).toMatch(/<details class="finding-original-review[^"]*"><summary>Original AI summary<\/summary>/);
+  });
+
+  it("switches groups, preserves choices across them and keeps blocked findings disabled", async () => {
     const onToggle = vi.fn();
     const onSave = vi.fn();
     const onReset = vi.fn();
     await interact({ onToggle, onSave, onReset }, async (container) => {
-      const previous = container.querySelector<HTMLButtonElement>('[aria-label="Previous finding group"]')!;
-      const next = container.querySelector<HTMLButtonElement>('[aria-label="Next finding group"]')!;
-      expect(previous.disabled).toBe(true);
-      await click(next);
-      expect(tab(container, "Discarded by AI").getAttribute("aria-selected")).toBe("true");
+      expect(chip(container, "Eligible findings").getAttribute("aria-pressed")).toBe("true");
+      await click(chip(container, "Discarded by AI"));
+      expect(chip(container, "Discarded by AI").getAttribute("aria-pressed")).toBe("true");
+      expect(chip(container, "Eligible findings").getAttribute("aria-pressed")).toBe("false");
       const discarded = container.querySelector<HTMLInputElement>('[aria-label="Include finding discarded"]')!;
       expect(discarded.disabled).toBe(false);
       expect(discarded.checked).toBe(false);
       expect(container.textContent).toContain("discarded evidence");
+      expect(container.textContent).toContain("AI: discarded");
       await click(discarded);
       expect(onToggle).toHaveBeenCalledExactlyOnceWith("discarded");
-      await click(next);
+      await click(chip(container, "Blocked by validation"));
       expect(container.querySelector<HTMLInputElement>('[aria-label="Include finding blocked"]')!.disabled).toBe(true);
       expect(container.textContent).toContain("Invalid anchor");
-      await click(tab(container, "Original AI summary"));
-      expect(container.querySelector('[role="tabpanel"]')?.textContent).toContain("Original summary");
-      expect(container.querySelector(".finding-candidate")).toBeNull();
-      expect(next.disabled).toBe(true);
-      await click(tab(container, "Discarded by AI"));
+      await click(chip(container, "Discarded by AI"));
       expect(container.querySelector<HTMLInputElement>('[aria-label="Include finding discarded"]')!.checked).toBe(true);
       expect(container.textContent).toContain("Manual override");
-      expect(container.querySelectorAll('[role="tabpanel"]')).toHaveLength(1);
+      expect(container.querySelectorAll(".finding-tab-panel")).toHaveLength(1);
+      expect(chip(container, "Discarded by AI").getAttribute("aria-controls")).toBe(
+        container.querySelector(".finding-tab-panel")!.id,
+      );
       expect(onSave).not.toHaveBeenCalled();
       expect(onReset).not.toHaveBeenCalled();
-    });
-  });
-
-  it("supports keyboard navigation and labels the active panel", async () => {
-    await interact({}, async (container) => {
-      tab(container, "Eligible findings").focus();
-      for (const [key, label] of [
-        ["ArrowRight", "Discarded by AI"],
-        ["End", "Original AI summary"],
-        ["ArrowRight", "Eligible findings"],
-        ["ArrowLeft", "Original AI summary"],
-        ["Home", "Eligible findings"],
-      ]) {
-        await act(async () =>
-          document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })),
-        );
-        const selected = tab(container, label);
-        expect(document.activeElement).toBe(selected);
-        expect(selected.tabIndex).toBe(0);
-        expect(selected.getAttribute("aria-selected")).toBe("true");
-        const panel = container.querySelector('[role="tabpanel"]')!;
-        expect(selected.getAttribute("aria-controls")).toBe(panel.id);
-        expect(panel.getAttribute("aria-labelledby")).toBe(selected.id);
-      }
     });
   });
 
@@ -196,15 +182,15 @@ describe("tabbed finding selection", () => {
         },
       },
       async (container) => {
-        expect(container.textContent).toContain("1 findings · 0 questions selected");
+        expect(container.textContent).toContain("1 finding · 0 questions selected");
         expect(container.textContent).toContain("cannot alone justify Request changes");
-        await click(tab(container, "Questions — optional publication"));
+        await click(chip(container, "Questions — optional publication"));
         expect(container.querySelector<HTMLInputElement>('[aria-label="Include question question"]')!.checked).toBe(
           false,
         );
-        await click(tab(container, "Decision unavailable"));
+        await click(chip(container, "Decision unavailable"));
         expect(container.textContent).toContain("unknown evidence");
-        await click(tab(container, "Awaiting final review"));
+        await click(chip(container, "Awaiting final review"));
         expect(container.textContent).toContain("pending evidence");
       },
     );
@@ -228,11 +214,11 @@ describe("tabbed finding selection", () => {
   });
 
   it.each([{ conflict: true }, { busy: true }, { error: "Audit failed" }, { view: { ...view, editable: false } }])(
-    "blocks editing across tabs for unavailable or read-only states %j",
+    "blocks editing across groups for unavailable or read-only states %j",
     async (overrides) => {
       await interact(overrides, async (container) => {
         expect(container.querySelector<HTMLInputElement>('[aria-label="Include finding kept"]')!.disabled).toBe(true);
-        await click(tab(container, "Discarded by AI"));
+        await click(chip(container, "Discarded by AI"));
         expect(container.querySelector<HTMLInputElement>('[aria-label="Include finding discarded"]')!.disabled).toBe(
           true,
         );

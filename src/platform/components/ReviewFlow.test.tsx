@@ -90,31 +90,41 @@ describe("review scope selection", () => {
     priorSha: "previous",
   };
 
-  it("shows one base-sync file and nineteen reused files without labeling the run full", () => {
+  it("shows one base-sync file and nineteen reused files without labeling the run full", async () => {
     const reused = Array.from({ length: 19 }, (_, index) => `source-${index}.ts`);
-    const html = renderToStaticMarkup(
-      <ContextPhaseDetails
-        context={{
-          ...context,
-          scopeSelection: {
-            mode: "base_sync",
-            requestedFull: false,
-            sourceRunId: 1487,
-            fullPrFiles: [...context.changedFiles, ...reused],
-            reusedFiles: reused,
-          },
-        }}
-      />,
-    );
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     const container = document.createElement("div");
-    container.innerHTML = html;
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        <ContextPhaseDetails
+          context={{
+            ...context,
+            scopeSelection: {
+              mode: "base_sync",
+              requestedFull: false,
+              sourceRunId: 1487,
+              fullPrFiles: [...context.changedFiles, ...reused],
+              reusedFiles: reused,
+            },
+          }}
+        />,
+      ),
+    );
     expect(container.textContent).toContain("1 file to review · 19 with reused coverage · 20 in the PR");
     expect(container.textContent).toContain("Base synchronization");
+    const reusedGroup = [...container.querySelectorAll<HTMLButtonElement>(".review-context-file-group")].find(
+      (group) => group.textContent === "19Reused",
+    )!;
+    await act(async () => reusedGroup.click());
+    expect(reusedGroup.getAttribute("aria-pressed")).toBe("true");
     expect(container.textContent).toContain("Verified coverage from run 1487");
     expect(container.textContent).not.toContain("Full review:");
     expect(container.querySelector(".review-context-range")?.textContent).toBe(
       "git diff 'base...head' -- 'docs/business-rules/programs.md'",
     );
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
   });
 
   it("quotes scoped diff arguments without allowing shell expansion", () => {
@@ -218,7 +228,10 @@ describe("review scope selection", () => {
     container.innerHTML = html;
     expect(container.textContent).toContain("Content-verified reuse");
     expect(container.textContent).toContain("1 excluded, not reviewed");
-    expect(container.textContent).toContain("Policy exclusions (not reviewed)");
+    const excludedGroup = [...container.querySelectorAll(".review-context-file-group")].find((group) =>
+      group.textContent?.endsWith("Excluded"),
+    );
+    expect(excludedGroup?.textContent).toBe("1Excluded");
     expect(container.textContent).not.toContain("Full review:");
     expect(container.querySelector(".review-context-range")).toBeNull();
   });
@@ -265,6 +278,26 @@ describe("review inspector navigation", () => {
     } finally {
       container.remove();
       style.remove();
+    }
+  });
+
+  it("pushes a disclosure's count to the right and mutes it", () => {
+    const style = document.createElement("style");
+    style.textContent = [...readFileSync("src/styles/components.css", "utf8").matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((match) => match[1].includes(".disclosure > summary > span"))
+      .map((match) => match[0])
+      .join("\n");
+    const container = document.createElement("div");
+    container.innerHTML = '<details class="disclosure"><summary>Model runs<span>1</span></summary></details>';
+    document.head.append(style);
+    document.body.append(container);
+    try {
+      const count = getComputedStyle(container.querySelector("summary > span")!);
+      expect(count.marginLeft).toBe("auto");
+      expect(count.color).toBe("var(--text-3)");
+    } finally {
+      style.remove();
+      container.remove();
     }
   });
 

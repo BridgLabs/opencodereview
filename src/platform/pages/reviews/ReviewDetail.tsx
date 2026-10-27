@@ -114,21 +114,27 @@ export function ReviewDetail({
   return (
     <>
       <div className="review-overview-toolbar flex flex-none items-center justify-between gap-3 border-b border-line bg-surface px-5 py-2.5">
-        <span className="review-detail-stream-status inline-flex items-center gap-1.5 text-caption text-fg-subtle">
-          <span className="size-1.5 rounded-full bg-emerald-500" />
-          {streamStatusLabel(streamState)}
-          {lastUpdatedAt ? ` · ${new Date(lastUpdatedAt).toLocaleTimeString()}` : ""}
-        </span>
+        {/* The connection status only matters while the run can still change. */}
+        {live ? (
+          <span className="review-detail-stream-status inline-flex items-center gap-1.5 text-caption text-fg-subtle">
+            <span className="size-1.5 rounded-full bg-emerald-500" />
+            {streamStatusLabel(streamState)}
+            {lastUpdatedAt ? ` · ${new Date(lastUpdatedAt).toLocaleTimeString()}` : ""}
+          </span>
+        ) : (
+          <span />
+        )}
         <div className="review-overview-actions flex items-center gap-2">
           {card.url && (
             <a
-              className="inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-small font-medium text-fg-muted hover:bg-surface-muted hover:text-fg"
+              className="inline-flex size-8 items-center justify-center rounded-md text-fg-muted hover:bg-surface-muted hover:text-fg"
               href={card.url}
               target="_blank"
               rel="noreferrer"
+              aria-label="Open on GitHub"
+              title="Open on GitHub"
             >
               <GitHubMark className="size-4" />
-              GitHub
             </a>
           )}
           {canCancel ? (

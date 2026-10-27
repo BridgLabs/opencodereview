@@ -586,31 +586,81 @@ textarea {
   color: var(--text-2);
 }
 
-.markdown details {
-  margin: 8px 0;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface-2);
+/* A flat disclosure row: a hairline above, a chevron that turns when open. Markdown <details> from
+   review comments and the inspector's own sections share it, so every expandable reads the same. */
+.markdown details,
+.disclosure {
+  margin: 0;
+  border-top: 1px solid var(--border);
 }
 
-.markdown details[open] {
-  padding-bottom: 4px;
+.markdown details:last-child,
+.disclosure:last-child {
+  border-bottom: 1px solid var(--border);
 }
 
-.markdown summary {
+.markdown summary,
+.disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 2px;
   cursor: pointer;
   color: var(--text-2);
-  font-weight: 600;
-  list-style: revert;
+  font-weight: 500;
+  list-style: none;
 }
 
-.markdown summary:hover {
+.markdown summary::-webkit-details-marker,
+.disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.markdown summary::before,
+.disclosure > summary::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin: 0 3px 0 1px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  opacity: 0.7;
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+
+.disclosure[open] > summary::before,
+.markdown details[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.markdown summary:hover,
+.disclosure > summary:hover {
   color: var(--text-1);
 }
 
+/* The count or value a disclosure carries sits at the far right of its row. */
+.disclosure > summary > span:last-child {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.disclosure > :not(summary) {
+  margin-bottom: 12px;
+}
+
 .markdown details > :not(summary) {
-  margin-top: 8px;
+  margin: 0 0 10px 20px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .markdown summary::before,
+  .disclosure > summary::before {
+    transition: none;
+  }
 }
 
 /* override the global ".pending-row span { display:block }" for the meta line */

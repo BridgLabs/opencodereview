@@ -4,6 +4,7 @@ import {
   canDecideFindings,
   type FindingSelectionDraft,
   findingAuditSummary,
+  findingDisplayBody,
   findingSelectionDirty,
   groupFindingCandidates,
   prepareEmptyFindingDecision,
@@ -212,5 +213,27 @@ describe("reviewBodyHasPostableFinding", () => {
     expect(reviewBodyHasPostableFinding("**[Finding] Issue**")).toBe(true);
     expect(reviewBodyHasPostableFinding("> **[Question] Intent?**")).toBe(true);
     expect(reviewBodyHasPostableFinding("No issues found.")).toBe(false);
+  });
+});
+
+describe("findingDisplayBody", () => {
+  it("drops the GitHub-only lines and the title line, and keeps the rest", () => {
+    const body = [
+      "<!-- ocr:fingerprint=fnv64:1109cf9f37037de9 -->",
+      "<sub>🤖 Automated review by OpenCodeReview</sub>",
+      "",
+      "**[Finding] Sitemap gets a 24h max-age**",
+      "",
+      "The cached sitemap keeps the Cache API header.",
+      "",
+      "<details><summary>Details</summary>Mentions [Finding] again.</details>",
+    ].join("\n");
+    expect(findingDisplayBody(body)).toBe(
+      "The cached sitemap keeps the Cache API header.\n\n<details><summary>Details</summary>Mentions [Finding] again.</details>",
+    );
+  });
+
+  it("leaves a body without those lines as it is", () => {
+    expect(findingDisplayBody("Plain text.")).toBe("Plain text.");
   });
 });

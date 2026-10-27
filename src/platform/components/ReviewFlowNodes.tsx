@@ -22,7 +22,7 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { BrandLoadingIcon } from "../../components/BrandLoading";
 import { DSBadge } from "../../components/DesignSystem";
 import type { ReviewContextPlan } from "../../types";
@@ -256,99 +256,109 @@ export function ContextPhaseDetails({ context }: { context: ReviewContextPlan })
             ? ["Incremental review", "Incremental review: selects the PR-owned changes since the previous review."]
             : ["Full review", "Full review: selects the PR diff against its immediate base."];
   const short = (sha?: string | null) => sha?.slice(0, 12) ?? "Unavailable";
+  const groups: ContextFileGroup[] = [
+    ...(excluded.length ? [{ id: "excluded", title: "Excluded", files: excluded }] : []),
+    { id: "changed", title: "Changed", files: context.changedFiles.map((path) => ({ path })) },
+    ...(selection && selection.reusedFiles.length > 0
+      ? [
+          {
+            id: "reused",
+            title: "Reused",
+            files: selection.reusedFiles.map((path) => ({
+              path,
+              reason:
+                selection.sourceRunId == null
+                  ? "Verified persisted review coverage"
+                  : `Verified coverage from run ${selection.sourceRunId}`,
+            })),
+          },
+        ]
+      : []),
+    {
+      id: "related",
+      title: "Related",
+      note: context.omittedCount > 0 ? `${context.omittedCount} more left out` : undefined,
+      files: context.relatedFiles.map((file) => ({ path: file.path, reason: file.reason, source: file.source })),
+    },
+    { id: "tests", title: "Tests", files: context.testFiles.map((path) => ({ path })) },
+    { id: "conventions", title: "Conventions", files: context.conventionFiles.map((path) => ({ path })) },
+    {
+      id: "packages",
+      title: "Packages",
+      note: context.dependentPackages.length ? `${context.dependentPackages.length} dependent` : undefined,
+      files: [
+        ...context.packages.map((item) => ({ path: item.name, reason: item.packagePath || "Repository root" })),
+        ...context.dependentPackages.map((path) => ({ path, source: "Dependent package" })),
+      ],
+    },
+  ];
   return (
-    <section className="review-context-details grid w-full min-w-0 gap-2">
-      <div className="mb-1 flex flex-wrap items-center gap-x-2.5 gap-y-1">
+    <section className="review-context-details grid w-full min-w-0 gap-3">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
         <DSBadge tone="brand" title={mode[1]}>
           {mode[0]}
         </DSBadge>
         {selection && (
-          <span className="text-caption text-fg-muted">{`${context.changedFiles.length} file${context.changedFiles.length === 1 ? "" : "s"} to review · ${selection.reusedFiles.length} with reused coverage${excluded.length ? ` · ${excluded.length} excluded, not reviewed` : ""} · ${selection.fullPrFiles.length} in the PR`}</span>
+          <span className="text-caption text-fg-muted tabular-nums">{`${context.changedFiles.length} file${context.changedFiles.length === 1 ? "" : "s"} to review · ${selection.reusedFiles.length} with reused coverage${excluded.length ? ` · ${excluded.length} excluded, not reviewed` : ""} · ${selection.fullPrFiles.length} in the PR`}</span>
         )}
       </div>
-      {excluded.length > 0 && <ContextFiles title="Policy exclusions (not reviewed)" files={excluded} />}
-      <ContextFiles title="Changed files" files={context.changedFiles.map((path) => ({ path }))} />
-      {selection && selection.reusedFiles.length > 0 && (
-        <ContextFiles
-          title="Reused review coverage"
-          files={selection.reusedFiles.map((path) => ({
-            path,
-            reason:
-              selection.sourceRunId == null
-                ? "Verified persisted review coverage"
-                : `Verified coverage from run ${selection.sourceRunId}`,
-          }))}
-        />
-      )}
-      <ContextFiles
-        title="Related files"
-        meta={context.omittedCount > 0 ? `${context.omittedCount} more left out` : undefined}
-        files={context.relatedFiles.map((file) => ({ path: file.path, reason: file.reason, source: file.source }))}
-      />
-      <ContextFiles title="Tests" files={context.testFiles.map((path) => ({ path }))} />
-      <ContextFiles title="Conventions" files={context.conventionFiles.map((path) => ({ path }))} />
-      <ContextFiles
-        title="Packages"
-        meta={context.dependentPackages.length ? `${context.dependentPackages.length} dependent` : undefined}
-        files={[
-          ...context.packages.map((item) => ({ path: item.name, reason: item.packagePath || "Repository root" })),
-          ...context.dependentPackages.map((path) => ({ path, source: "Dependent package" })),
-        ]}
-      />
-      <details className={`review-context-scope ${contextGroupClass}`}>
-        <summary>
-          Git scope
-          <span>
-            {context.mergeBaseSha?.slice(0, 7) ?? "?"}…{context.headSha?.slice(0, 7) ?? "?"}
-          </span>
-        </summary>
-        <div className="mt-3 grid gap-3 font-normal">
-          <p className="text-caption text-fg-muted">
-            {mode[1]} Related files come from the repository index and import graph.
-            {context.scopeReason && ` ${context.scopeReason.replace(/\.$/, "")}.`}
-          </p>
-          <dl className="grid grid-cols-3 gap-x-4 gap-y-2.5 text-caption [&_dt]:text-fg-subtle [&_dd]:mt-0.5 [&_dd]:truncate [&_dd]:font-mono [&_dd]:text-fg">
-            <div className="col-span-3">
-              <dt>Immediate base</dt>
-              <dd title={context.baseRef ?? undefined}>{context.baseRef ?? "Unavailable for this historical run"}</dd>
-            </div>
-            <div>
-              <dt>Base SHA</dt>
-              <dd>{short(context.reviewedBaseSha)}</dd>
-            </div>
-            <div>
-              <dt>Merge-base</dt>
-              <dd>{short(context.mergeBaseSha)}</dd>
-            </div>
-            <div>
-              <dt>Head</dt>
-              <dd>{short(context.headSha)}</dd>
-            </div>
-            <div>
-              <dt>Index SHA</dt>
-              <dd>{short(context.baseSha)}</dd>
-            </div>
-            {context.priorSha && (
-              <div>
-                <dt>Previous review</dt>
-                <dd>{short(context.priorSha)}</dd>
+      <ContextFileGroups groups={groups} />
+      <div>
+        <details className={`review-context-scope ${contextGroupClass}`}>
+          <summary>
+            Git scope
+            <span>
+              {context.mergeBaseSha?.slice(0, 7) ?? "?"}…{context.headSha?.slice(0, 7) ?? "?"}
+            </span>
+          </summary>
+          <div className="mt-3 grid gap-3 font-normal">
+            <p className="text-caption text-fg-muted">
+              {mode[1]} Related files come from the repository index and import graph.
+              {context.scopeReason && ` ${context.scopeReason.replace(/\.$/, "")}.`}
+            </p>
+            <dl className="grid grid-cols-3 gap-x-4 gap-y-2.5 text-caption [&_dt]:text-fg-subtle [&_dd]:mt-0.5 [&_dd]:truncate [&_dd]:font-mono [&_dd]:text-fg">
+              <div className="col-span-3">
+                <dt>Immediate base</dt>
+                <dd title={context.baseRef ?? undefined}>{context.baseRef ?? "Unavailable for this historical run"}</dd>
               </div>
+              <div>
+                <dt>Base SHA</dt>
+                <dd>{short(context.reviewedBaseSha)}</dd>
+              </div>
+              <div>
+                <dt>Merge-base</dt>
+                <dd>{short(context.mergeBaseSha)}</dd>
+              </div>
+              <div>
+                <dt>Head</dt>
+                <dd>{short(context.headSha)}</dd>
+              </div>
+              <div>
+                <dt>Index SHA</dt>
+                <dd>{short(context.baseSha)}</dd>
+              </div>
+              {context.priorSha && (
+                <div>
+                  <dt>Previous review</dt>
+                  <dd>{short(context.priorSha)}</dd>
+                </div>
+              )}
+            </dl>
+            {context.range && (!scoped || context.changedFiles.length > 0) && (
+              <code className="review-context-range block rounded-md bg-surface-muted p-2 font-mono text-caption text-fg-muted [overflow-wrap:anywhere]">
+                git diff {quoteShellArgument(context.range)}
+                {scoped && ` -- ${context.changedFiles.map(quoteShellArgument).join(" ")}`}
+              </code>
             )}
-          </dl>
-          {context.range && (!scoped || context.changedFiles.length > 0) && (
-            <code className="review-context-range block rounded-md bg-surface-muted p-2 font-mono text-caption text-fg-muted [overflow-wrap:anywhere]">
-              git diff {quoteShellArgument(context.range)}
-              {scoped && ` -- ${context.changedFiles.map(quoteShellArgument).join(" ")}`}
-            </code>
-          )}
-        </div>
-      </details>
+          </div>
+        </details>
+      </div>
     </section>
   );
 }
 
 export const contextGroupClass =
-  "min-w-0 rounded-lg border border-line px-3 py-2 [&_summary]:cursor-pointer [&_summary]:text-small [&_summary]:font-medium [&_summary]:text-fg [&_summary>span]:float-right [&_summary>span]:font-normal [&_summary>span]:text-fg-subtle [&_ul]:mt-3 [&_ul]:grid [&_ul]:max-h-65 [&_ul]:gap-2.5 [&_ul]:overflow-auto";
+  "disclosure min-w-0 [&_summary]:text-small [&_ul]:grid [&_ul]:max-h-65 [&_ul]:gap-2.5 [&_ul]:overflow-auto";
 
 /** A repository path in small monospace: the folder dimmed, the file name readable. */
 function FilePath({ path }: { path: string }) {
@@ -361,40 +371,58 @@ function FilePath({ path }: { path: string }) {
   );
 }
 
-function ContextFiles({
-  title,
-  files,
-  meta,
-}: {
+type ContextFileGroup = {
+  id: string;
   title: string;
   files: Array<{ path: string; reason?: string; source?: string }>;
-  meta?: string;
-}) {
+  note?: string;
+};
+
+/** One number per kind of context file; picking one lists its files underneath. */
+function ContextFileGroups({ groups }: { groups: ContextFileGroup[] }) {
+  const [activeId, setActiveId] = useState("changed");
+  const active = groups.find((group) => group.id === activeId) ?? groups[0];
   return (
-    <details
-      className={`review-context-files ${contextGroupClass} [&_ul]:gap-0 [&_li]:border-t [&_li]:border-line/60 [&_li]:py-1.5 [&_li]:[overflow-wrap:anywhere] [&_li_p]:mt-0.5 [&_li_p]:text-caption [&_li_p]:text-fg-subtle [&_li>span]:text-caption [&_li>span]:text-fg-subtle`}
-    >
-      <summary>
-        {title}
-        <span>{meta ? `${files.length} · ${meta}` : files.length}</span>
-      </summary>
-      {files.length ? (
-        <ul>
-          {files.map((file, index) => (
+    <div className="review-context-files grid min-w-0 gap-2">
+      <fieldset
+        className="m-0 grid min-w-0 grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] gap-1.5 border-0 p-0"
+        aria-label="Context files"
+      >
+        {groups.map((group) => (
+          <button
+            key={group.id}
+            type="button"
+            className={`review-context-file-group min-w-0 cursor-pointer rounded-lg border px-2.5 py-1.5 text-left transition-colors ${group.id === active.id ? "border-brand bg-brand-soft" : "border-line bg-canvas hover:bg-surface-muted"}`}
+            aria-pressed={group.id === active.id}
+            onClick={() => setActiveId(group.id)}
+          >
+            <b className="block text-heading font-semibold text-fg tabular-nums">{group.files.length}</b>
+            <span className="block truncate text-caption text-fg-muted">{group.title}</span>
+          </button>
+        ))}
+      </fieldset>
+      {active.note && <p className="text-caption text-fg-subtle">{active.note}</p>}
+      {active.files.length ? (
+        <ul className="review-context-file-list grid max-h-65 min-w-0 overflow-auto">
+          {active.files.map((file, index) => (
             <li
               // biome-ignore lint/suspicious/noArrayIndexKey: read-only list that is never reordered; entries can repeat, so the index keeps keys unique
               key={`${file.path}:${index}`}
+              className="flex min-w-0 items-baseline justify-between gap-3 border-b border-line/60 py-1.5 last:border-b-0 [overflow-wrap:anywhere]"
             >
               <FilePath path={file.path} />
-              {file.reason && <p>{file.reason}</p>}
-              {file.source && <span>{file.source}</span>}
+              {(file.reason || file.source) && (
+                <span className="flex-none text-right text-caption text-fg-subtle">
+                  {[file.reason, file.source].filter(Boolean).join(" · ")}
+                </span>
+              )}
             </li>
           ))}
         </ul>
       ) : (
         <p className="review-stage-note">None selected for this run.</p>
       )}
-    </details>
+    </div>
   );
 }
 
