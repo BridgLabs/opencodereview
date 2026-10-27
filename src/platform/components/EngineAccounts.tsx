@@ -16,12 +16,12 @@ import {
 
 type Provider = AiAccount["provider"];
 
-/** What a row says about an account, kept short beside its name: how much is left, or why it
+/** What a row says about an account: how much is left beside its name, or, under it, why it
  * can't take reviews now. The full status is in the row's tooltip. */
 function accountNote(account: AiAccount, left: number | null, now = Date.now()) {
   const health = accountHealth(account, now);
   if (health === "signed-out") return "Signed out";
-  if (health === "resting") return `Resets in ${relative((account.limitedUntil ?? now) - now)}`;
+  if (health === "resting") return `Limit reached · resets in ${relative((account.limitedUntil ?? now) - now)}`;
   if (health === "paused") return left === null ? "Paused" : `Paused · ${left}% left`;
   return left === null ? "" : `${left}% left`;
 }
@@ -56,7 +56,7 @@ export function AccountChoices({
             aria-checked={selected}
             title={accountStatusText(account)}
             disabled={busy || unavailable}
-            className="flex h-10 w-full flex-none cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-small text-fg transition-colors hover:bg-surface-muted/60 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex min-h-10 w-full flex-none cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-small text-fg transition-colors hover:bg-surface-muted/60 disabled:cursor-not-allowed disabled:opacity-60"
             onClick={() => !selected && onChoose(account)}
           >
             <span
@@ -67,21 +67,24 @@ export function AccountChoices({
             >
               {selected && <Check className="size-3" strokeWidth={3} />}
             </span>
-            <span className="min-w-16 flex-1 truncate">{account.label}</span>
-            <span
-              className={cx(
-                "flex-none text-caption tabular-nums",
-                health === "resting"
-                  ? "text-warning"
-                  : health === "signed-out"
-                    ? "text-danger"
-                    : left !== null && left <= 10
-                      ? "text-danger"
-                      : "text-fg-subtle",
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate">{account.label}</span>
+              {unavailable && (
+                <span className={cx("truncate text-caption", health === "resting" ? "text-warning" : "text-danger")}>
+                  {accountNote(account, left)}
+                </span>
               )}
-            >
-              {accountNote(account, left)}
             </span>
+            {!unavailable && (
+              <span
+                className={cx(
+                  "flex-none text-caption tabular-nums",
+                  left !== null && left <= 10 ? "text-danger" : "text-fg-subtle",
+                )}
+              >
+                {accountNote(account, left)}
+              </span>
+            )}
           </button>
         );
       })}
