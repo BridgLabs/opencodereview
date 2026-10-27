@@ -138,6 +138,27 @@ export function findingTitle(candidate: FindingCandidate) {
   );
 }
 
+/**
+ * The finding as the app shows it, under its own title: without the fingerprint and "Automated review"
+ * lines GitHub needs, and without the [Finding] line that `findingTitle` already shows.
+ */
+export function findingDisplayBody(body: string) {
+  let titleRemoved = false;
+  return body
+    .split("\n")
+    .filter((line) => {
+      if (/^\s*<!--\s*ocr:.*-->\s*$/.test(line)) return false;
+      if (/^\s*<sub>.*Automated review by OpenCodeReview.*<\/sub>\s*$/i.test(line)) return false;
+      if (!titleRemoved && /\[(Finding|Question)\]/i.test(line)) {
+        titleRemoved = true;
+        return false;
+      }
+      return true;
+    })
+    .join("\n")
+    .trim();
+}
+
 export function reviewBodyHasPostableFinding(body: string | null) {
   return Boolean(
     body?.split("\n").some((line) => {

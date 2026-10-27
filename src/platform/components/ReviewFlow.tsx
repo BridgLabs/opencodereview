@@ -259,7 +259,10 @@ export function ReviewFlow({
                   <span className="review-stage-times text-caption text-fg-muted tabular-nums" title={stageNote}>
                     {[
                       formatFlowDuration(selected.data.metrics.durationMs),
-                      `${formatFlowTokens(selected.data.metrics.tokens)}${selected.data.metrics.tokens !== null && selected.data.metrics.partial ? " (partial)" : ""}`,
+                      // A stage that never called a model has no tokens to report; "0 tokens" there is noise.
+                      executions.length > 0 || (selected.data.metrics.tokens ?? 0) > 0
+                        ? `${formatFlowTokens(selected.data.metrics.tokens)}${selected.data.metrics.tokens !== null && selected.data.metrics.partial ? " (partial)" : ""}`
+                        : null,
                       startedAt !== null ? `started ${new Date(startedAt).toLocaleTimeString()}` : null,
                       selected.data.chunk ? `queued ${formatFlowDuration(selected.data.chunk.queuedDurationMs)}` : null,
                       selected.data.chunk && selected.data.chunk.attempts > 1
@@ -270,12 +273,16 @@ export function ReviewFlow({
                       .join(" · ")}
                   </span>
                 </div>
-                <p className="review-stage-description text-small text-fg-muted [overflow-wrap:anywhere]">
-                  {selected.data.detail}
-                </p>
+                {!(phase?.id === "context" && contextQuery.data) && (
+                  <p className="review-stage-description text-small text-fg [overflow-wrap:anywhere]">
+                    {selected.data.detail}
+                  </p>
+                )}
                 {phase && ["merge", "final", "validate"].includes(phase.id) && (
                   <DSButton tone="primary" onClick={() => onSelectView("overview")}>
-                    Review findings{findingCount !== undefined ? ` (${findingCount})` : ""}
+                    {findingCount !== undefined
+                      ? `Review ${findingCount} finding${findingCount === 1 ? "" : "s"}`
+                      : "Review findings"}
                   </DSButton>
                 )}
                 {phase?.id === "chunks" && (
@@ -321,9 +328,9 @@ export function ReviewFlow({
                   </>
                 )}
                 {executions.length > 0 && (
-                  <details className={`review-stage-executions w-full ${contextGroupClass}`}>
+                  <details className={`review-stage-executions w-full ${contextGroupClass}`} open>
                     <summary>
-                      Recorded stages<span>{executions.length}</span>
+                      Model runs<span>{executions.length}</span>
                     </summary>
                     <div className="mt-2 grid">
                       {executions.map((execution) => (
@@ -353,21 +360,20 @@ export function ReviewFlow({
                     </div>
                   </details>
                 )}
-                {events.length > 0 && <StageTimeline events={events} state={selected.data.state} />}
-                <details className={`review-stage-output w-full ${contextGroupClass}`}>
-                  <summary>
-                    Latest stage output
-                    <span>{log ? `${log.split("\n").length} ${log.includes("\n") ? "lines" : "line"}` : "empty"}</span>
-                  </summary>
-                  <pre className="review-stage-log mt-3 max-h-[55dvh] min-h-35 w-full flex-none overflow-auto rounded-lg border border-line bg-slate-50 p-3 font-mono text-[0.7857rem] leading-relaxed font-normal whitespace-pre-wrap text-fg-muted [overflow-wrap:anywhere]">
-                    {log ||
-                      (selected.data.chunk
-                        ? "No retained output for this chunk. The live feed only includes the chunk currently reported by the worker."
-                        : selected.data.state === "pending"
-                          ? "This stage has not started yet."
-                          : "No stage output recorded for this run.")}
-                  </pre>
-                </details>
+                {events.length > 0 && (
+                  // The timeline is what most stages have to show; Context has its files instead.
+                  <StageTimeline events={events} state={selected.data.state} open={phase?.id !== "context"} />
+                )}
+                <StageOutput
+                  log={log ?? ""}
+                  empty={
+                    selected.data.chunk
+                      ? "No retained output for this chunk. The live feed only includes the chunk currently reported by the worker."
+                      : selected.data.state === "pending"
+                        ? "This stage has not started yet."
+                        : "No stage output recorded for this run."
+                  }
+                />
               </div>
             )
           )}
@@ -377,12 +383,41 @@ export function ReviewFlow({
   );
 }
 
+/** A few lines of output read inline; a longer log folds away behind its line count. */
+function StageOutput({ log, empty }: { log: string; empty: string }) {
+  const lines = log ? log.split("\n").length : 0;
+  const pre = (
+    <pre className="review-stage-log max-h-[55dvh] w-full flex-none overflow-auto rounded-lg border border-line bg-canvas px-3 py-2 font-mono text-[0.7857rem] leading-relaxed font-normal whitespace-pre-wrap text-fg-muted [overflow-wrap:anywhere]">
+      {log || empty}
+    </pre>
+  );
+  if (lines > INLINE_OUTPUT_LINES)
+    return (
+      <details className={`review-stage-output w-full ${contextGroupClass}`}>
+        <summary>
+          Stage output<span>{lines} lines</span>
+        </summary>
+        {pre}
+      </details>
+    );
+  return (
+    <section className="review-stage-output grid w-full gap-1.5">
+      <h3 className="text-caption font-semibold tracking-wide text-fg-subtle uppercase">Output</h3>
+      {pre}
+    </section>
+  );
+}
+
+const INLINE_OUTPUT_LINES = 3;
+
 function StageTimeline({
   events,
   state,
+  open,
 }: {
   events: Array<{ at: number; message: string }>;
   state: ReviewFlowNodeData["state"];
+  open: boolean;
 }) {
   const last = events.length - 1;
   const tone =
@@ -392,7 +427,7 @@ function StageTimeline({
         ? "bg-brand ring-brand-soft animate-pulse"
         : "bg-success ring-emerald-100";
   return (
-    <details className={`review-stage-history w-full ${contextGroupClass}`}>
+    <details className={`review-stage-history w-full ${contextGroupClass}`} open={open}>
       <summary>
         What happened
         <span>

@@ -376,10 +376,9 @@ describe("review result decisions", () => {
         expect(getComputedStyle(details).display).toBe("none");
         const choice = findings.querySelector<HTMLInputElement>('[aria-label="Include finding kept"]')!;
         if (editable) await act(async () => choice.click());
-        const summary = [...findings.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
-          (tab) => tab.textContent === "Original AI summary",
-        )!;
-        await act(async () => summary.click());
+        const summary = findings.querySelector<HTMLDetailsElement>(".finding-original-review")!;
+        expect(summary.querySelector("summary")?.textContent).toBe("Original AI summary");
+        await act(async () => summary.querySelector("summary")!.click());
         body.scrollTop = 200;
         await act(async () => tabs[1].click());
         expect(body.scrollTop).toBe(0);
@@ -398,13 +397,8 @@ describe("review result decisions", () => {
         expect(document.activeElement).toBe(tabs[0]);
         expect(findings.hidden).toBe(false);
         expect(details.hidden).toBe(true);
-        expect(summary.getAttribute("aria-selected")).toBe("true");
-        expect(findings.querySelector('[role="tabpanel"]')?.textContent).toContain("Original summary text");
-        await act(async () =>
-          [...findings.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
-            .find((tab) => tab.textContent?.startsWith("Eligible findings"))!
-            .click(),
-        );
+        expect(summary.open).toBe(true);
+        expect(summary.textContent).toContain("Original summary text");
         expect(findings.querySelector<HTMLInputElement>('[aria-label="Include finding kept"]')!.checked).toBe(
           !editable,
         );
