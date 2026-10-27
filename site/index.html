@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>OpenCodeReview — a code reviewer for people who ship alone</title>
-  <meta name="description" content="Source-available AI code review for indie hackers and solo SaaS builders. Every pull request gets reviewed by Claude Code, Codex or Gemini with the account you already have, or by OpenCode for free.">
+  <meta name="description" content="Self-hosted AI code review for indie hackers and solo SaaS builders. Every pull request gets reviewed by Claude Code, Codex or Gemini with the account you already have, or by OpenCode for free.">
   <link rel="canonical" href="https://opencodereview.run/">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
   <meta name="theme-color" content="#111111">
@@ -13,7 +13,7 @@
   <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://opencodereview.run/">
   <meta property="og:title" content="OpenCodeReview — a code reviewer for people who ship alone">
-  <meta property="og:description" content="Every pull request reviewed by the AI account you already have, or by free models. Self-hosted and source-available.">
+  <meta property="og:description" content="Every pull request reviewed by the AI account you already have, or by free models. Self-hosted, with the code on GitHub.">
   <meta property="og:image" content="https://opencodereview.run/og.png?v=2">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
@@ -21,7 +21,7 @@
   <meta property="og:image:alt" content="OpenCodeReview: every pull request, reviewed. A diff with a high-severity review comment from the OpenCodeReview mascot.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="OpenCodeReview — a code reviewer for people who ship alone">
-  <meta name="twitter:description" content="Every pull request reviewed by the AI account you already have, or by free models. Self-hosted and source-available.">
+  <meta name="twitter:description" content="Every pull request reviewed by the AI account you already have, or by free models. Self-hosted, with the code on GitHub.">
   <meta name="twitter:image" content="https://opencodereview.run/og.png?v=2">
   <meta name="twitter:image:alt" content="OpenCodeReview: every pull request, reviewed. A diff with a high-severity review comment from the OpenCodeReview mascot.">
   <link rel="icon" href="favicon.ico" sizes="32x32">
@@ -141,7 +141,7 @@
             "name": "How is it different from CodeRabbit or Greptile?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "They are hosted services billed per developer. OpenCodeReview is self-hosted with its source available, and it reviews with the AI plan you already pay for."
+              "text": "They are hosted services billed per developer. OpenCodeReview runs on your own machine, its code is on GitHub, and it reviews with the AI plan you already pay for."
             }
           },
           {
@@ -482,7 +482,7 @@
       <div class="compare-wrap">
         <table class="compare">
           <colgroup><col class="c-label"><col><col><col></colgroup>
-          <thead><tr><th></th><th class="us"><span class="vendor"><svg style="color:var(--mascot)"><use href="#bubble" /></svg><span>OpenCodeReview<small>Self-hosted · source-available</small></span></span></th><th><span class="vendor"><span>CodeRabbit<small>Hosted service</small></span></span></th><th><span class="vendor"><span>Greptile<small>Hosted service</small></span></span></th></tr></thead>
+          <thead><tr><th></th><th class="us"><span class="vendor"><svg style="color:var(--mascot)"><use href="#bubble" /></svg><span>OpenCodeReview<small>Self-hosted · code on GitHub</small></span></span></th><th><span class="vendor"><span>CodeRabbit<small>Hosted service</small></span></span></th><th><span class="vendor"><span>Greptile<small>Hosted service</small></span></span></th></tr></thead>
           <tbody>
             <tr><th scope="row">Price</th><td class="us"><span class="cell"><span class="mark yes" aria-label="Yes">✓</span>Free for individuals and small companies, on your AI plan</span></td><td><span class="cell"><span class="mark no" aria-label="No">✕</span>Per developer, monthly</span></td><td><span class="cell"><span class="mark no" aria-label="No">✕</span>Per developer, monthly</span></td></tr>
             <tr><th scope="row">Where your code runs</th><td class="us"><span class="cell"><span class="mark yes" aria-label="Yes">✓</span>Your machine; only your AI provider sees the diff</span></td><td><span class="cell"><span class="mark no" aria-label="No">✕</span>Their cloud</span></td><td><span class="cell"><span class="mark part" aria-label="Partly">~</span>Their cloud, or self-hosted on enterprise</span></td></tr>
@@ -539,7 +539,7 @@
           <details><summary>Which plans work?</summary><p>Claude Pro, Max or Team through Claude Code, ChatGPT plans that include Codex, a Google account through the Gemini CLI, and OpenCode's free models or an OpenCode Go key. Local models are not supported. You can connect several accounts of each kind.</p></details>
           <details><summary>What happens when my plan hits its limit?</summary><p>The review continues on your next account in order. The limited account rests and is used again after its window resets. Claude and ChatGPT accounts show how much usage they have left; API keys are billed by their provider.</p></details>
           <details><summary>Where does my code go?</summary><p>It stays on the machine that runs OpenCodeReview. Reviews call your AI provider with your own sign-in or key, the same way its CLI does when you use it yourself.</p></details>
-          <details><summary>How is it different from CodeRabbit or Greptile?</summary><p>They are hosted services billed per developer. OpenCodeReview is self-hosted with its source available, and it reviews with the AI plan you already pay for.</p></details>
+          <details><summary>How is it different from CodeRabbit or Greptile?</summary><p>They are hosted services billed per developer. OpenCodeReview runs on your own machine, its code is on GitHub, and it reviews with the AI plan you already pay for.</p></details>
           <details><summary>Does my laptop need to stay on?</summary><p>Reviews run while OpenCodeReview is running. For reviews around the clock, run it on any always-on machine with Docker, such as a small VPS or a home server.</p></details>
           <details><summary>What do I need to run it?</summary><p>Docker, a GitHub account with access to your repositories, and a Claude, ChatGPT or Gemini account. Without one, OpenCode's free models work. The Claude Code, Codex, Gemini and OpenCode CLIs ship inside the container.</p></details>
           <details><summary>Does it work with GitHub Enterprise?</summary><p>Yes. Set <code>OCR_GH_HOST</code> to your GitHub host before starting it.</p></details>
