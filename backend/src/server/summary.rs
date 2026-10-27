@@ -21,7 +21,7 @@ pub(crate) fn maybe_enqueue_pr_summary(db: &Database, inputs: &review::ReviewInp
         return;
     };
     let job = PrSummaryJob {
-        db_path: inputs.db_path.clone(),
+        db_handle: db.handle(),
         summary_id,
         pr_id: inputs.pr_id,
         repo_path: inputs.repo_path.clone(),
@@ -37,7 +37,7 @@ pub(crate) fn maybe_enqueue_pr_summary(db: &Database, inputs: &review::ReviewInp
 
 #[derive(Clone)]
 pub(crate) struct PrSummaryJob {
-    db_path: String,
+    db_handle: Db,
     summary_id: i64,
     pr_id: i64,
     repo_path: PathBuf,
@@ -51,7 +51,7 @@ pub(crate) struct PrSummaryJob {
 
 pub(crate) fn run_pr_summary_job(job: PrSummaryJob) {
     let result = build_pr_summary_body(&job).and_then(|(body, json)| {
-        if let Ok(db) = Database::open_at(PathBuf::from(&job.db_path)) {
+        if let Ok(db) = job.db_handle.open() {
             if let Ok((_repo_id, _full_name, _number, current_head)) = db.pr_review_coords(job.pr_id) {
                 if current_head != job.head_sha {
                     let _ = db.finish_pr_summary(
@@ -70,7 +70,7 @@ pub(crate) fn run_pr_summary_job(job: PrSummaryJob) {
         github::upsert_issue_comment_by_marker(&job.full_name, job.number, &marker, &body)
             .map(|posted| (body, json, posted.id))
     });
-    if let Ok(db) = Database::open_at(PathBuf::from(&job.db_path)) {
+    if let Ok(db) = job.db_handle.open() {
         match result {
             Ok((body, json, comment_id)) => {
                 let _ = db.finish_pr_summary(

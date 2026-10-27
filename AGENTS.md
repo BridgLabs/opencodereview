@@ -13,7 +13,7 @@ backend/src/review/                      Review orchestration, scope, coverage, 
 backend/src/review_archive/              Frozen review archives, retention and purge
 backend/src/github/, indexer/            GitHub calls through `gh`; repository indexer
 backend/src/server/                      HTTP API, background jobs, publication, sign-in flows
-backend/src/db/                          SQLite schema, migrations and queries
+backend/src/db/                          Postgres access, migrations (pg/), queries, SQLite import
 backend/src/assets/                      Built-in review skills
 docker-compose.yml, docker/              Docker runtime, Dockerfiles, smoke and regression scripts
 .agents/skills/                          Agent workflows: git, comments
@@ -53,7 +53,7 @@ docker-compose.yml, docker/              Docker runtime, Dockerfiles, smoke and 
 
 ## Sandbox invariants
 
-- Runners get only their IPC socket and the read-only sign-in projection. Never mount `ocr-data`, repositories or SQLite into a runner, and never expose credential bytes to the browser or logs.
+- Runners get only their IPC socket and the read-only sign-in projection. Never mount `ocr-data` or repositories into a runner, never let a runner reach the database, and never expose credential bytes (database URLs included) to the browser or logs.
 - All Claude CLI arguments live in `backend/src/providers/claude.rs`. Runners expose `Read`, `Grep`, `Glob`, `Bash` and `Write`; deny `Agent`, `Task`, `WebFetch`, `WebSearch` and `mcp__*`; and run the `ocr-sandbox tool-guard` `PreToolUse` hook on every call.
 - Egress admits only the AI provider hosts in `backend/src/sandbox/egress.rs`.
 - Backend and runner images share an executor fingerprint; deploy them together. Never add an in-process fallback that runs the AI inside `server`.
@@ -97,11 +97,16 @@ python3 -B docker/test-web-proxy.py
 docker compose config --quiet
 ```
 
-After building images, `python3 -u docker/runner-smoke.py` validates the sandbox with fake inference (no credentials, no paid calls). If SQLite-backed Rust tests fail with `database is locked`, rerun with `-- --test-threads=1`; do not weaken production locking. Zero matching tests is not a pass.
+After building images, `python3 -u docker/runner-smoke.py` validates the sandbox with fake inference (no credentials, no paid calls). Rust tests need `OCR_TEST_DATABASE_URL` pointing at a Postgres where the role may create databases ([docs/development.md](docs/development.md)). Zero matching tests is not a pass.
 
 ## Database
 
-The schema starts from `backend/src/db/schema.sql` plus the migrations in `backend/src/db/migrations.rs`. Append new migrations at the end; never edit an applied one. A database newer than the app fails explicitly.
+Postgres. Migrations are the SQL files in `backend/src/db/pg/`, listed in `migrate.rs`. Append new migrations at the end; never edit an applied one. A database newer than the app fails explicitly. `backend/src/db/schema.sql` and its SQLite migrations remain only for `ocr-server import-sqlite`.
+
+- Bind every value as a parameter; never format input into SQL.
+- A transaction that reads a pull request's state to decide a write calls `lock_pull_request` first.
+- Never hold a `Database` across Git, GitHub or model calls: open one per step.
+- Background work that must not run twice when several server instances share the database goes through `Db::run_exclusive`.
 
 ## UI rules
 

@@ -1,8 +1,8 @@
 # OpenCodeReview Contributor Assignment Agreement
 
-Version: 1.0
+Version: 1.2
 
-Date: 2026-10-25
+Date: 2026-10-26
 
 This agreement is between you and BRIDG LABS LTDA, the company that maintains OpenCodeReview ("the Maintainer", "we", "us"). It applies to each Contribution that you give to the Project. Read all of it before you sign. If you do not agree, do not send a Contribution.
 
@@ -74,7 +74,7 @@ The law of the country where the Maintainer lives governs this agreement, withou
 1. On your first pull request, a bot asks you to sign. Add a comment to the pull request with this line:
 
    ```text
-   I have read the OpenCodeReview Contributor Assignment Agreement 1.0 and I agree to it.
+   I have read the OpenCodeReview Contributor Assignment Agreement 1.2 and I agree to it.
    ```
 
 2. Each author of a commit in the pull request signs with the same comment, from their own GitHub account.

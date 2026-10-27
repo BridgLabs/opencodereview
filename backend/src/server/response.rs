@@ -89,7 +89,7 @@ pub(crate) fn with_db_read<T: Serialize>(
 }
 
 pub(crate) fn with_db_raw<T>(state: &SharedState, f: impl FnOnce(&Database) -> Result<T, String>) -> Result<T, String> {
-    let db = Database::open_at(state.config.db_path.clone())?;
+    let db = state.config.db.open()?;
     f(&db)
 }
 
@@ -97,12 +97,44 @@ pub(crate) fn with_db_read_raw<T>(
     state: &SharedState,
     f: impl FnOnce(&Database) -> Result<T, String>,
 ) -> Result<T, String> {
-    let db = Database::open_read_at(state.config.db_path.clone())?;
+    let db = state.config.db.open_read()?;
     f(&db)
 }
 
 pub(crate) fn parse_id(value: &str) -> Result<i64, String> {
     value.parse::<i64>().map_err(|_| format!("invalid id: {value}"))
+}
+
+/// The first value of `name` in the request's query string, percent-decoded.
+pub(crate) fn query_param(request: &Request, name: &str) -> Option<String> {
+    request.query.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        (key == name).then(|| percent_decode(value))
+    })
+}
+
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => out.push(b' '),
+            b'%' => match value
+                .get(index + 1..index + 3)
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+            {
+                Some(byte) => {
+                    out.push(byte);
+                    index += 2;
+                }
+                None => out.push(b'%'),
+            },
+            byte => out.push(byte),
+        }
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 pub(crate) fn json_ok(value: &serde_json::Value) -> Response {

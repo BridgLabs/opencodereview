@@ -134,7 +134,10 @@ pub(crate) fn start_index(state: &SharedState, repo_id: i64) -> Result<serde_jso
             .map_err(|error| error.to_string());
     }
     let repo = with_db_raw(state, |db| db.repo_by_id(repo_id))?;
-    let status = with_db_raw(state, |db| db.begin_repo_index(repo_id, repo.default_branch.as_deref()))?;
+    let Some(status) = with_db_raw(state, |db| db.claim_repo_index(repo_id, repo.default_branch.as_deref()))? else {
+        // Another instance is indexing it.
+        return with_db_read(state, |db| db.repo_index_status(repo_id));
+    };
     let cancel = Arc::new(AtomicBool::new(false));
     jobs.insert(repo_id, cancel.clone());
     drop(jobs);
@@ -180,15 +183,16 @@ pub(crate) fn run_index_job(state: SharedState, repo_id: i64, repo: Repo, repo_p
     let mut last_emit = std::time::Instant::now() - Duration::from_secs(1);
     let mut last_stage = String::new();
     let mut stage_started = std::time::Instant::now();
-    let db_path = state.config.db_path.clone();
+    let db_handle = state.config.db.clone();
     let progress_map = state.index_progress.clone();
+    let mut last_recorded = std::time::Instant::now() - Duration::from_secs(1);
     let mut on_progress = |progress: indexer::IndexProgress| {
         let now = std::time::Instant::now();
         let stage_changed = progress.stage != last_stage;
         if stage_changed {
             last_stage = progress.stage.clone();
             stage_started = now;
-            if let Ok(db) = Database::open_at(db_path.clone()) {
+            if let Ok(db) = db_handle.open() {
                 let _ = db.update_repo_index_stage(
                     repo_id,
                     &progress.stage,
@@ -231,6 +235,13 @@ pub(crate) fn run_index_job(state: SharedState, repo_id: i64, repo: Repo, repo_p
             current_path: progress.current_path,
             updated_at: crate::db::now_millis(),
         };
+        // Other instances answer progress requests from the database; a write a second is enough.
+        if stage_changed || now.duration_since(last_recorded) >= Duration::from_secs(1) {
+            last_recorded = now;
+            if let (Ok(json), Ok(db)) = (serde_json::to_string(&event), db_handle.open()) {
+                let _ = db.record_repo_index_progress(repo_id, &json);
+            }
+        }
         if let Ok(mut map) = progress_map.lock() {
             map.insert(repo_id, event);
         }
@@ -239,14 +250,18 @@ pub(crate) fn run_index_job(state: SharedState, repo_id: i64, repo: Repo, repo_p
     let result = match indexer::run_index(&repo_path, repo.default_branch.as_deref(), &cancel, &mut on_progress) {
         Ok(mut write) => {
             write.duration_ms = started.elapsed().as_millis() as i64;
-            Database::open_at(state.config.db_path.clone()).and_then(|db| db.finish_repo_index(repo_id, &write))
+            state
+                .config
+                .db
+                .open()
+                .and_then(|db| db.finish_repo_index(repo_id, &write))
         }
-        Err(error) if error == "cancelled" => {
-            Database::open_at(state.config.db_path.clone()).and_then(|db| db.cancel_repo_index(repo_id))
-        }
-        Err(error) => {
-            Database::open_at(state.config.db_path.clone()).and_then(|db| db.fail_repo_index(repo_id, &error))
-        }
+        Err(error) if error == "cancelled" => state.config.db.open().and_then(|db| db.cancel_repo_index(repo_id)),
+        Err(error) => state
+            .config
+            .db
+            .open()
+            .and_then(|db| db.fail_repo_index(repo_id, &error)),
     };
     if let Err(error) = result {
         let _ = with_db_raw(&state, |db| db.fail_repo_index(repo_id, &error));
@@ -267,7 +282,14 @@ pub(crate) fn index_progress(state: &SharedState, repo_id: i64) -> Result<serde_
         .map_err(|_| "index progress lock poisoned".to_string())?
         .get(&repo_id)
         .cloned();
-    serde_json::to_value(value).map_err(|error| error.to_string())
+    if value.is_some() {
+        return serde_json::to_value(value).map_err(|error| error.to_string());
+    }
+    // An index another instance runs.
+    match with_db_read_raw(state, |db| db.repo_index_progress(repo_id))? {
+        Some(json) => serde_json::from_str(&json).map_err(|error| error.to_string()),
+        None => Ok(serde_json::Value::Null),
+    }
 }
 
 pub(crate) fn check_freshness(state: &SharedState, repo_id: i64) -> Result<serde_json::Value, String> {
@@ -308,60 +330,69 @@ fn due_for_remote_check(repo_id: i64) -> bool {
 pub(crate) fn start_reindex_worker(state: SharedState) {
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(2));
-        let repos = match with_db_raw(&state, |db| db.monitored_repos()) {
-            Ok(repos) => repos,
+        // One instance decides what to index at a time; the index job it starts records that
+        // instance, and the others see the repository as indexing.
+        let _ = state
+            .config
+            .db
+            .run_exclusive(exclusive::REINDEX, || reindex_pass(&state));
+    });
+}
+
+fn reindex_pass(state: &SharedState) {
+    let repos = match with_db_raw(state, |db| db.monitored_repos()) {
+        Ok(repos) => repos,
+        Err(error) => {
+            eprintln!("worker could not load repos: {error}");
+            return;
+        }
+    };
+    for repo in repos {
+        let should_skip = state
+            .index_jobs
+            .lock()
+            .map(|jobs| jobs.len() >= 2 || jobs.contains_key(&repo.id))
+            .unwrap_or(true);
+        if should_skip {
+            continue;
+        }
+        let status = match with_db_raw(state, |db| db.repo_index_status(repo.id)) {
+            Ok(status) => status,
             Err(error) => {
-                eprintln!("worker could not load repos: {error}");
+                eprintln!("worker could not load index status for {}: {error}", repo.full_name);
                 continue;
             }
         };
-        for repo in repos {
-            let should_skip = state
-                .index_jobs
-                .lock()
-                .map(|jobs| jobs.len() >= 2 || jobs.contains_key(&repo.id))
-                .unwrap_or(true);
-            if should_skip {
-                continue;
-            }
-            let status = match with_db_raw(&state, |db| db.repo_index_status(repo.id)) {
-                Ok(status) => status,
-                Err(error) => {
-                    eprintln!("worker could not load index status for {}: {error}", repo.full_name);
-                    continue;
-                }
+        if matches!(status.status.as_str(), "queued" | "not_indexed" | "stale")
+            || (status.status == "ready" && status.spec_version != crate::db::INDEX_SPEC_VERSION)
+        {
+            let _ = start_index(state, repo.id);
+            continue;
+        }
+        // An empty repository indexes itself after its first push; check for one each minute.
+        if status.status == "empty" && crate::db::now_millis() - status.updated_at > 60_000 {
+            let pushed = ensure_repo_checkout(&state.config.repos_dir, &repo)
+                .and_then(|path| indexer::git(&path, &["ls-remote", "--heads", "origin"], None))
+                .is_ok_and(|heads| !heads.is_empty());
+            let _ = if pushed {
+                start_index(state, repo.id).map(drop)
+            } else {
+                with_db_raw(state, |db| db.mark_repo_index_empty(repo.id)).map(drop)
             };
-            if matches!(status.status.as_str(), "queued" | "not_indexed" | "stale")
-                || (status.status == "ready" && status.spec_version != crate::db::INDEX_SPEC_VERSION)
-            {
-                let _ = start_index(&state, repo.id);
-                continue;
-            }
-            // An empty repository indexes itself after its first push; check for one each minute.
-            if status.status == "empty" && crate::db::now_millis() - status.updated_at > 60_000 {
-                let pushed = ensure_repo_checkout(&state.config.repos_dir, &repo)
-                    .and_then(|path| indexer::git(&path, &["ls-remote", "--heads", "origin"], None))
-                    .is_ok_and(|heads| !heads.is_empty());
-                let _ = if pushed {
-                    start_index(&state, repo.id).map(drop)
-                } else {
-                    with_db_raw(&state, |db| db.mark_repo_index_empty(repo.id)).map(drop)
-                };
-                continue;
-            }
-            // Ask GitHub whether the default branch moved at most once a minute per repository.
-            if status.status == "ready" && status.base_sha.is_some() && due_for_remote_check(repo.id) {
-                if let Ok(repo_path) = ensure_repo_checkout(&state.config.repos_dir, &repo) {
-                    if let Ok(remote_sha) = indexer::remote_default_sha(&repo_path, repo.default_branch.as_deref()) {
-                        if status.base_sha.as_deref() != Some(remote_sha.as_str()) {
-                            let _ = with_db_raw(&state, |db| db.mark_repo_index_stale(repo.id, &remote_sha));
-                            let _ = start_index(&state, repo.id);
-                        }
+            continue;
+        }
+        // Ask GitHub whether the default branch moved at most once a minute per repository.
+        if status.status == "ready" && status.base_sha.is_some() && due_for_remote_check(repo.id) {
+            if let Ok(repo_path) = ensure_repo_checkout(&state.config.repos_dir, &repo) {
+                if let Ok(remote_sha) = indexer::remote_default_sha(&repo_path, repo.default_branch.as_deref()) {
+                    if status.base_sha.as_deref() != Some(remote_sha.as_str()) {
+                        let _ = with_db_raw(state, |db| db.mark_repo_index_stale(repo.id, &remote_sha));
+                        let _ = start_index(state, repo.id);
                     }
                 }
             }
         }
-    });
+    }
 }
 
 pub(crate) fn ensure_repo_checkout(repos_dir: &Path, repo: &Repo) -> Result<PathBuf, String> {

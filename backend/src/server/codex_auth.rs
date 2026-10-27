@@ -91,8 +91,8 @@ fn forward_callback(listener: TcpListener, stop: Arc<AtomicBool>) {
 }
 
 /// Saves a signed-in `auth.json` to `account` (a re-sign-in) or to a new Codex account.
-fn store_auth(db_path: &Path, account: Option<i64>, raw: &str) -> Result<(), String> {
-    let db = Database::open_at(db_path.to_path_buf())?;
+fn store_auth(db_handle: &Db, account: Option<i64>, raw: &str) -> Result<(), String> {
+    let db = db_handle.open()?;
     let id = match account {
         Some(id) => {
             if db.ai_account(id)?.provider != "codex" {
@@ -146,7 +146,7 @@ pub(crate) fn start_codex_auth(request: &Request, state: &SharedState) -> Result
     if let Some(id) = account {
         with_db_read_raw(state, |db| db.ai_account(id))?;
     }
-    let db_path = state.config.db_path.clone();
+    let db_handle = state.config.db.clone();
     let mut current = flow();
     if current.cancel.is_some() {
         return Ok(serde_json::json!({ "running": true, "flowSecret": current.secret }));
@@ -250,7 +250,7 @@ pub(crate) fn start_codex_auth(request: &Request, state: &SharedState) -> Result
                     let saved = fs::read_to_string(home.join("auth.json"))
                         .ok()
                         .filter(|_| status.success());
-                    let event = match saved.map(|raw| store_auth(&db_path, account, &raw)) {
+                    let event = match saved.map(|raw| store_auth(&db_handle, account, &raw)) {
                         Some(Ok(())) => {
                             serde_json::json!({ "kind": "done", "success": true, "message": "Signed in to Codex." })
                         }

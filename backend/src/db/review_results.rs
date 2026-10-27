@@ -15,7 +15,7 @@ pub(crate) fn result_marker_key(full_name: &str, number: i64, installation_id: &
 /// recheck can never drift. References the result row as `result`.
 const FAILED_CLEAN_RESULT_ELIGIBLE: &str = "result.publication_status = 'failed'
                AND result.effective_state = 'clean'
-               AND result.updated_at <= ?2
+               AND result.updated_at <= $2
                AND EXISTS (SELECT 1 FROM pull_requests pr
                            JOIN review_runs run ON run.id = result.run_id AND run.pr_id = result.pr_id
                            WHERE pr.id = result.pr_id AND LOWER(pr.state) = 'open'
@@ -31,7 +31,7 @@ impl Database {
     pub fn set_ocr_review(&self, pr_id: i64, review_id: i64, event: &str) -> Result<(), String> {
         self.conn
             .execute(
-                "UPDATE pull_requests SET ocr_review_id = ?1, ocr_review_event = ?2, updated_at = ?3 WHERE id = ?4",
+                "UPDATE pull_requests SET ocr_review_id = $1, ocr_review_event = $2, updated_at = $3 WHERE id = $4",
                 params![review_id, event, now_millis(), pr_id],
             )
             .map_err(|error| error.to_string())?;
@@ -52,12 +52,12 @@ impl Database {
                     prior_result_head_sha, observation, effective_state, publication_status,
                     body, body_hash, github_review_id, github_review_url, reviewer_version,
                     skill_version, error_message, created_at, updated_at, posted_at
-             FROM review_results WHERE pr_id = ?1 AND installation_id = ?2",
+             FROM review_results WHERE pr_id = $1 AND installation_id = $2",
             params![pr_id, installation_id],
             review_result_from_row,
         ) {
             Ok(result) => Ok(Some(result)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(pg::Error::QueryReturnedNoRows) => Ok(None),
             Err(error) => Err(error.to_string()),
         }
     }
@@ -70,7 +70,7 @@ impl Database {
         match self.conn.query_row(
             "SELECT id, status, decision, head_sha, reviewed_head_sha, comments_json, review_body
              FROM review_runs
-             WHERE pr_id = ?1 AND id != ?2 AND review_body IS NOT NULL
+             WHERE pr_id = $1 AND id != $2 AND review_body IS NOT NULL
              ORDER BY id DESC LIMIT 1",
             params![pr_id, excluded_run_id],
             |row| {
@@ -86,7 +86,7 @@ impl Database {
             },
         ) {
             Ok(outcome) => Ok(Some(outcome)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(pg::Error::QueryReturnedNoRows) => Ok(None),
             Err(error) => Err(error.to_string()),
         }
     }
@@ -107,8 +107,8 @@ impl Database {
                github_review_id, github_review_url, reviewer_version, skill_version,
                created_at, updated_at
              ) VALUES (
-               ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
-               ?15, ?16, ?17, ?18, ?19, ?19
+               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+               $15, $16, $17, $18, $19, $19
              )
              ON CONFLICT(pr_id, installation_id) DO UPDATE SET
                run_id = excluded.run_id,
@@ -170,11 +170,17 @@ impl Database {
             .conn
             .execute(
                 "UPDATE review_results SET publication_status = 'posting', error_message = NULL,
-                    updated_at = ?1
-             WHERE id = ?2 AND observed_head_sha = ?3
-               AND body_hash IS ?4
+                    updated_at = $1, owner_instance = $5
+             WHERE id = $2 AND observed_head_sha = $3
+               AND body_hash IS NOT DISTINCT FROM $4
                AND publication_status IN ('pending', 'failed')",
-                params![now_millis(), result_id, observed_head_sha, body_hash],
+                params![
+                    now_millis(),
+                    result_id,
+                    observed_head_sha,
+                    body_hash,
+                    self.db.instance_id()
+                ],
             )
             .map_err(|error| error.to_string())?;
         Ok(changed == 1)
@@ -184,9 +190,9 @@ impl Database {
         let now = now_millis();
         self.conn
             .execute(
-                "UPDATE review_results SET github_comment_id = ?1, publication_status = 'posted',
-                    error_message = NULL, posted_at = ?2, updated_at = ?2
-             WHERE id = ?3 AND publication_status = 'posting'",
+                "UPDATE review_results SET github_comment_id = $1, publication_status = 'posted',
+                    error_message = NULL, posted_at = $2, updated_at = $2
+             WHERE id = $3 AND publication_status = 'posting'",
                 params![github_comment_id, now, result_id],
             )
             .map_err(|error| error.to_string())?;
@@ -197,7 +203,7 @@ impl Database {
         let pr_id: i64 = self
             .conn
             .query_row(
-                "SELECT pr_id FROM review_results WHERE id = ?1",
+                "SELECT pr_id FROM review_results WHERE id = $1",
                 params![result_id],
                 |row| row.get(0),
             )
@@ -208,7 +214,7 @@ impl Database {
                 "SELECT EXISTS(
                    SELECT 1 FROM review_results result
                    JOIN review_runs run ON run.id = result.run_id
-                   WHERE result.id = ?1 AND run.decided_at IS NULL
+                   WHERE result.id = $1 AND run.decided_at IS NULL
                  )",
                 params![result_id],
                 |row| row.get::<_, i64>(0),
@@ -217,16 +223,16 @@ impl Database {
             != 0;
         self.conn
             .execute(
-                "UPDATE review_results SET publication_status = 'failed', error_message = ?1,
-                    updated_at = ?2 WHERE id = ?3",
+                "UPDATE review_results SET publication_status = 'failed', error_message = $1,
+                    updated_at = $2 WHERE id = $3",
                 params![error, now_millis(), result_id],
             )
             .map_err(|db_error| db_error.to_string())?;
         self.conn
             .execute(
-                "UPDATE review_runs SET status = 'result_failed', error_message = ?1, updated_at = ?2
-             WHERE id = (SELECT run_id FROM review_results WHERE id = ?3)
-               AND (SELECT effective_state FROM review_results WHERE id = ?3) = 'clean'
+                "UPDATE review_runs SET status = 'result_failed', error_message = $1, updated_at = $2
+             WHERE id = (SELECT run_id FROM review_results WHERE id = $3)
+               AND (SELECT effective_state FROM review_results WHERE id = $3) = 'clean'
                AND decided_at IS NULL",
                 params![error, now_millis(), result_id],
             )
@@ -238,7 +244,7 @@ impl Database {
     pub fn review_run_is_decided(&self, run_id: i64) -> Result<bool, String> {
         self.conn
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM review_runs WHERE id = ?1 AND decided_at IS NOT NULL)",
+                "SELECT EXISTS(SELECT 1 FROM review_runs WHERE id = $1 AND decided_at IS NOT NULL)",
                 params![run_id],
                 |row| row.get::<_, i64>(0),
             )
@@ -249,8 +255,8 @@ impl Database {
     pub fn supersede_review_result(&self, result_id: i64, reason: &str) -> Result<(), String> {
         self.conn
             .execute(
-                "UPDATE review_results SET publication_status = 'superseded', error_message = ?1,
-                    updated_at = ?2 WHERE id = ?3",
+                "UPDATE review_results SET publication_status = 'superseded', error_message = $1,
+                    updated_at = $2 WHERE id = $3",
                 params![reason, now_millis(), result_id],
             )
             .map_err(|error| error.to_string())?;
@@ -271,29 +277,39 @@ impl Database {
         self.conn
             .execute(
                 "UPDATE review_results SET publication_status = 'disabled', error_message = NULL,
-                    updated_at = ?1 WHERE id = ?2 AND publication_status != 'posted'",
+                    updated_at = $1 WHERE id = $2 AND publication_status != 'posted'",
                 params![now_millis(), result_id],
             )
             .map_err(|error| error.to_string())?;
         Ok(())
     }
 
-    pub fn posting_review_results(&self) -> Result<Vec<ReviewResult>, String> {
+    /// Takes over the publications left `posting` by an instance that has stopped (or predates
+    /// instance tracking), so the caller posts them again and no other instance does meanwhile.
+    pub fn claim_abandoned_review_results(&self) -> Result<Vec<ReviewResult>, String> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, pr_id, installation_id, marker_key, github_comment_id, run_id, actionable_run_id,
+                "UPDATE review_results SET owner_instance = $2
+             WHERE publication_status = 'posting'
+               AND (owner_instance IS NULL
+                    OR owner_instance NOT IN (SELECT id FROM server_instances WHERE heartbeat_at > $1))
+             RETURNING id, pr_id, installation_id, marker_key, github_comment_id, run_id, actionable_run_id,
                     observed_head_sha, reviewed_head_sha, prior_result_state,
                     prior_result_head_sha, observation, effective_state, publication_status,
                     body, body_hash, github_review_id, github_review_url, reviewer_version,
-                    skill_version, error_message, created_at, updated_at, posted_at
-             FROM review_results WHERE publication_status = 'posting' ORDER BY updated_at",
+                    skill_version, error_message, created_at, updated_at, posted_at",
             )
             .map_err(|error| error.to_string())?;
         let rows = stmt
-            .query_map([], review_result_from_row)
+            .query_map(
+                params![self.instance_live_after()?, self.db.instance_id()],
+                review_result_from_row,
+            )
             .map_err(|error| error.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+        let mut results = rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+        results.sort_by_key(|result| result.updated_at);
+        Ok(results)
     }
 
     /// Clean-result publications that failed at least `failed_before` millis
@@ -313,7 +329,7 @@ impl Database {
                     result.skill_version, result.error_message, result.created_at,
                     result.updated_at, result.posted_at
              FROM review_results result
-             WHERE result.installation_id = ?1
+             WHERE result.installation_id = $1
                AND {FAILED_CLEAN_RESULT_ELIGIBLE}
              ORDER BY result.updated_at",
             ))
@@ -333,8 +349,8 @@ impl Database {
             .conn
             .execute(
                 "UPDATE review_results SET publication_status = 'pending', error_message = NULL,
-                    updated_at = ?1
-             WHERE pr_id = ?2 AND installation_id = ?3 AND publication_status = 'failed'",
+                    updated_at = $1
+             WHERE pr_id = $2 AND installation_id = $3 AND publication_status = 'failed'",
                 params![now_millis(), pr_id, installation_id],
             )
             .map_err(|error| error.to_string())?;
@@ -364,12 +380,12 @@ impl Database {
             .execute(
                 &format!(
                     "UPDATE review_results AS result SET publication_status = 'pending',
-                        error_message = NULL, updated_at = ?3
-                     WHERE result.installation_id = ?1
+                        error_message = NULL, updated_at = $3
+                     WHERE result.installation_id = $1
                        AND {FAILED_CLEAN_RESULT_ELIGIBLE}
                        AND EXISTS (SELECT 1 FROM settings WHERE key = 'review_result_mode' AND value = 'result_comment')
-                       AND result.id = ?4
-                       AND result.run_id IS ?5",
+                       AND result.id = $4
+                       AND result.run_id IS NOT DISTINCT FROM $5",
                 ),
                 params![installation_id, failed_before, now_millis(), result.id, result.run_id],
             )
@@ -391,11 +407,14 @@ impl Database {
              JOIN pull_requests pr ON pr.id = rr.pr_id
              JOIN repos r ON r.id = pr.repo_id
              WHERE rr.status = 'posting'
+               AND (rr.owner_instance IS NULL
+                    OR rr.owner_instance NOT IN (SELECT id FROM server_instances WHERE heartbeat_at > $1))
              ORDER BY rr.updated_at",
             )
             .map_err(|error| error.to_string())?;
+        let live_after = self.instance_live_after()?;
         let rows = stmt
-            .query_map([], |row| {
+            .query_map([live_after], |row| {
                 let outcome: String = row.get(7)?;
                 Ok(InterruptedReviewPost {
                     run_id: row.get(0)?,

@@ -38,9 +38,12 @@ LABEL ai.claude.cli.version="${CLAUDE_CLI_VERSION}"
 ARG CODEX_CLI_VERSION=0.163.0
 ARG CODEX_CLI_SHA256_AMD64=beb339e8ecd9ba057a6bb2dc81ad8ca474812edfbf0fc5056ca818797648dde4
 ARG CODEX_CLI_SHA256_ARM64=a7261e65f4a96d8f4ca65a069c6cf2dc2c33defc341e48078acefda9461fffe4
+# Codex runs its shell tool through this host for current models; without it every command fails.
+ARG CODEX_CODE_MODE_HOST_SHA256_AMD64=314263128ba6592e7e807c265deeaf928a692b72dcbfeb5e0b20c9423b703529
+ARG CODEX_CODE_MODE_HOST_SHA256_ARM64=284356aefb197f00b76b912efdfdbae8ccf3ea1f89b976dde064b7ccb43214ef
 RUN case "$TARGETARCH" in \
-      amd64) target=x86_64-unknown-linux-musl; checksum="$CODEX_CLI_SHA256_AMD64" ;; \
-      arm64) target=aarch64-unknown-linux-musl; checksum="$CODEX_CLI_SHA256_ARM64" ;; \
+      amd64) target=x86_64-unknown-linux-musl; checksum="$CODEX_CLI_SHA256_AMD64"; host_checksum="$CODEX_CODE_MODE_HOST_SHA256_AMD64" ;; \
+      arm64) target=aarch64-unknown-linux-musl; checksum="$CODEX_CLI_SHA256_ARM64"; host_checksum="$CODEX_CODE_MODE_HOST_SHA256_ARM64" ;; \
       *) echo "Unsupported Codex CLI architecture: $TARGETARCH" >&2; exit 1 ;; \
     esac \
   && mkdir -p /opt/codex/bin \
@@ -49,7 +52,12 @@ RUN case "$TARGETARCH" in \
   && tar -xzf /tmp/codex.tar.gz -C /opt/codex/bin \
   && mv "/opt/codex/bin/codex-${target}" /opt/codex/bin/codex \
   && rm /tmp/codex.tar.gz \
-  && chmod 0755 /opt/codex/bin/codex \
+  && curl -fsSL --retry 3 "https://github.com/openai/codex/releases/download/rust-v${CODEX_CLI_VERSION}/codex-code-mode-host-${target}.tar.gz" -o /tmp/codex-code-mode-host.tar.gz \
+  && printf '%s  /tmp/codex-code-mode-host.tar.gz\n' "$host_checksum" | sha256sum -c - \
+  && tar -xzf /tmp/codex-code-mode-host.tar.gz -C /opt/codex/bin \
+  && mv "/opt/codex/bin/codex-code-mode-host-${target}" /opt/codex/bin/codex-code-mode-host \
+  && rm /tmp/codex-code-mode-host.tar.gz \
+  && chmod 0755 /opt/codex/bin/codex /opt/codex/bin/codex-code-mode-host \
   && ln -s /opt/codex/bin/codex /usr/local/bin/codex \
   && test "$(/opt/codex/bin/codex --version | cut -d ' ' -f2)" = "$CODEX_CLI_VERSION"
 LABEL ai.codex.cli.version="${CODEX_CLI_VERSION}"
@@ -106,7 +114,6 @@ COPY --from=server /app/assets ./assets
 COPY --from=server /usr/local/bin/ocr-server /usr/local/bin/ocr-server
 ENV OCR_BIND=0.0.0.0:8787 \
   OCR_DATA_DIR=/data \
-  OCR_DB_PATH=/data/opencodereview.sqlite \
   OCR_REPOS_DIR=/data/repos
 VOLUME ["/data"]
 EXPOSE 8787

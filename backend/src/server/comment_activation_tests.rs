@@ -18,7 +18,7 @@ impl Fixture {
                 .unwrap()
                 .as_nanos()
         ));
-        let db = Database::open_at(root.join("test.sqlite")).unwrap();
+        let db = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
         db.ensure_temp_repo_for_index(1, "acme/repo").unwrap();
         db.save_repo_subscription(1, true, "manual", true, false).unwrap();
         let repo = db.repo_by_id(1).unwrap();
@@ -57,10 +57,11 @@ impl Fixture {
         )
     }
     fn activation_marker_body(&self) -> (String, String) {
-        rusqlite::Connection::open(self.root.join("test.sqlite"))
+        crate::db::Db::for_test_at(self.root.join("test.sqlite"))
+            .open()
             .unwrap()
             .query_row(
-                "SELECT marker, body FROM pr_comment_activations WHERE pr_id = ?1",
+                "SELECT marker, body FROM pr_comment_activations WHERE pr_id = $1",
                 [self.pr_id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -119,7 +120,7 @@ fn activation_requires_author_and_persists_queue_and_marker() {
     assert!(marker.contains("ocr-activation:v1"));
     assert!(body.contains("### ⏳ OpenCodeReview is reviewing this pull request"));
     assert!(body.contains("[`abc12345`](https://github.com/acme/repo/commit/abc1234567)"));
-    let reopened = Database::open_at(f.root.join("test.sqlite")).unwrap();
+    let reopened = crate::db::Db::for_test_at(f.root.join("test.sqlite")).open().unwrap();
     assert!(reopened.pr_comment_activated(1, 7).unwrap());
     assert_eq!(reopened.queued_pr_ids().unwrap(), vec![f.pr_id]);
     drop(reopened);
@@ -296,10 +297,10 @@ fn activation_survives_draft_rebase_without_forcing_future_manual_reviews() {
     assert_eq!(f.db.pr_review_start_state(f.pr_id).unwrap().1, "manual_required");
     assert!(f.db.queued_pr_ids().unwrap().is_empty());
     assert_eq!(f.activation_marker_body().1, before.1);
-    let conn = rusqlite::Connection::open(f.root.join("test.sqlite")).unwrap();
+    let conn = crate::db::Db::for_test_at(f.root.join("test.sqlite")).open().unwrap();
     let values: (bool, bool, bool) = conn
         .query_row(
-            "SELECT is_draft, force_full_next_review, reprocess_next_review FROM pull_requests WHERE id = ?1",
+            "SELECT is_draft, force_full_next_review, reprocess_next_review FROM pull_requests WHERE id = $1",
             [f.pr_id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
@@ -323,7 +324,7 @@ fn activation_reenable_resets_baseline_and_ui_queue_keeps_existing_semantics() {
     assert!(!f.db.comment_activation_seen(1, 1).unwrap());
     f.db.save_repo_subscription(1, true, "manual", true, false).unwrap();
     assert!(f.db.comment_scan_cursor(1).unwrap().0 >= before.0);
-    let conn = rusqlite::Connection::open(f.root.join("test.sqlite")).unwrap();
+    let conn = crate::db::Db::for_test_at(f.root.join("test.sqlite")).open().unwrap();
     assert!(conn
         .query_row(
             "SELECT enabled_at = checkpoint FROM comment_scan_cursors WHERE repo_id = 1",
@@ -388,7 +389,8 @@ fn activation_poll_reset_keeps_normal_manual_and_automatic_scope_semantics() {
 fn fixture_state(f: &Fixture) -> SharedState {
     Arc::new(ServerState::new(ServerConfig {
         bind: "127.0.0.1:0".into(),
-        db_path: f.root.join("test.sqlite"),
+        db: crate::db::Db::for_test_at(f.root.join("test.sqlite")),
+        data_dir: f.root.to_path_buf(),
         repos_dir: f.root.join("repos"),
         auto_reindex: false,
         poll_interval_seconds: 60,
@@ -572,7 +574,8 @@ fn activation_acknowledgement_is_due_only_while_the_pr_is_open() {
         f.db.due_queue_acknowledgements(crate::db::now_millis()).unwrap().len(),
         1
     );
-    rusqlite::Connection::open(f.root.join("test.sqlite"))
+    crate::db::Db::for_test_at(f.root.join("test.sqlite"))
+        .open()
         .unwrap()
         .execute("UPDATE pull_requests SET state = 'closed'", [])
         .unwrap();

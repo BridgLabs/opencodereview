@@ -62,7 +62,14 @@ docker compose build && python3 -u docker/runner-smoke.py
 
 CI also checks the links and heading anchors between Markdown files with lychee.
 
-Run a subset of Rust tests with a filter, for example `cargo test -p opencodereview-server review_scope --lib --locked`. If SQLite-backed tests fail with `database is locked`, rerun with `-- --test-threads=1`.
+Rust tests need a Postgres where their role may create databases; each test gets its own, cloned from a migrated template:
+
+```bash
+docker run -d --name ocr-pg-dev -e POSTGRES_USER=ocr -e POSTGRES_PASSWORD=dev -p 127.0.0.1:55432:5432 postgres:17
+export OCR_TEST_DATABASE_URL=postgres://ocr:dev@127.0.0.1:55432/postgres
+```
+
+Run a subset of Rust tests with a filter, for example `cargo test -p opencodereview-server review_scope --lib --locked`.
 
 After building the images, the runner smoke test checks archive IPC and sandboxing with fake inference. It uses no credentials and makes no AI calls:
 
@@ -88,7 +95,7 @@ src/                     React frontend (React 19, TypeScript, Vite, Tailwind)
 backend/                 Rust crate opencodereview-server
   src/main_server.rs     ocr-server binary
   src/main_sandbox.rs    ocr-sandbox binary (runner, egress, tool guard)
-  src/db/                SQLite schema, migrations and queries
+  src/db/                Postgres access, migrations (pg/) and queries
   src/assets/            Built-in review skills
 assets/                  Mascot, favicon and static onboarding page
 docker/                  Dockerfiles, nginx config, smoke and diagnostic scripts
@@ -125,3 +132,15 @@ GHCR creates packages private, even for a public repository. After the first rel
 ## Landing page
 
 `site/` is a static page with no build step, served at <https://opencodereview.run> as Cloudflare Workers static assets (`site/wrangler.jsonc`). The [Site workflow](../.github/workflows/site.yml) deploys it whenever a push to `main` changes `site/`, and can also be run by hand. It needs the `CLOUDFLARE_API_TOKEN` (from the "Edit Cloudflare Workers" token template) and `CLOUDFLARE_ACCOUNT_ID` repository secrets. To deploy from your machine: `npx wrangler deploy --config site/wrangler.jsonc`.
+
+### Search, AI assistants and link previews
+
+The page is written to be found by search engines and cited by AI assistants:
+
+- `site/index.html` carries the Open Graph and Twitter tags and one JSON-LD block (Organization, WebSite, SoftwareApplication and FAQPage). `pnpm site:build` writes the JSON-LD; its FAQPage is copied from the page's FAQ section, so edit the FAQ and rerun it. CI fails when the block is out of date (`scripts/site/seo.test.ts`).
+- `site/robots.txt` allows every crawler, names the AI ones, and sets Cloudflare's `Content-Signal` to allow search, AI answers and training. `site/sitemap.xml` lists the page and its images.
+- `site/llms.txt` is a hand-written summary for language models ([llmstxt.org](https://llmstxt.org)). `site/llms-full.txt` joins the README and `docs/` into one file; it is not committed, because the Site workflow builds it (and the sitemap's `lastmod`) before each deploy and also runs when the README or `docs/` change.
+- `site/_headers` sets content types and caching for those files.
+- The share image `site/og.png` (1200×630) and the PNG icons are rendered from `scripts/og/` with Playwright: `pnpm exec playwright install chromium-headless-shell` once, then `pnpm site:images`. When the image changes, bump `?v=` in its two meta tags so previews refetch it.
+
+The Cloudflare zone for `opencodereview.run` must not undo this. Keep **AI Crawl Control → Block AI bots** off, and **Manage robots.txt** off, since it would prepend its own rules to ours. Keep **Bot Fight Mode** off; it challenges crawlers that are not on Cloudflare's verified list. Keep **Crawler Hints** on, which tells Bing and other IndexNow search engines when the page changes. To check from outside: `curl -A GPTBot -I https://opencodereview.run/` should answer 200, and `https://opencodereview.run/robots.txt` should match `site/robots.txt`.

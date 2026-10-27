@@ -9,12 +9,14 @@ pub(crate) fn parse_transcript_usage(transcript_path: &Path) -> RunUsage {
                 usages.push(parse_transcript_usage_single(&retry));
             }
         }
-        // Attempts abandoned when an account hit its limit still consumed tokens.
-        for attempt in 1..=MAX_ACCOUNT_FAILOVERS {
+        // Attempts abandoned when an account hit its limit still consumed tokens. They are
+        // numbered without gaps, across the stage's executions.
+        for attempt in 1.. {
             let failover = parent.join(format!("transcript.failover-{attempt}.json"));
-            if failover.exists() {
-                usages.push(parse_transcript_usage_single(&failover));
+            if !failover.exists() {
+                break;
             }
+            usages.push(parse_transcript_usage_single(&failover));
         }
     }
     sum_usage(usages)

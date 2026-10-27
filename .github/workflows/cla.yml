@@ -18,15 +18,15 @@ jobs:
   cla:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft && (github.event_name == 'pull_request_target' || github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the OpenCodeReview Contributor Assignment Agreement 1.0 and I agree to it.')
+    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft && (github.event_name == 'pull_request_target' || github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the OpenCodeReview Contributor Assignment Agreement 1.2 and I agree to it.')
     steps:
       - uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path-to-document: https://github.com/BridgLabs/opencodereview/blob/main/CLA.md
-          path-to-signatures: signatures/cla-assignment-1.0.json
+          path-to-signatures: signatures/cla-assignment-1.2.json
           branch: cla-signatures
           allowlist: bpinheiroms,dependabot[bot]
-          custom-pr-sign-comment: I have read the OpenCodeReview Contributor Assignment Agreement 1.0 and I agree to it.
+          custom-pr-sign-comment: I have read the OpenCodeReview Contributor Assignment Agreement 1.2 and I agree to it.
           custom-notsigned-prcomment: Thank you for your contribution. Before it can be merged, each author signs the [OpenCodeReview Contributor Assignment Agreement](https://github.com/BridgLabs/opencodereview/blob/main/CLA.md), which assigns the copyright in the contribution to the maintainer. To sign, add a comment with the line below.

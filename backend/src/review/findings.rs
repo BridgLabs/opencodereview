@@ -67,6 +67,53 @@ pub fn actionable(comments_json: Option<&str>, body: Option<&str>) -> bool {
     }) || body.is_some_and(|body| matches!(point_kind(body), "finding" | "mixed"))
 }
 
+/// (findings, questions) among a run's inline comments. A comment that is both counts as both;
+/// one without a marker counts as a finding. Older runs stored the comments as a bare array.
+pub fn point_counts(comments_json: Option<&str>) -> (i64, i64) {
+    let value = comments_json.and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+    let items = value
+        .as_ref()
+        .and_then(|value| value.get("comments").or(Some(value)))
+        .and_then(Value::as_array);
+    items
+        .into_iter()
+        .flatten()
+        .fold((0, 0), |(findings, questions), comment| {
+            match point_kind(comment["body"].as_str().unwrap_or_default()) {
+                "question" => (findings, questions + 1),
+                "mixed" => (findings + 1, questions + 1),
+                _ => (findings + 1, questions),
+            }
+        })
+}
+
+/// (findings, questions) among the candidates a complete finding audit kept, leaving out ones
+/// inherited from an earlier run. `None` when the audit is unreadable or incomplete: a seeded audit
+/// holds undecided (`pending`) chunk candidates, and `unmapped` ones were neither kept nor discarded.
+pub fn candidate_counts(audit_json: &str) -> Option<(i64, i64)> {
+    let audit = serde_json::from_str::<Value>(audit_json).ok()?;
+    if audit["complete"] != true {
+        return None;
+    }
+    let candidates = audit.get("candidates")?.as_array()?;
+    Some(
+        candidates
+            .iter()
+            .filter(|candidate| candidate["origin"] != "inherited" && candidate["aiDecision"] == "kept")
+            .fold((0, 0), |(findings, questions), candidate| {
+                let kind = match candidate["kind"].as_str() {
+                    Some(kind) if !kind.is_empty() => kind,
+                    _ => point_kind(candidate["body"].as_str().unwrap_or_default()),
+                };
+                match kind {
+                    "question" => (findings, questions + 1),
+                    "mixed" => (findings + 1, questions + 1),
+                    _ => (findings + 1, questions),
+                }
+            }),
+    )
+}
+
 pub(crate) fn auto_post_event(mode: &str, comments_json: Option<&str>, body: Option<&str>) -> Option<&'static str> {
     match mode {
         "request_changes" if actionable(comments_json, body) => Some("REQUEST_CHANGES"),

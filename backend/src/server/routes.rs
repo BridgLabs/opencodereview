@@ -50,6 +50,8 @@ pub(crate) fn route(request: Request, state: SharedState) -> Response {
         ("GET", "/workspaces") => with_db_read(&state, |db| db.list_workspaces()),
         ("GET", "/indexing/jobs") => list_index_jobs(&state),
         ("GET", "/reviews/board") => list_review_board(&state),
+        ("GET", "/usage") => usage_report_http(&request, &state),
+        ("GET", "/usage/prs") => usage_prs_http(&request, &state),
         ("GET", "/pending") => with_db(&state, |db| {
             db.sync_review_attention_pendings()?;
             db.list_pending_actions()
@@ -142,6 +144,7 @@ pub(crate) fn route_dynamic(request: &Request, state: &SharedState) -> Result<se
         ("GET", ["reviews", pr_id, "context"]) => with_db_read(state, |db| db.latest_context_plan(parse_id(pr_id)?)),
         ("GET", ["reviews", pr_id, "threads"]) => with_db_read(state, |db| db.get_review_threads(parse_id(pr_id)?)),
         ("GET", ["reviews", pr_id, "usage"]) => with_db_read(state, |db| db.pr_usage(parse_id(pr_id)?)),
+        ("GET", ["usage", "prs", pr_id, "runs"]) => usage_pr_runs_http(request, state, parse_id(pr_id)?),
         _ => Err(format!("route not found: {} {}", request.method, request.path)),
     }
 }
@@ -150,7 +153,6 @@ pub(crate) fn health(state: &SharedState) -> Result<serde_json::Value, String> {
     let response = HealthResponse {
         ok: true,
         message: "OpenCodeReview server ready".to_string(),
-        db_path: state.config.db_path.to_string_lossy().to_string(),
         repos_dir: state.config.repos_dir.to_string_lossy().to_string(),
         github: github_status(),
         git: command_status("git", &["--version"]),
@@ -310,6 +312,16 @@ pub(crate) fn save_settings_batch_http(request: &Request, state: &SharedState) -
 }
 
 pub(crate) fn get_archive_storage_status(state: &SharedState) -> Result<serde_json::Value, String> {
+    // The last pass's status, which may have run on another instance.
+    let stored = with_db_read_raw(state, |db| {
+        db.setting(crate::review_archive::retention::STORAGE_STATUS_SETTING)
+    })
+    .ok()
+    .flatten()
+    .and_then(|raw| serde_json::from_str::<crate::review_archive::retention::ArchiveStorageStatus>(&raw).ok());
+    if let Some(status) = stored {
+        return serde_json::to_value(status).map_err(|e| e.to_string());
+    }
     let status = state
         .archive_storage_status
         .lock()

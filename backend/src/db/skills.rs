@@ -13,34 +13,28 @@ impl Database {
 
     /// The skill text reviews should use: the active version's content,
     /// or the built-in embedded skill when the baseline (v0) is active or missing.
+    /// A negative id, left by the removed generic built-in, also means the baseline.
     pub fn active_skill_content(&self) -> String {
         let id = self.active_skill_version_id();
-        if id == GENERIC_SKILL_ID {
-            return crate::review::REVIEW_SKILL_GENERIC.to_string();
-        }
         if id <= 0 {
             return crate::review::REVIEW_SKILL.to_string();
         }
         self.conn
             .query_row(
-                "SELECT content FROM skill_versions WHERE id = ?1 AND deleted_at IS NULL",
+                "SELECT content FROM skill_versions WHERE id = $1 AND deleted_at IS NULL",
                 params![id],
                 |row| row.get::<_, String>(0),
             )
             .unwrap_or_else(|_| crate::review::REVIEW_SKILL.to_string())
     }
 
-    /// Content of a specific version; the generic built-in id → the generic
-    /// skill; id 0 (or unknown) → the default built-in skill.
+    /// Content of a specific version; id 0 (or unknown) → the built-in skill.
     pub fn skill_version_content(&self, id: i64) -> String {
-        if id == GENERIC_SKILL_ID {
-            return crate::review::REVIEW_SKILL_GENERIC.to_string();
-        }
         if id <= 0 {
             return crate::review::REVIEW_SKILL.to_string();
         }
         self.conn
-            .query_row("SELECT content FROM skill_versions WHERE id = ?1", params![id], |row| {
+            .query_row("SELECT content FROM skill_versions WHERE id = $1", params![id], |row| {
                 row.get::<_, String>(0)
             })
             .unwrap_or_else(|_| crate::review::REVIEW_SKILL.to_string())
@@ -72,22 +66,13 @@ impl Database {
         for v in rows {
             out.push(v.map_err(|error| error.to_string())?);
         }
-        // Always include the two built-ins: the default (v0) and the generic
-        // alternative. The default is active for any non-generic baseline value.
+        // Always include the built-in (v0), active for any baseline value.
         out.push(SkillVersion {
             id: 0,
             version: 0,
             note: Some("Built-in review skill (default)".to_string()),
             char_count: crate::review::REVIEW_SKILL.chars().count() as i64,
-            active: active <= 0 && active != GENERIC_SKILL_ID,
-            created_at: 0,
-        });
-        out.push(SkillVersion {
-            id: GENERIC_SKILL_ID,
-            version: 0,
-            note: Some("Built-in generic review skill (for other codebases)".to_string()),
-            char_count: crate::review::REVIEW_SKILL_GENERIC.chars().count() as i64,
-            active: active == GENERIC_SKILL_ID,
+            active: active <= 0,
             created_at: 0,
         });
         Ok(out)
@@ -108,14 +93,15 @@ impl Database {
             let id = self.active_skill_version_id();
             (id > 0).then_some(id)
         };
-        self.conn
-            .execute(
+        let id: i64 = self
+            .conn
+            .query_row(
                 "INSERT INTO skill_versions (version, content, note, parent_id, created_at)
-       VALUES (?1, ?2, ?3, ?4, ?5)",
+       VALUES ($1, $2, $3, $4, $5) RETURNING id",
                 params![next_version, content, note, parent_id, now],
+                |row| row.get(0),
             )
             .map_err(|error| error.to_string())?;
-        let id = self.conn.last_insert_rowid();
         self.save_setting_value("active_skill_version", &id.to_string())?;
         Ok(SkillVersion {
             id,
@@ -135,7 +121,7 @@ impl Database {
         let deleted = self
             .conn
             .execute(
-                "UPDATE skill_versions SET deleted_at = ?2 WHERE id = ?1 AND deleted_at IS NULL",
+                "UPDATE skill_versions SET deleted_at = $2 WHERE id = $1 AND deleted_at IS NULL",
                 params![id, now_millis()],
             )
             .map_err(|error| error.to_string())?;
@@ -162,7 +148,7 @@ impl Database {
             let exists: bool = self
                 .conn
                 .query_row(
-                    "SELECT 1 FROM skill_versions WHERE id = ?1 AND deleted_at IS NULL",
+                    "SELECT 1 FROM skill_versions WHERE id = $1 AND deleted_at IS NULL",
                     params![id],
                     |_| Ok(true),
                 )
@@ -171,13 +157,7 @@ impl Database {
                 return Err("skill version not found".to_string());
             }
         }
-        // Preserve the generic built-in sentinel; clamp any other negative to the
-        // default baseline (0).
-        let normalized = if id == GENERIC_SKILL_ID {
-            GENERIC_SKILL_ID
-        } else {
-            id.max(0)
-        };
-        self.save_setting_value("active_skill_version", &normalized.to_string())
+        // Any negative id is the baseline (0).
+        self.save_setting_value("active_skill_version", &id.max(0).to_string())
     }
 }

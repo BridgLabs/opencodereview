@@ -93,7 +93,10 @@ it("shows the next review's engine and changes model, effort and provider", asyn
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(container.textContent).toContain("Opus 5.5");
-    expect(container.textContent).toContain("Medium");
+    // Effort and account live in the trigger's label, not its text.
+    expect(container.querySelector("button[aria-haspopup]")?.getAttribute("aria-label")).toBe(
+      "Opus 5.5 · Medium · Claude",
+    );
     await act(async () => container.querySelector<HTMLButtonElement>("button[aria-haspopup]")!.click());
     // The rail holds the signed-in accounts; the models are the next account's provider's.
     expect(container.querySelector('[aria-label="ChatGPT · me@x.com"]')).not.toBeNull();

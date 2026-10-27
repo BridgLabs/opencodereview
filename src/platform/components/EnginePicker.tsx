@@ -65,6 +65,10 @@ export function EnginePicker() {
     const efforts = engine.models.find((item) => item.id === id)?.efforts ?? [];
     save.mutate({ provider: engine.provider, model: id, effort: efforts.includes(engine.effort) ? engine.effort : "" });
   };
+  // The trigger shows the model; effort and account are in its label and in the menu.
+  const summary = [model?.label ?? engine.model, engine.effort && labelEffort(engine.effort), next.label]
+    .filter(Boolean)
+    .join(" · ");
   // Accounts of a provider with several are numbered in the rail, as they are tried.
   const number = (account: AiAccount) => {
     const same = usable.filter((other) => other.provider === account.provider);
@@ -77,15 +81,16 @@ export function EnginePicker() {
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="The account, model and effort new reviews run on"
-        className="flex h-8 max-w-[min(26rem,60vw)] cursor-pointer items-center gap-2 rounded-lg bg-surface-muted px-3 text-small text-fg-muted transition-colors hover:text-fg"
+        aria-label={summary}
+        title={`New reviews run on ${summary}`}
+        className="flex h-8 max-w-[min(20rem,50vw)] cursor-pointer items-center gap-2 rounded-lg px-2 text-small text-fg transition-colors hover:bg-surface-muted"
         onClick={() => setOpen((value) => !value)}
       >
         <ProviderGlyph provider={engine.provider} />
-        <span className="truncate font-medium text-fg">{model?.label ?? engine.model}</span>
-        {engine.effort && <span className="flex-none">· {labelEffort(engine.effort)}</span>}
-        <span className="truncate max-sm:hidden">· {next.label}</span>
-        <ChevronDown className={cx("size-3.5 flex-none transition-transform", open && "rotate-180")} />
+        <span className="truncate font-medium">{model?.label ?? engine.model}</span>
+        <ChevronDown
+          className={cx("-ml-0.5 size-3.5 flex-none text-fg-subtle transition-transform", open && "rotate-180")}
+        />
       </button>
       {open && (
         <div

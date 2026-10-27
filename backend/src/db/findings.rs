@@ -1,7 +1,6 @@
-use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 
-use super::{now_millis, Database};
+use super::{now_millis, params, Database, OptionalExtension};
 use crate::review::findings::{self, FindingAudit};
 
 #[derive(Debug, Serialize)]
@@ -43,7 +42,7 @@ impl Database {
     pub fn review_requires_finding_selection(&self, run_id: i64) -> Result<bool, String> {
         self.conn
             .query_row(
-                "SELECT human_selection_required FROM review_runs WHERE id = ?1",
+                "SELECT human_selection_required FROM review_runs WHERE id = $1",
                 params![run_id],
                 |row| row.get::<_, bool>(0),
             )
@@ -54,7 +53,7 @@ impl Database {
         let raw: Option<String> = self
             .conn
             .query_row(
-                "SELECT audit_json FROM review_finding_audits WHERE run_id = ?1",
+                "SELECT audit_json FROM review_finding_audits WHERE run_id = $1",
                 params![run_id],
                 |row| row.get(0),
             )
@@ -67,7 +66,7 @@ impl Database {
     pub fn clear_finding_evidence(&self, run_id: i64) -> Result<(), String> {
         self.conn
             .execute(
-                "UPDATE review_finding_audits SET audit_json = json_remove(audit_json, '$.diff') WHERE run_id = ?1",
+                "UPDATE review_finding_audits SET audit_json = json_without_member(audit_json, 'diff') WHERE run_id = $1",
                 params![run_id],
             )
             .map_err(|error| error.to_string())?;
@@ -78,9 +77,9 @@ impl Database {
         let json = serde_json::to_string(audit).map_err(|error| error.to_string())?;
         self.conn.execute(
             "INSERT INTO review_finding_audits (run_id, audit_json, revision, selection_saved, updated_at)
-             SELECT id, ?2, 0, 0, ?3 FROM review_runs WHERE id = ?1 AND status = 'running'
+             SELECT id, $2, 0, 0, $3 FROM review_runs WHERE id = $1 AND status = 'running'
              ON CONFLICT(run_id) DO UPDATE SET audit_json = excluded.audit_json, revision = review_finding_audits.revision + 1, selection_saved = 0, updated_at = excluded.updated_at
-             WHERE EXISTS (SELECT 1 FROM review_runs WHERE id = ?1 AND status = 'running')",
+             WHERE EXISTS (SELECT 1 FROM review_runs WHERE id = $1 AND status = 'running')",
             params![run_id, json, now_millis()],
         ).map_err(|error| error.to_string())?;
         Ok(())
@@ -95,7 +94,7 @@ impl Database {
         let stored: Option<(String, i64, bool)> = self
             .conn
             .query_row(
-                "SELECT audit_json, revision, selection_saved FROM review_finding_audits WHERE run_id = ?1",
+                "SELECT audit_json, revision, selection_saved FROM review_finding_audits WHERE run_id = $1",
                 params![run_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -110,8 +109,8 @@ impl Database {
             None => (None, 0, false),
         };
         let current: bool = self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pull_requests pr WHERE pr.id = ?1 AND pr.head_sha = ?2 AND LOWER(pr.state) = 'open'
-             AND ?3 = (SELECT id FROM review_runs WHERE pr_id = ?1 ORDER BY created_at DESC, id DESC LIMIT 1))",
+            "SELECT EXISTS(SELECT 1 FROM pull_requests pr WHERE pr.id = $1 AND pr.head_sha = $2 AND LOWER(pr.state) = 'open'
+             AND $3 = (SELECT id FROM review_runs WHERE pr_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1))",
             params![pr_id, run.head_sha, run_id], |row| row.get(0),
         ).map_err(|error| error.to_string())?;
         let editable = requires_confirmation
@@ -147,6 +146,7 @@ impl Database {
         selected_ids: &[String],
     ) -> Result<FindingAuditView, String> {
         let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        self.lock_pull_request(pr_id)?;
         let view = self.finding_audit(pr_id, run_id)?;
         if !view.editable {
             return Err(
@@ -161,11 +161,11 @@ impl Database {
         findings::select(&mut audit, selected_ids)?;
         let (body, comments) = findings::selection_payload(&audit);
         let json = serde_json::to_string(&audit).map_err(|error| error.to_string())?;
-        let audit_changed = self.conn.execute("UPDATE review_finding_audits SET audit_json = ?1, revision = revision + 1, selection_saved = 1, updated_at = ?2 WHERE run_id = ?3 AND revision = ?4", params![json, now_millis(), run_id, revision]).map_err(|error| error.to_string())?;
+        let audit_changed = self.conn.execute("UPDATE review_finding_audits SET audit_json = $1, revision = revision + 1, selection_saved = 1, updated_at = $2 WHERE run_id = $3 AND revision = $4", params![json, now_millis(), run_id, revision]).map_err(|error| error.to_string())?;
         if audit_changed != 1 {
             return Err("Finding selection changed. Reload before saving.".to_string());
         }
-        let changed = self.conn.execute("UPDATE review_runs SET review_body = ?1, comments_json = ?2, updated_at = ?3 WHERE id = ?4 AND status = 'preview'", params![body, comments, now_millis(), run_id]).map_err(|error| error.to_string())?;
+        let changed = self.conn.execute("UPDATE review_runs SET review_body = $1, comments_json = $2, updated_at = $3 WHERE id = $4 AND status = 'preview'", params![body, comments, now_millis(), run_id]).map_err(|error| error.to_string())?;
         if changed != 1 {
             return Err("Review is no longer editable.".to_string());
         }
@@ -176,6 +176,7 @@ impl Database {
 
     pub fn auto_confirm_generated_finding_selection(&self, pr_id: i64, run_id: i64) -> Result<Option<i64>, String> {
         let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        self.lock_pull_request(pr_id)?;
         let view = self.finding_audit(pr_id, run_id)?;
         if !view.editable {
             return Err("Automatic finding confirmation is unavailable for this review.".to_string());
@@ -200,14 +201,14 @@ impl Database {
         let (body, comments) = findings::selection_payload(&audit);
         let json = serde_json::to_string(&audit).map_err(|error| error.to_string())?;
         let changed = self.conn.execute(
-            "UPDATE review_finding_audits SET audit_json = ?1, revision = revision + 1, selection_saved = 1, updated_at = ?2 WHERE run_id = ?3 AND revision = ?4",
+            "UPDATE review_finding_audits SET audit_json = $1, revision = revision + 1, selection_saved = 1, updated_at = $2 WHERE run_id = $3 AND revision = $4",
             params![json, now_millis(), run_id, view.revision],
         ).map_err(|error| error.to_string())?;
         if changed != 1 {
             return Err("Finding selection changed before automatic confirmation.".to_string());
         }
         let changed = self.conn.execute(
-            "UPDATE review_runs SET review_body = ?1, comments_json = ?2, updated_at = ?3 WHERE id = ?4 AND status = 'preview'",
+            "UPDATE review_runs SET review_body = $1, comments_json = $2, updated_at = $3 WHERE id = $4 AND status = 'preview'",
             params![body, comments, now_millis(), run_id],
         ).map_err(|error| error.to_string())?;
         if changed != 1 {
@@ -225,6 +226,7 @@ impl Database {
         operation: impl FnOnce() -> Result<T, String>,
     ) -> Result<T, String> {
         let tx = self.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        self.lock_pull_request(pr_id)?;
         let view = self.finding_audit(pr_id, run_id)?;
         let selection_required = view.requires_confirmation
             && match view.audit.as_ref() {

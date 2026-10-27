@@ -12,7 +12,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::db::{Database, Repo, ReviewResult, ReviewResultInput};
+use crate::db::{Database, Db, Repo, ReviewResult, ReviewResultInput};
 use crate::state::{IndexProgressEvent, ReviewJob};
 use crate::{github, indexer, local, review};
 
@@ -37,6 +37,7 @@ mod review_http;
 mod review_jobs;
 mod status_comments;
 mod summary;
+mod usage_http;
 mod workspace;
 
 pub(crate) use accounts::*;
@@ -57,6 +58,7 @@ pub(crate) use runtime::*;
 pub(crate) use status_comments::*;
 pub(crate) use stream::*;
 pub(crate) use summary::*;
+pub(crate) use usage_http::*;
 pub(crate) use workspace::*;
 #[cfg(test)]
 mod progress_tests;
@@ -72,7 +74,9 @@ fn ocr_footer() -> String {
 #[derive(Clone)]
 pub struct ServerConfig {
     pub bind: String,
-    pub db_path: PathBuf,
+    pub db: Db,
+    /// Server state on disk: repositories, review archives, sign-ins.
+    pub data_dir: PathBuf,
     pub repos_dir: PathBuf,
     pub auto_reindex: bool,
     pub poll_interval_seconds: u64,
@@ -80,15 +84,18 @@ pub struct ServerConfig {
 }
 
 impl ServerConfig {
-    pub fn from_env() -> Self {
+    pub fn archive_dir(&self) -> PathBuf {
+        crate::review_archive::archive_dir(&self.data_dir)
+    }
+
+    /// Connects to Postgres (and migrates it); call before any thread starts.
+    pub fn from_env() -> Result<Self, String> {
         let data_dir = std::env::var("OCR_DATA_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("data"));
-        Self {
+        Ok(Self {
             bind: std::env::var("OCR_BIND").unwrap_or_else(|_| "127.0.0.1:8787".to_string()),
-            db_path: std::env::var("OCR_DB_PATH")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| data_dir.join("opencodereview.sqlite")),
+            db: Db::from_env()?,
             repos_dir: std::env::var("OCR_REPOS_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| data_dir.join("repos")),
@@ -103,7 +110,8 @@ impl ServerConfig {
                 .ok()
                 .filter(|v| !v.is_empty())
                 .or_else(|| resolve_persisted_token(&data_dir)),
-        }
+            data_dir,
+        })
     }
 }
 
@@ -150,7 +158,6 @@ impl ServerState {
 pub(crate) struct HealthResponse {
     ok: bool,
     message: String,
-    db_path: String,
     repos_dir: String,
     github: ToolStatus,
     git: ToolStatus,
@@ -240,13 +247,18 @@ fn resolve_persisted_token(data_dir: &Path) -> Option<String> {
 }
 
 pub fn run_from_env() -> Result<(), String> {
-    run(ServerConfig::from_env())
+    run(ServerConfig::from_env()?)
 }
 
-pub fn run(config: ServerConfig) -> Result<(), String> {
+pub fn run(mut config: ServerConfig) -> Result<(), String> {
     std::fs::create_dir_all(&config.repos_dir).map_err(|error| error.to_string())?;
-    let db = Database::open_at(config.db_path.clone())?;
+    let instance = Instance::new()?;
+    config.db = config.db.with_instance(&instance.id);
+    let db = config.db.open()?;
+    db.register_instance(&instance.id, &instance.host)?;
+    // Only work whose instance is gone: other instances sharing the database keep theirs.
     db.reconcile_interrupted_jobs()?;
+    db.reap_snapshot_indexes()?;
     crate::accounts::adopt_legacy_token(&db)?;
     drop(db);
     cleanup_runtime_artifacts();
@@ -255,8 +267,12 @@ pub fn run(config: ServerConfig) -> Result<(), String> {
     if config.auto_reindex {
         start_reindex_worker(state.clone());
     }
-    start_review_result_reconciliation(config.db_path.clone(), config.repos_dir.clone());
-    start_review_request_restoration(config.db_path.clone());
+    start_instance_heartbeat(config.db.clone(), instance);
+    start_orphan_reaper(config.db.clone(), config.repos_dir.clone());
+    start_review_queue_drain(state.clone());
+    start_untracked_run_sweeper(state.clone());
+    start_review_result_reconciliation(config.db.clone(), config.repos_dir.clone());
+    start_review_request_restoration(config.db.clone());
     start_poll_scheduler(state.clone());
     start_runtime_cleanup_worker();
     crate::review_archive::retention::start_archive_retention_worker(state.clone());
@@ -295,6 +311,8 @@ pub fn run(config: ServerConfig) -> Result<(), String> {
 pub(crate) struct Request {
     method: String,
     path: String,
+    /// The raw query string, without `?`.
+    query: String,
     origin: Option<String>,
     authorization: Option<String>,
     content_type: Option<String>,

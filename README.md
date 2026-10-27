@@ -17,6 +17,7 @@ OpenCodeReview watches the repositories you pick, reviews each pull request with
 - **Your own AI.** Reviews run on the Claude Code CLI (Claude Opus 5.5, medium effort), the Codex CLI or the Gemini CLI, signed in with your Claude, ChatGPT or Google account, or on OpenCode with its free models or your OpenCode Go key. There is no OpenCodeReview account.
 - **Several accounts with failover.** Connect more than one account, of any provider, and order them. When an account hits its usage limit, the review continues on the next one, and the limited account comes back after its window resets. Settings shows how much of each Claude and ChatGPT plan is left.
 - **Codebase indexing.** Each selected repository is indexed locally: file metadata, a package and import graph, and lightweight symbols. Reviews get the callers, dependencies and tests of the changed code, plus your convention files (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `REVIEW.md` and others).
+- **Usage.** See the tokens reviews used by day, pull request, repository, model and account, with findings, time and cache reuse. A pull request opens into each of its runs.
 - **Review skills.** The review methodology is a Markdown skill you can edit, version and roll back in the app.
 - **Evidence-checked findings.** Every finding must quote the exact code it is about and anchor to a changed line. Reports that fail validation are never published as clean.
 - **Incremental and stacked PRs.** New pushes review only what changed since the last review; stacked PRs are reviewed against their immediate base.
@@ -78,7 +79,7 @@ The full list of variables, including the ones Compose sets internally, is in [d
 
 ```text
 browser ──> web (nginx, :1421) ──/api──> server (Rust API, 127.0.0.1:8787)
-                                            │  SQLite, Git cache, index, gh CLI
+                                            │  Git cache, gh CLI ──> postgres
                                             │  private IPC
                                             v
                               review-runner × 20 ──> review-egress ──> AI provider
@@ -125,7 +126,7 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before openin
 
 Copyright 2026 BRIDG LABS LTDA.
 
-Licensed under the [PolyForm Small Business License 1.0.0](LICENSE). Individuals and companies with fewer than 100 people (employees and contractors) and less than USD 1,000,000 in revenue in the prior tax year (2019 dollars, adjusted for inflation) may use, modify and distribute it for free. Larger companies, counted together with the organizations they control or are controlled by, need a separate commercial license from the copyright owner. For a commercial license, or help rolling it out across a company, contact [contato@bridglabs.com](mailto:contato@bridglabs.com).
+Licensed under the [PolyForm Small Business License 1.0.0](LICENSE). Individuals and companies with fewer than 100 people (employees and contractors) and less than USD 1,000,000 in revenue in the prior tax year (2019 dollars, adjusted for inflation) may use, modify and distribute it for free. Larger companies, counted together with the organizations they control or are controlled by, need a separate commercial license from the copyright owner. Personal, non-commercial use and use by non-profit organizations are also free, whatever their size, as [NOTICE](NOTICE) states. For a commercial license, or help rolling it out across a company, contact [contato@bridglabs.com](mailto:contato@bridglabs.com).
 
 See [NOTICE](NOTICE) for attribution and third-party notices.
 

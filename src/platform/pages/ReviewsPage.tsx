@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, ListFilter, PanelLeftClose, PanelLeftOpen, RefreshCw, Search } from "lucide-react";
+import { ListFilter, PanelLeftClose, PanelLeftOpen, RefreshCw, Search } from "lucide-react";
 import {
   type ComponentProps,
   type Dispatch,
@@ -45,6 +45,7 @@ import { Avatar } from "./reviews/Avatar";
 import { ReviewDetail } from "./reviews/ReviewDetail";
 import { ReviewProcessColumns } from "./reviews/ReviewProcessColumns";
 import { parseComments, type ReviewDecision, reviewError, streamStatusLabel } from "./reviews/reviewHelpers";
+import { useReviewSelection } from "./reviews/useReviewSelection";
 
 const ReviewFlow = lazy(() => import("../components/ReviewFlow").then((module) => ({ default: module.ReviewFlow })));
 
@@ -66,7 +67,6 @@ export function ReviewsPage() {
     return { view: null, processesOpen: wide, restoreProcesses: wide };
   });
   const [streamVersion, setStreamVersion] = useState(0);
-  const [monitoringId, setMonitoringId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const listWidth = useResizableWidth("ocr.reviewsListWidth", { initial: 344, compact: 76, max: 560 });
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -86,7 +86,7 @@ export function ReviewsPage() {
     refetchInterval: 5000,
   });
   const items = useMemo(() => (boardQuery.data ?? []).flatMap((group) => group.items), [boardQuery.data]);
-  const monitoring = items.find((item) => item.id === monitoringId) ?? null;
+  const { monitoringId, setMonitoringId, monitoring } = useReviewSelection(items);
   const viewing = isReviewResultView(workspace.view) ? monitoring : null;
   const streamPrId = monitoringId;
   const runQuery = useReviewRunStream(streamPrId, streamVersion);
@@ -211,10 +211,6 @@ export function ReviewsPage() {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
-  useEffect(() => {
-    if (monitoring) return;
-    setMonitoringId(items.find((item) => ["reviewing", "queued"].includes(item.lane))?.id ?? items[0]?.id ?? null);
-  }, [items, monitoring]);
   const monitoredRun = monitoring?.lane === "queued" ? null : (runQuery.data ?? null);
   const stagesQuery = useQuery({
     queryKey: ["reviews", monitoringId, "stages", monitoredRun?.id, monitoredRun?.status],
@@ -650,14 +646,14 @@ export function ReviewsPage() {
               </div>
               {monitoring?.url && (
                 <a
-                  className="review-workspace-github-link inline-flex h-8 shrink-0 items-center gap-2 rounded-full bg-fg px-3.5 text-small font-semibold text-canvas no-underline transition-colors hover:bg-white"
+                  className="review-workspace-github-link grid size-8 shrink-0 place-items-center rounded-lg text-fg-muted no-underline transition-colors hover:bg-surface-muted hover:text-fg"
                   href={monitoring.url}
                   target="_blank"
                   rel="noreferrer"
+                  aria-label="Open on GitHub"
+                  title="Open on GitHub"
                 >
                   <GitHubMark className="size-4" />
-                  Open on GitHub
-                  <ExternalLink className="size-3.5 opacity-60" />
                 </a>
               )}
             </header>
