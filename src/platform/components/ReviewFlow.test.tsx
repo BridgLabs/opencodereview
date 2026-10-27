@@ -281,6 +281,26 @@ describe("review inspector navigation", () => {
     }
   });
 
+  it("pushes a disclosure's count to the right and mutes it", () => {
+    const style = document.createElement("style");
+    style.textContent = [...readFileSync("src/styles/components.css", "utf8").matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .filter((match) => match[1].includes(".disclosure > summary > span"))
+      .map((match) => match[0])
+      .join("\n");
+    const container = document.createElement("div");
+    container.innerHTML = '<details class="disclosure"><summary>Model runs<span>1</span></summary></details>';
+    document.head.append(style);
+    document.body.append(container);
+    try {
+      const count = getComputedStyle(container.querySelector("summary > span")!);
+      expect(count.marginLeft).toBe("auto");
+      expect(count.color).toBe("var(--text-3)");
+    } finally {
+      style.remove();
+      container.remove();
+    }
+  });
+
   it("keeps a selected published result green instead of applying the purple selection highlight", () => {
     const style = document.createElement("style");
     style.textContent = [...readFileSync("src/styles/components.css", "utf8").matchAll(/([^{}]+)\{([^{}]*)\}/g)]

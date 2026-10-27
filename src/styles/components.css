@@ -641,7 +641,7 @@ textarea {
 }
 
 /* The count or value a disclosure carries sits at the far right of its row. */
-.disclosure > summary > span:last-child:not(:first-child) {
+.disclosure > summary > span:last-child {
   margin-left: auto;
   font-weight: 400;
   color: var(--text-3);
