@@ -61,7 +61,21 @@ export function ReviewSections({
     if (selectedSectionId)
       setOpen((current) => (current[selectedSectionId] ? current : { ...current, [selectedSectionId]: true }));
   }, [selectedSectionId]);
-  const toggle = (id: string) =>
+  // While searching or filtering every matching section shows open; what the user collapses then is not saved,
+  // and clearing the search brings back the sections exactly as they were.
+  const [collapsedWhileFiltering, setCollapsedWhileFiltering] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!expandAll) setCollapsedWhileFiltering(new Set());
+  }, [expandAll]);
+  const toggle = (id: string) => {
+    if (expandAll) {
+      setCollapsedWhileFiltering((current) => {
+        const next = new Set(current);
+        if (!next.delete(id)) next.add(id);
+        return next;
+      });
+      return;
+    }
     setOpen((current) => {
       const next = { ...current, [id]: !current[id] };
       try {
@@ -71,6 +85,7 @@ export function ReviewSections({
       }
       return next;
     });
+  };
   if (compact)
     return (
       <div className="review-process-compact flex flex-col items-center gap-1.5 pt-1">
@@ -104,7 +119,7 @@ export function ReviewSections({
     <div className="review-sections flex flex-col gap-1">
       {grouped.map((section, index) => {
         const empty = section.items.length === 0;
-        const expanded = !empty && (expandAll || Boolean(open[section.id]));
+        const expanded = !empty && (expandAll ? !collapsedWhileFiltering.has(section.id) : Boolean(open[section.id]));
         const panelId = `review-section-${section.id}`;
         return (
           <section
