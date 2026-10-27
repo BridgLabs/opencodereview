@@ -592,8 +592,8 @@ fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, String) {
         .unwrap_or_else(|_| crate::providers::engines::default_engine(provider))
 }
 
-/// The account a stage runs on: the first ready account by priority, of any provider, skipping
-/// the ones this stage already tried.
+/// The account a stage runs on: the first ready account by priority, the first account's provider
+/// before the other, skipping the ones this stage already tried.
 fn next_account(inputs: &ReviewInputs, tried: &[i64]) -> Result<crate::db::AiAccount, String> {
     let db = accounts_db(inputs)?;
     if let Some(account) = db.pick_ai_account(tried)? {

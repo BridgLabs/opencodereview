@@ -1,7 +1,7 @@
 {
   "name": "OpenCodeReview",
   "short_name": "OpenCodeReview",
-  "description": "Self-hosted AI code review on the Claude, ChatGPT or Gemini plan you already have.",
+  "description": "Self-hosted AI code review on the Claude or ChatGPT plan you already have.",
   "start_url": "/",
   "display": "browser",
   "background_color": "#111111",

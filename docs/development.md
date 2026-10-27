@@ -111,9 +111,9 @@ The schema starts from `backend/src/db/schema.sql` and the migrations listed in 
 
 ## Upgrading the AI CLIs
 
-The Claude Code and Codex CLI and Node.js versions are pinned in `docker/Dockerfile` with SHA-256 checksums for `amd64` and `arm64`; the Gemini CLI is pinned to one npm package with its SHA-256; the OpenCode CLI is a pinned release archive with per-architecture SHA-256 checksums. Update a version and its checksums together, rebuild, and run `docker/runner-smoke.py` before using the new image.
+The Claude Code and Codex CLI versions are pinned in `docker/Dockerfile` with SHA-256 checksums for `amd64` and `arm64`. Update a version and its checksums together, rebuild, and run `docker/runner-smoke.py` before using the new image.
 
-The [Provider CLI canary](../.github/workflows/provider-cli-canary.yml) builds the image with the newest release of each CLI every six hours. It checks that each CLI still accepts the flags its provider passes, runs the runner smoke, and sends one prompt to OpenCode's free model. Its run summary lists the pinned and newest versions, and `python3 -B docker/provider-cli-canary.py resolve` prints the newest versions with their `amd64` checksums. It opens an issue when it fails twice in a row.
+The [Provider CLI canary](../.github/workflows/provider-cli-canary.yml) builds the image with the newest release of each CLI every six hours. It checks that each CLI still accepts the flags its provider passes and runs the runner smoke. Its run summary lists the pinned and newest versions, and `python3 -B docker/provider-cli-canary.py resolve` prints the newest versions with their `amd64` checksums. It opens an issue when it fails twice in a row.
 
 ## Releases
 

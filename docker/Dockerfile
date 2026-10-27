@@ -61,53 +61,6 @@ RUN case "$TARGETARCH" in \
   && ln -s /opt/codex/bin/codex /usr/local/bin/codex \
   && test "$(/opt/codex/bin/codex --version | cut -d ' ' -f2)" = "$CODEX_CLI_VERSION"
 LABEL ai.codex.cli.version="${CODEX_CLI_VERSION}"
-ARG NODE_VERSION=22.23.3
-ARG NODE_SHA256_AMD64=df450af89261115ef9f9e3830c3eeb2cc9213b63c720b1af623cb5dcbe2e02de
-ARG NODE_SHA256_ARM64=a44aeb94849a299b22df10b9e622ec2f605c2183501bc40590705131de7c740f
-RUN case "$TARGETARCH" in \
-      amd64) platform=linux-x64; checksum="$NODE_SHA256_AMD64" ;; \
-      arm64) platform=linux-arm64; checksum="$NODE_SHA256_ARM64" ;; \
-      *) echo "Unsupported Node.js architecture: $TARGETARCH" >&2; exit 1 ;; \
-    esac \
-  && apt-get update && apt-get install -y --no-install-recommends xz-utils && rm -rf /var/lib/apt/lists/* \
-  && curl -fsSL --retry 3 "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-${platform}.tar.xz" -o /tmp/node.tar.xz \
-  && printf '%s  /tmp/node.tar.xz\n' "$checksum" | sha256sum -c - \
-  && mkdir -p /opt/node \
-  && tar -xJf /tmp/node.tar.xz -C /opt/node --strip-components=1 "node-v${NODE_VERSION}-${platform}/bin/node" \
-  && rm /tmp/node.tar.xz \
-  && test "$(/opt/node/bin/node --version)" = "v${NODE_VERSION}"
-LABEL org.nodejs.version="${NODE_VERSION}"
-ARG GEMINI_CLI_VERSION=0.63.0
-ARG GEMINI_CLI_SHA256=97a6edfc10645463b517f0518d46a8c72efbdc12558a9a948607f726284a0420
-RUN curl -fsSL --retry 3 "https://registry.npmjs.org/@google/gemini-cli/-/gemini-cli-${GEMINI_CLI_VERSION}.tgz" -o /tmp/gemini.tgz \
-  && printf '%s  /tmp/gemini.tgz\n' "$GEMINI_CLI_SHA256" | sha256sum -c - \
-  && mkdir -p /opt/gemini \
-  && tar -xzf /tmp/gemini.tgz -C /opt/gemini --strip-components=1 \
-  && rm /tmp/gemini.tgz \
-  && printf '#!/bin/sh\nGEMINI_CLI_NO_RELAUNCH=true exec /opt/node/bin/node /opt/gemini/bundle/gemini.js "$@"\n' > /usr/local/bin/gemini \
-  && chmod 0755 /usr/local/bin/gemini \
-  && test "$(HOME=/tmp gemini --version)" = "$GEMINI_CLI_VERSION" \
-  && rm -rf /tmp/.gemini
-LABEL ai.gemini.cli.version="${GEMINI_CLI_VERSION}"
-ARG OPENCODE_CLI_VERSION=1.18.35
-ARG OPENCODE_CLI_SHA256_AMD64=c8f888b451f5494a18f858fffb0e0b68f4e4baa9c241761c5f206884f0fa640d
-ARG OPENCODE_CLI_SHA256_ARM64=f7f2ba59ee8aa94d388f9696575a32d20e71c2ee48def9f80fc693a60fec6c72
-RUN case "$TARGETARCH" in \
-      amd64) platform=linux-x64; checksum="$OPENCODE_CLI_SHA256_AMD64" ;; \
-      arm64) platform=linux-arm64; checksum="$OPENCODE_CLI_SHA256_ARM64" ;; \
-      *) echo "Unsupported OpenCode CLI architecture: $TARGETARCH" >&2; exit 1 ;; \
-    esac \
-  && curl -fsSL --retry 3 "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_CLI_VERSION}/opencode-${platform}.tar.gz" -o /tmp/opencode.tar.gz \
-  && printf '%s  /tmp/opencode.tar.gz\n' "$checksum" | sha256sum -c - \
-  && mkdir -p /opt/opencode/bin \
-  && tar -xzf /tmp/opencode.tar.gz -C /opt/opencode/bin \
-  && rm /tmp/opencode.tar.gz \
-  && chown -R root:root /opt/opencode \
-  && chmod 0755 /opt/opencode/bin/opencode \
-  && ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode \
-  && test "$(HOME=/tmp/opencode-home XDG_DATA_HOME=/tmp/opencode-home XDG_CONFIG_HOME=/tmp/opencode-home XDG_CACHE_HOME=/tmp/opencode-home XDG_STATE_HOME=/tmp/opencode-home /opt/opencode/bin/opencode --version)" = "$OPENCODE_CLI_VERSION" \
-  && rm -rf /tmp/opencode-home
-LABEL ai.opencode.cli.version="${OPENCODE_CLI_VERSION}"
 ENV DISABLE_AUTOUPDATER=1
 WORKDIR /app
 COPY --from=server /app/assets ./assets

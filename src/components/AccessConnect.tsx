@@ -76,15 +76,6 @@ const claudeApi: PasteFlowApi = {
   input: (code) => setupApi.claudeAuthInput(code),
   cancel: () => setupApi.claudeAuthCancel(),
 };
-const geminiApi: PasteFlowApi = {
-  key: "gemini-auth-events",
-  name: "Gemini",
-  start: (id) => setupApi.geminiAuthStart(id),
-  events: () => setupApi.geminiAuthEvents(),
-  input: (code) => setupApi.geminiAuthInput(code),
-  cancel: () => setupApi.geminiAuthCancel(),
-};
-
 function usePasteFlow(api: PasteFlowApi, onChanged: () => void, accountId?: number) {
   const [started, setStarted] = useState(false);
   const [code, setCode] = useState("");
@@ -275,65 +266,6 @@ function PasteCodeSignIn({
 /** Signs in to Claude right away, saving the token to `accountId` or to a new account. */
 export function ClaudeSignIn(props: { accountId?: number; onDone: () => void; onCancel: () => void }) {
   return <PasteCodeSignIn api={claudeApi} plan="Uses your Claude Pro, Max or Team plan." {...props} />;
-}
-
-/** Signs in to Gemini with a Google account, saving the sign-in to `accountId` or to a new account. */
-export function GeminiSignIn(props: { accountId?: number; onDone: () => void; onCancel: () => void }) {
-  return <PasteCodeSignIn api={geminiApi} plan="Uses your Google account." {...props} />;
-}
-
-/** Connects OpenCode, to `accountId` or to a new account: the free models need nothing, and an
- * OpenCode Go key, checked with OpenCode before it is kept, unlocks the paid Go models. */
-export function OpencodeKeySignIn({
-  accountId,
-  onDone,
-  onCancel,
-}: {
-  accountId?: number;
-  onDone: () => void;
-  onCancel: () => void;
-}) {
-  const [key, setKey] = useState("");
-  const save = useMutation({
-    mutationFn: (withKey: boolean) => setupApi.opencodeKeySave(withKey ? key.trim() : undefined, accountId),
-    onSuccess: onDone,
-  });
-  return (
-    <SignInFrame
-      hint="Free models need no account. A key unlocks the paid Go models."
-      problems={save.error && <Problem>{friendlyError(save.error)}</Problem>}
-    >
-      <form
-        className="flex flex-wrap items-center gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          save.mutate(true);
-        }}
-      >
-        <input
-          aria-label="OpenCode Go key"
-          type="password"
-          className={codeInput}
-          value={key}
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="Paste your OpenCode Go key"
-          onChange={(event) => setKey(event.target.value)}
-        />
-        <button type="submit" className={brandButton} disabled={!key.trim() || save.isPending}>
-          {save.isPending && save.variables ? "Checking the key…" : "Save key"}
-        </button>
-      </form>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button type="button" className={quietButton} disabled={save.isPending} onClick={() => save.mutate(false)}>
-          {save.isPending && !save.variables ? "Saving…" : "Use free models"}
-        </button>
-        <button type="button" className={quietButton} onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </SignInFrame>
-  );
 }
 
 /** Pastes a token made with `claude setup-token`, saving it to `accountId` or to a new account. */

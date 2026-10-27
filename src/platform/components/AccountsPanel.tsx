@@ -1,13 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, KeyRound, LogIn, Pencil, Play, Plus, Smartphone, Trash2 } from "lucide-react";
+import { KeyRound, LogIn, Pencil, Play, Plus, Smartphone, Trash2 } from "lucide-react";
 import { useState } from "react";
-import {
-  ClaudeSignIn,
-  ClaudeTokenSignIn,
-  CodexSignIn,
-  GeminiSignIn,
-  OpencodeKeySignIn,
-} from "../../components/AccessConnect";
+import { ClaudeSignIn, ClaudeTokenSignIn, CodexSignIn } from "../../components/AccessConnect";
 import { BrandLoading } from "../../components/BrandLoading";
 import { cx, DSButton, DSError, DSInput, DSMenu, DSSwitchIndicator } from "../../components/DesignSystem";
 import { setupApi } from "../../services/setupApi";
@@ -27,8 +21,9 @@ type Health = "ready" | "resting" | "signed-out" | "paused";
 
 export function accountHealth(account: AiAccount, now = Date.now()): Health {
   if (!account.signedIn || account.status === "auth_failed") return "signed-out";
-  if (!account.enabled) return "paused";
+  // A limit outranks a pause: resuming an account still at its limit would not start reviews on it.
   if (account.status === "limited" && (account.limitedUntil ?? 0) > now) return "resting";
+  if (!account.enabled) return "paused";
   return "ready";
 }
 
@@ -36,42 +31,10 @@ type Provider = AiAccount["provider"];
 export const providerName: Record<Provider, string> = {
   claude: "Claude",
   codex: "ChatGPT",
-  gemini: "Gemini",
-  opencode: "OpenCode",
 };
 
-/** Claude's asterisk, Codex's knot, Gemini's sparkle or OpenCode's brackets. */
+/** Claude's asterisk or Codex's knot. */
 export function ProviderGlyph({ provider }: { provider: Provider }) {
-  if (provider === "opencode")
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        className="size-4 text-fg"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.9}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M8.5 6.5 3.5 12l5 5.5M15.5 6.5l5 5.5-5 5.5" />
-      </svg>
-    );
-  if (provider === "gemini")
-    return (
-      <svg viewBox="0 0 24 24" className="size-4" aria-hidden="true">
-        <defs>
-          <linearGradient id="gemini-sparkle" x1="4" y1="20" x2="20" y2="4" gradientUnits="userSpaceOnUse">
-            <stop stopColor="#4f8df5" />
-            <stop offset="1" stopColor="#a87ffb" />
-          </linearGradient>
-        </defs>
-        <path
-          d="M12 2c.6 5.4 4.6 9.4 10 10-5.4.6-9.4 4.6-10 10-.6-5.4-4.6-9.4-10-10 5.4-.6 9.4-4.6 10-10Z"
-          fill="url(#gemini-sparkle)"
-        />
-      </svg>
-    );
   return provider === "codex" ? (
     <svg
       viewBox="0 0 24 24"
@@ -91,16 +54,20 @@ export function ProviderGlyph({ provider }: { provider: Provider }) {
   );
 }
 
-function relative(ms: number) {
+export function relative(ms: number) {
   const minutes = Math.max(1, Math.round(Math.abs(ms) / 60_000));
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
   return minutes % 60 ? `${hours} h ${minutes % 60} min` : `${hours} h`;
 }
 
-/** The account the next review starts on: the first ready one, as the server picks it. */
+/** The account the next review starts on, as the server picks it: the first ready one of the first
+ * usable account's provider, then of the other providers. */
 export function nextAccountId(accounts: AiAccount[], now = Date.now()) {
-  return accounts.find((account) => accountHealth(account, now) === "ready")?.id;
+  const usable = accounts.filter((account) => account.enabled && account.status !== "auth_failed" && account.signedIn);
+  const preferred = usable[0]?.provider;
+  const ready = usable.filter((account) => accountHealth(account, now) === "ready");
+  return (ready.find((account) => account.provider === preferred) ?? ready[0])?.id;
 }
 
 export function windowName(minutes: number | null) {
@@ -185,10 +152,7 @@ function AccountRow({
   account,
   usage,
   next,
-  index,
-  count,
   busy,
-  onMove,
   onToggle,
   onRename,
   onSignIn,
@@ -198,10 +162,7 @@ function AccountRow({
   account: AiAccount;
   usage?: AccountUsage;
   next: boolean;
-  index: number;
-  count: number;
   busy: boolean;
-  onMove: (direction: -1 | 1) => void;
   onToggle: () => void;
   onRename: (label: string) => void;
   onSignIn: () => void;
@@ -304,21 +265,17 @@ function AccountRow({
             vertical
             size="iconSm"
             items={[
-              ...(index === 0
+              ...(next
                 ? []
                 : [
                     {
-                      label: "Use first",
+                      label: "Use for new reviews",
                       hint: "New reviews start on this account",
                       icon: <Play />,
-                      disabled: busy || health === "signed-out",
+                      disabled: busy || health === "signed-out" || health === "resting",
                       onSelect: onPick,
                     },
-                    { label: "Move up", icon: <ArrowUp />, disabled: busy, onSelect: () => onMove(-1) },
                   ]),
-              ...(index === count - 1
-                ? []
-                : [{ label: "Move down", icon: <ArrowDown />, disabled: busy, onSelect: () => onMove(1) }]),
               { label: "Rename", icon: <Pencil />, onSelect: () => setEditing(true) },
               { label: "Sign in again", icon: <LogIn />, onSelect: onSignIn },
               {
@@ -405,13 +362,6 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
   const accounts = provider ? all.filter((account) => account.provider === provider) : all;
   const next = nextAccountId(all);
   const busy = update.isPending || reorder.isPending || remove.isPending;
-  // Swaps two neighbours of the shown list in the global order, which may hold other providers between them.
-  const move = (index: number, direction: -1 | 1) => {
-    const ids = all.map((account) => account.id);
-    const [a, b] = [ids.indexOf(accounts[index].id), ids.indexOf(accounts[index + direction].id)];
-    [ids[a], ids[b]] = [ids[b], ids[a]];
-    reorder.mutate(ids);
-  };
   const pick = async (account: AiAccount) => {
     if (!account.enabled) await update.mutateAsync({ id: account.id, enabled: true });
     reorder.mutate([account.id, ...all.filter((other) => other.id !== account.id).map((other) => other.id)]);
@@ -423,9 +373,8 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
         <div>
           <h2 className="text-small font-semibold text-fg">Accounts</h2>
           <p className="mt-0.5 max-w-2xl text-caption text-fg-subtle">
-            {provider
-              ? "Reviews try these accounts in this order. When one hits its usage limit, they move to the next."
-              : "Reviews use the first available account in this list. When it hits its usage limit, they continue on the next one."}
+            New reviews start on the account marked Next review. When it hits its usage limit, they continue on the next
+            account of the same provider, and only then on another provider's.
           </p>
         </div>
         {!signIn && provider && accounts.length > 0 && (
@@ -451,18 +400,6 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
                 hint: "ChatGPT plan with Codex",
                 icon: <ProviderGlyph provider="codex" />,
                 onSelect: () => setSignIn({ provider: "codex" }),
-              },
-              {
-                label: "Gemini",
-                hint: "Google account",
-                icon: <ProviderGlyph provider="gemini" />,
-                onSelect: () => setSignIn({ provider: "gemini" }),
-              },
-              {
-                label: "OpenCode",
-                hint: "Free models, or an OpenCode Go key",
-                icon: <ProviderGlyph provider="opencode" />,
-                onSelect: () => setSignIn({ provider: "opencode" }),
               },
               {
                 label: "Claude with a token",
@@ -511,27 +448,16 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
                 <Plus className="size-3.5" />
                 Add ChatGPT account
               </DSButton>
-              <DSButton onClick={() => setSignIn({ provider: "gemini" })}>
-                <Plus className="size-3.5" />
-                Add Gemini account
-              </DSButton>
-              <DSButton onClick={() => setSignIn({ provider: "opencode" })}>
-                <Plus className="size-3.5" />
-                Add OpenCode
-              </DSButton>
             </div>
           </div>
         ) : (
-          accounts.map((account, index) => (
+          accounts.map((account) => (
             <AccountRow
               key={account.id}
               account={account}
               usage={usageQueryResult.data?.find((usage) => usage.accountId === account.id)}
               next={account.id === next}
-              index={index}
-              count={accounts.length}
               busy={busy}
-              onMove={(direction) => move(index, direction)}
               onToggle={() => update.mutate({ id: account.id, enabled: !account.enabled })}
               onRename={(label) => update.mutate({ id: account.id, label })}
               onSignIn={() => setSignIn({ provider: account.provider, accountId: account.id })}
@@ -567,32 +493,12 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
             <h3 className="mb-3 text-small font-semibold text-fg">
               {signIn.accountId
                 ? `Sign in again to “${accounts.find((account) => account.id === signIn.accountId)?.label ?? providerName[signIn.provider]}”`
-                : signIn.provider === "opencode"
-                  ? "Add OpenCode"
-                  : `Add a ${providerName[signIn.provider]} account`}
+                : `Add a ${providerName[signIn.provider]} account`}
             </h3>
             {signIn.provider === "codex" ? (
               <CodexSignIn
                 accountId={signIn.accountId}
                 mode={signIn.code ? "device" : "browser"}
-                onDone={() => {
-                  setSignIn(null);
-                  refresh();
-                }}
-                onCancel={() => setSignIn(null)}
-              />
-            ) : signIn.provider === "gemini" ? (
-              <GeminiSignIn
-                accountId={signIn.accountId}
-                onDone={() => {
-                  setSignIn(null);
-                  refresh();
-                }}
-                onCancel={() => setSignIn(null)}
-              />
-            ) : signIn.provider === "opencode" ? (
-              <OpencodeKeySignIn
-                accountId={signIn.accountId}
                 onDone={() => {
                   setSignIn(null);
                   refresh();

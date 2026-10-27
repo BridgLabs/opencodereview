@@ -59,7 +59,7 @@ impl Database {
     }
 
     pub fn create_ai_account(&self, provider: &str, label: &str) -> Result<AiAccount, String> {
-        if !matches!(provider, "claude" | "codex" | "gemini" | "opencode") {
+        if !matches!(provider, "claude" | "codex") {
             return Err("Unsupported account provider".into());
         }
         let label = label.trim();
@@ -132,15 +132,20 @@ impl Database {
     }
 
     /// Next account to try: enabled, signed in, not resting, by priority. Accounts whose rest has
-    /// elapsed count as available again.
+    /// elapsed count as available again. The first usable account's provider goes first, so a
+    /// limit moves reviews to that provider's other accounts before another provider's.
     pub fn pick_ai_account(&self, excluded: &[i64]) -> Result<Option<AiAccount>, String> {
         let now = now_millis();
-        Ok(self.list_ai_accounts()?.into_iter().find(|account| {
-            account.enabled
-                && account.status != "auth_failed"
-                && account.limited_until.is_none_or(|until| until <= now)
-                && !excluded.contains(&account.id)
-        }))
+        let mut accounts = self.list_ai_accounts()?;
+        accounts.retain(|account| account.enabled && account.status != "auth_failed");
+        let Some(preferred) = accounts.first().map(|account| account.provider.clone()) else {
+            return Ok(None);
+        };
+        // A stable sort keeps the priority order inside each group.
+        accounts.sort_by_key(|account| account.provider != preferred);
+        Ok(accounts
+            .into_iter()
+            .find(|account| account.limited_until.is_none_or(|until| until <= now) && !excluded.contains(&account.id)))
     }
 
     /// Earliest moment a resting account becomes available again.
@@ -171,6 +176,28 @@ impl Database {
     pub fn mark_ai_account_auth_failed(&self, id: i64, error: &str) -> Result<(), String> {
         self.conn.execute("UPDATE ai_accounts SET status = 'auth_failed', limited_until = NULL, last_error = $2, updated_at = $3 WHERE id = $1", params![id, error, now_millis()]).map_err(|error| error.to_string())?;
         Ok(())
+    }
+
+    /// Drops accounts and engine choices of providers the app no longer runs, such as Gemini and
+    /// OpenCode, including ones an import of an older database brings back.
+    /// Returns the ids of the accounts it removed.
+    pub fn remove_unsupported_ai_accounts(&self) -> Result<Vec<i64>, String> {
+        let mut statement = self
+            .conn
+            .prepare("DELETE FROM ai_accounts WHERE provider NOT IN ('claude', 'codex') RETURNING id")
+            .map_err(|error| error.to_string())?;
+        let removed = statement
+            .query_map([], |row| row.get::<_, i64>(0))
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        self.conn
+            .execute(
+                "DELETE FROM settings WHERE key LIKE 'review_engine_%' AND key NOT IN ('review_engine_claude', 'review_engine_codex')",
+                [],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(removed)
     }
 
     /// A fresh sign-in clears any recorded failure.

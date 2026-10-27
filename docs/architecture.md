@@ -13,7 +13,7 @@ flowchart TB
   API --> GH[gh CLI -> GitHub]
   API -->|private IPC| Runners[review-runner replicas]
   Runners --> Egress[review-egress]
-  Egress --> Provider[Claude, ChatGPT, Gemini and OpenCode hosts]
+  Egress --> Provider[Claude and ChatGPT hosts]
   API -->|sign-in projection| Auth[(review-claude-auth volume)]
   Auth -. read-only .-> Runners
 ```
@@ -22,7 +22,7 @@ flowchart TB
 | --- | ---: | --- |
 | `web` | `1421` | nginx serving the built React app and proxying `/api` to `server`. |
 | `server` | `127.0.0.1:8787` | Rust API (`ocr-server`): GitHub integration, indexing, review orchestration, publication, sign-in flows and background workers. Also publishes `127.0.0.1:1455` for the ChatGPT browser sign-in callback, forwarded only while a sign-in runs. |
-| `review-runner` | none | `ocr-sandbox runner`: executes Claude Code, Codex, the Gemini CLI or OpenCode on a frozen review snapshot, one stage per container at a time. `OCR_REVIEW_RUNNERS` replicas (20 by default) share the `review-ipc` volume, each listening on `/ipc/<hostname>.sock`; the server lists the sockets to find them and removes those whose runner is gone. Settings → PR selection → Reviews at a time (20 by default) limits how many reviews run at once. |
+| `review-runner` | none | `ocr-sandbox runner`: executes Claude Code or Codex on a frozen review snapshot, one stage per container at a time. `OCR_REVIEW_RUNNERS` replicas (20 by default) share the `review-ipc` volume, each listening on `/ipc/<hostname>.sock`; the server lists the sockets to find them and removes those whose runner is gone. Settings → PR selection → Reviews at a time (20 by default) limits how many reviews run at once. |
 | `review-egress` | none | `ocr-sandbox egress`: a CONNECT proxy that admits only the AI provider hosts. Runner networks are internal and reach the internet only through it. |
 
 Volumes: `ocr-data` (database, repository cache, index, review archives, settings and sign-ins), `review-claude-auth` (read-only sign-in projection for runners) and one IPC volume per runner. The runtime uses built images and named volumes only: no source bind mounts, no host credential folders, no Docker socket.
@@ -33,15 +33,13 @@ Volumes: `ocr-data` (database, repository cache, index, review archives, setting
 - The containers are read-only, drop all capabilities except the few the supervisor needs, use `no-new-privileges`, and limit CPU, memory and process count. The AI process runs as an unprivileged UID separate from its supervisor.
 - Claude Code runs as `claude --print` with a fixed model and effort (`claude-opus-5-5`, medium), JSON streaming output, no MCP servers, no session persistence, no slash commands and an explicit tool list (`Read`, `Grep`, `Glob`, `Bash`, `Write`). `Agent`, `Task`, `WebFetch`, `WebSearch` and `mcp__*` are denied, and a `PreToolUse` hook (`ocr-sandbox tool-guard`) checks every tool call. Shell access is limited to bounded reads, searches and listings inside the snapshot.
 - Codex runs as `codex exec` with medium reasoning effort, the CLI's default model, ephemeral sessions and user config, extensions and web search disabled. Codex's own sandbox cannot start inside the hardened runner, so the container is the sandbox.
-- Gemini runs the Gemini CLI headless (`--output-format stream-json`, prompt on stdin) with its default model, a private home with usage statistics, auto-update and checkpointing off, and a policy that denies web search, web fetch, subagents and skills. Like Codex, the container is the sandbox.
-- OpenCode runs `opencode run --pure --format json` with the prompt on stdin, the account's OpenCode Go key, if any, in `OPENCODE_API_KEY`, and the plan's model (`opencode-go/glm-5.3` with a key, `opencode/big-pickle` for the free models) unless the account names another. Model catalogue downloads, auto-update, default plugins, LSP downloads, sharing, project configuration and Claude Code files are off, and the web, subagent, todo, skill and edit tools are disabled. Local models are not offered: the egress proxy refuses private networks.
 - The sign-in reaches the process only through its environment or a private per-stage home directory. Output that contains the account's tokens is rejected, and transcripts are kept outside paths the model can read.
 - The backend and runner images share an executor fingerprint (`ocr-sandbox engine-version`). A mismatched runner fails before any AI call, and there is no fallback that runs the AI inside `server`.
 - Every CLI version is pinned in [`docker/Dockerfile`](../docker/Dockerfile) with per-architecture SHA-256 checksums and auto-update disabled.
 
 ## Accounts and failover
 
-Settings → Accounts holds Claude, ChatGPT, Gemini and OpenCode accounts in one priority order. Each review stage uses the first account that is enabled, signed in and not resting. When a stage hits a usage limit, that account rests until the reset time reported by the provider (or one hour when none is given) and the same stage runs again on the next account, across providers. A rejected sign-in marks the account as needing attention. Settings shows each Claude and ChatGPT account's remaining plan usage, refreshed every five minutes; Gemini does not expose its quota outside a session, so its accounts rest when a review reports the daily quota is used up. OpenCode does not report usage, so its accounts show none.
+Settings → Accounts holds Claude and ChatGPT accounts in one priority order. Each review stage uses the first account that is enabled, signed in and not resting, trying the first account's provider before the other: a limit moves reviews to that provider's other accounts before another provider's. When a stage hits a usage limit, that account rests until the reset time reported by the provider (or one hour when none is given) and the same stage runs again on the next account. A rejected sign-in marks the account as needing attention. Settings shows each account's remaining plan usage and the top bar shows it for the account the next review uses, refreshed every five minutes.
 
 ## Backend
 
@@ -51,7 +49,7 @@ Rust crate `opencodereview-server` in [`backend/`](../backend/Cargo.toml) with t
 | --- | --- |
 | HTTP API and jobs | `server/` |
 | Reviews | `review/` (`mod.rs`, `frozen.rs`, `execution.rs`, `scope.rs`, `coverage.rs`, `chunks.rs`, `integration/`, `evidence.rs`, `validation.rs`, `findings.rs`), `review_archive/` |
-| AI CLIs | `providers/` (`claude.rs`, `codex.rs`, `gemini.rs`, `opencode.rs`), `accounts/` (`mod.rs`, `usage.rs`) |
+| AI CLIs | `providers/` (`claude.rs`, `codex.rs`), `accounts/` (`mod.rs`, `usage.rs`) |
 | Sandbox | `sandbox/` (`mod.rs`, `runner.rs`, `egress.rs`, `read_commands.rs`), `accounts/sandbox_sync.rs` |
 | Indexing | `indexer/` |
 | GitHub | `github/` (all calls go through the authenticated `gh` CLI) |
@@ -94,7 +92,5 @@ State-changing endpoints also require the request origin to match `OCR_WEB_APP_U
 | `/data/xdg-config/gh` | GitHub CLI sign-in created by the onboarding device flow. |
 | `/data/accounts/<id>/claude/oauth-token` | Claude Code token from `claude setup-token` (mode `0600`). |
 | `/data/accounts/<id>/codex/auth.json` | ChatGPT sign-in from `codex login` (mode `0600`). Refreshed sign-ins returned by a review replace it. |
-| `/data/accounts/<id>/gemini/oauth_creds.json` | Google sign-in from the Gemini CLI (mode `0600`). Refreshed sign-ins returned by a review replace it. |
-| `/data/accounts/<id>/opencode/auth.json` | OpenCode plan (Go or free), Go key and optional model (mode `0600`). |
 
 OpenCodeReview never manages its own GitHub tokens; `GH_TOKEN` is only a development fallback.

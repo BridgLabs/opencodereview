@@ -139,57 +139,52 @@ pub(crate) fn save_review_engine(request: &Request, state: &SharedState) -> Resu
 pub(crate) fn ai_providers(state: &SharedState) -> Result<serde_json::Value, String> {
     let accounts = with_db_read_raw(state, |db| db.list_ai_accounts())?;
     Ok(serde_json::Value::Array(
-        [
-            ("claude", "Claude"),
-            ("codex", "ChatGPT"),
-            ("gemini", "Gemini"),
-            ("opencode", "OpenCode"),
-        ]
-        .into_iter()
-        .map(|(provider, name)| {
-            // A scratch home keeps CLIs that log or create state on every start out of the data volume.
-            let home = std::env::temp_dir().join("ocr-cli-version");
-            let home = home.to_string_lossy();
-            let homes = [
-                "HOME",
-                "XDG_DATA_HOME",
-                "XDG_CONFIG_HOME",
-                "XDG_CACHE_HOME",
-                "XDG_STATE_HOME",
-            ]
-            .map(|name| format!("{name}={home}"));
-            let args = homes
-                .iter()
-                .map(String::as_str)
-                .chain([provider, "--version"])
-                .collect::<Vec<_>>();
-            let version = command_output_timeout("env", &args, Duration::from_secs(10))
-                .ok()
-                .filter(|output| output.status.success())
-                .and_then(|output| cli_version(&String::from_utf8_lossy(&output.stdout)));
-            let mine = accounts
-                .iter()
-                .filter(|account| account.provider == provider)
-                .collect::<Vec<_>>();
-            let ready = mine
-                .iter()
-                .filter(|account| {
-                    account.enabled
-                        && account.status != "auth_failed"
-                        && crate::accounts::has_credential(provider, account.id)
+        [("claude", "Claude"), ("codex", "ChatGPT")]
+            .into_iter()
+            .map(|(provider, name)| {
+                // A scratch home keeps CLIs that log or create state on every start out of the data volume.
+                let home = std::env::temp_dir().join("ocr-cli-version");
+                let home = home.to_string_lossy();
+                let homes = [
+                    "HOME",
+                    "XDG_DATA_HOME",
+                    "XDG_CONFIG_HOME",
+                    "XDG_CACHE_HOME",
+                    "XDG_STATE_HOME",
+                ]
+                .map(|name| format!("{name}={home}"));
+                let args = homes
+                    .iter()
+                    .map(String::as_str)
+                    .chain([provider, "--version"])
+                    .collect::<Vec<_>>();
+                let version = command_output_timeout("env", &args, Duration::from_secs(10))
+                    .ok()
+                    .filter(|output| output.status.success())
+                    .and_then(|output| cli_version(&String::from_utf8_lossy(&output.stdout)));
+                let mine = accounts
+                    .iter()
+                    .filter(|account| account.provider == provider)
+                    .collect::<Vec<_>>();
+                let ready = mine
+                    .iter()
+                    .filter(|account| {
+                        account.enabled
+                            && account.status != "auth_failed"
+                            && crate::accounts::has_credential(provider, account.id)
+                    })
+                    .collect::<Vec<_>>();
+                serde_json::json!({
+                    "provider": provider,
+                    "name": name,
+                    "installed": version.is_some(),
+                    "version": version,
+                    "accounts": mine.len(),
+                    "ready": ready.len(),
+                    "label": ready.first().map(|account| account.label.clone()),
                 })
-                .collect::<Vec<_>>();
-            serde_json::json!({
-                "provider": provider,
-                "name": name,
-                "installed": version.is_some(),
-                "version": version,
-                "accounts": mine.len(),
-                "ready": ready.len(),
-                "label": ready.first().map(|account| account.label.clone()),
             })
-        })
-        .collect(),
+            .collect(),
     ))
 }
 
