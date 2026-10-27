@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, KeyRound, LogIn, Pencil, Play, Plus, Smartphone, Trash2 } from "lucide-react";
+import { KeyRound, LogIn, Pencil, Play, Plus, Smartphone, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ClaudeSignIn, ClaudeTokenSignIn, CodexSignIn } from "../../components/AccessConnect";
 import { BrandLoading } from "../../components/BrandLoading";
@@ -147,10 +147,7 @@ function AccountRow({
   account,
   usage,
   next,
-  index,
-  count,
   busy,
-  onMove,
   onToggle,
   onRename,
   onSignIn,
@@ -160,10 +157,7 @@ function AccountRow({
   account: AiAccount;
   usage?: AccountUsage;
   next: boolean;
-  index: number;
-  count: number;
   busy: boolean;
-  onMove: (direction: -1 | 1) => void;
   onToggle: () => void;
   onRename: (label: string) => void;
   onSignIn: () => void;
@@ -266,21 +260,17 @@ function AccountRow({
             vertical
             size="iconSm"
             items={[
-              ...(index === 0
+              ...(next
                 ? []
                 : [
                     {
-                      label: "Use first",
+                      label: "Use for new reviews",
                       hint: "New reviews start on this account",
                       icon: <Play />,
-                      disabled: busy || health === "signed-out",
+                      disabled: busy || health === "signed-out" || health === "resting",
                       onSelect: onPick,
                     },
-                    { label: "Move up", icon: <ArrowUp />, disabled: busy, onSelect: () => onMove(-1) },
                   ]),
-              ...(index === count - 1
-                ? []
-                : [{ label: "Move down", icon: <ArrowDown />, disabled: busy, onSelect: () => onMove(1) }]),
               { label: "Rename", icon: <Pencil />, onSelect: () => setEditing(true) },
               { label: "Sign in again", icon: <LogIn />, onSelect: onSignIn },
               {
@@ -367,13 +357,6 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
   const accounts = provider ? all.filter((account) => account.provider === provider) : all;
   const next = nextAccountId(all);
   const busy = update.isPending || reorder.isPending || remove.isPending;
-  // Swaps two neighbours of the shown list in the global order, which may hold other providers between them.
-  const move = (index: number, direction: -1 | 1) => {
-    const ids = all.map((account) => account.id);
-    const [a, b] = [ids.indexOf(accounts[index].id), ids.indexOf(accounts[index + direction].id)];
-    [ids[a], ids[b]] = [ids[b], ids[a]];
-    reorder.mutate(ids);
-  };
   const pick = async (account: AiAccount) => {
     if (!account.enabled) await update.mutateAsync({ id: account.id, enabled: true });
     reorder.mutate([account.id, ...all.filter((other) => other.id !== account.id).map((other) => other.id)]);
@@ -385,9 +368,8 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
         <div>
           <h2 className="text-small font-semibold text-fg">Accounts</h2>
           <p className="mt-0.5 max-w-2xl text-caption text-fg-subtle">
-            {provider
-              ? "Reviews try these accounts in this order. When one hits its usage limit, they move to the next."
-              : "Reviews use the first available account in this list. When it hits its usage limit, they continue on the next one."}
+            New reviews start on the account marked Next review. When it hits its usage limit, they continue on the next
+            account in this list.
           </p>
         </div>
         {!signIn && provider && accounts.length > 0 && (
@@ -464,16 +446,13 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
             </div>
           </div>
         ) : (
-          accounts.map((account, index) => (
+          accounts.map((account) => (
             <AccountRow
               key={account.id}
               account={account}
               usage={usageQueryResult.data?.find((usage) => usage.accountId === account.id)}
               next={account.id === next}
-              index={index}
-              count={accounts.length}
               busy={busy}
-              onMove={(direction) => move(index, direction)}
               onToggle={() => update.mutate({ id: account.id, enabled: !account.enabled })}
               onRename={(label) => update.mutate({ id: account.id, label })}
               onSignIn={() => setSignIn({ provider: account.provider, accountId: account.id })}

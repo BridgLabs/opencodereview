@@ -99,9 +99,9 @@ it("reorders accounts and removes one only after confirmation", async () => {
     });
     const rows = () => [...container.querySelectorAll<HTMLElement>(".account-row")];
     expect(rows().map((row) => row.dataset.account)).toEqual(["1", "2"]);
-    expect(await menuItem(container, "Claude 1", "Move up")).toBeUndefined();
+    expect(await menuItem(container, "Claude 2", "Move up")).toBeUndefined();
     await act(async () => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
-    await menuItem(container, "Claude 2", "Move up");
+    await menuItem(container, "Claude 2", "Use for new reviews");
     expect(setupApi.reorderAccounts).toHaveBeenCalledWith([2, 1]);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -311,9 +311,9 @@ it("starts new reviews on the account picked, resuming it if it was paused", asy
   const { container, unmount } = await renderPanel();
   try {
     expect(container.querySelector('[role="radiogroup"]')).toBeNull();
-    expect(await menuItem(container, "Claude 1", "Use first")).toBeUndefined();
+    expect(await menuItem(container, "Claude 1", "Use for new reviews")).toBeUndefined();
     await act(async () => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
-    await menuItem(container, "ChatGPT", "Use first");
+    await menuItem(container, "ChatGPT", "Use for new reviews");
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });

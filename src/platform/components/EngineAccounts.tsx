@@ -1,0 +1,149 @@
+import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft, Check } from "lucide-react";
+import { useState } from "react";
+import { ClaudeSignIn, ClaudeTokenSignIn, CodexSignIn } from "../../components/AccessConnect";
+import { cx } from "../../components/DesignSystem";
+import type { AiAccount } from "../../types";
+import {
+  accountHealth,
+  accountStatusText,
+  ProviderGlyph,
+  percentLeft,
+  providerName,
+  usageQuery,
+} from "./AccountsPanel";
+
+type Provider = AiAccount["provider"];
+
+/** What a row says about an account: how much is left, or why it can't take reviews now. */
+function accountNote(account: AiAccount, left: number | null) {
+  const health = accountHealth(account);
+  if (health === "signed-out" || health === "resting") return accountStatusText(account);
+  if (health === "paused") return left === null ? "Paused" : `Paused · ${left}% left`;
+  return left === null ? "" : `${left}% left`;
+}
+
+/** The provider's signed-in accounts; choosing one makes new reviews start on it. */
+export function AccountChoices({
+  accounts,
+  nextId,
+  busy,
+  onChoose,
+}: {
+  accounts: AiAccount[];
+  nextId: number;
+  busy: boolean;
+  onChoose: (account: AiAccount) => void;
+}) {
+  const usage = useQuery(usageQuery).data;
+  return (
+    <div className="flex flex-col px-2 pb-1" role="radiogroup" aria-label="Account">
+      {accounts.map((account) => {
+        const selected = account.id === nextId;
+        const health = accountHealth(account);
+        const windows = usage?.find((item) => item.accountId === account.id)?.windows ?? [];
+        const left = windows.length ? Math.min(...windows.map(percentLeft)) : null;
+        const unavailable = health === "signed-out" || health === "resting";
+        return (
+          // biome-ignore lint/a11y/useSemanticElements: radio rows styled as a list; a native radio cannot hold this layout
+          <button
+            key={account.id}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={busy || unavailable}
+            className="flex h-10 w-full flex-none cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-small text-fg transition-colors hover:bg-surface-muted/60 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => !selected && onChoose(account)}
+          >
+            <span
+              className={cx(
+                "grid size-4.5 flex-none place-items-center rounded-full border",
+                selected ? "border-fg bg-fg text-canvas" : "border-line-strong",
+              )}
+            >
+              {selected && <Check className="size-3" strokeWidth={3} />}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{account.label}</span>
+            <span
+              className={cx(
+                "flex-none text-caption tabular-nums",
+                health === "resting"
+                  ? "text-warning"
+                  : health === "signed-out"
+                    ? "text-danger"
+                    : left !== null && left <= 10
+                      ? "text-danger"
+                      : "text-fg-subtle",
+              )}
+            >
+              {accountNote(account, left)}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Signs in a new Claude or ChatGPT account without leaving the picker. */
+export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) => void; onCancel: () => void }) {
+  const [choice, setChoice] = useState<{ provider: Provider; alternative: boolean } | null>(null);
+  const done = () => choice && onDone(choice.provider);
+  const back = () => setChoice(null);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3.5">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          aria-label="Back"
+          className="grid size-7 flex-none cursor-pointer place-items-center rounded-lg text-fg-subtle hover:bg-surface-muted hover:text-fg"
+          onClick={choice ? back : onCancel}
+        >
+          <ArrowLeft className="size-4" />
+        </button>
+        <span className="text-small font-semibold text-fg">
+          {choice ? `Add a ${providerName[choice.provider]} account` : "Add an account"}
+        </span>
+      </div>
+      {!choice ? (
+        <div className="flex flex-col gap-1.5">
+          {(["claude", "codex"] as const).map((provider) => (
+            <button
+              key={provider}
+              type="button"
+              className="flex h-11 cursor-pointer items-center gap-2.5 rounded-lg bg-surface-muted/60 px-3 text-left text-small font-medium text-fg transition-colors hover:bg-surface-muted"
+              onClick={() => setChoice({ provider, alternative: false })}
+            >
+              <ProviderGlyph provider={provider} />
+              {providerName[provider]}
+              <span className="ml-auto text-caption font-normal text-fg-subtle">
+                {provider === "claude" ? "Pro, Max or Team" : "Plus or Pro"}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <>
+          {choice.provider === "codex" ? (
+            <CodexSignIn mode={choice.alternative ? "device" : "browser"} onDone={done} onCancel={back} />
+          ) : choice.alternative ? (
+            <ClaudeTokenSignIn onDone={done} onCancel={back} />
+          ) : (
+            <ClaudeSignIn onDone={done} onCancel={back} />
+          )}
+          <button
+            type="button"
+            className="cursor-pointer self-start text-caption text-fg-subtle underline-offset-2 hover:text-fg hover:underline"
+            onClick={() => setChoice({ ...choice, alternative: !choice.alternative })}
+          >
+            {choice.alternative
+              ? `Sign in to ${providerName[choice.provider]} in the browser instead`
+              : choice.provider === "claude"
+                ? "Paste a token from claude setup-token instead"
+                : "Sign in with a one-time code instead"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
