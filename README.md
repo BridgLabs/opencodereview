@@ -6,15 +6,15 @@
 
 [![License](https://img.shields.io/badge/license-PolyForm_Small_Business_1.0.0-blue.svg)](LICENSE)
 
-AI code review for GitHub pull requests that runs on your own machine, using the Claude, ChatGPT or Gemini account you already have, or OpenCode's free models.
+AI code review for GitHub pull requests that runs on your own machine, using the Claude or ChatGPT account you already have.
 
-OpenCodeReview watches the repositories you pick, reviews each pull request with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli) or [OpenCode](https://github.com/anomalyco/opencode) inside isolated Docker containers, checks every finding against the code, and posts the result on the pull request.
+OpenCodeReview watches the repositories you pick, reviews each pull request with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Codex](https://github.com/openai/codex) inside isolated Docker containers, checks every finding against the code, and posts the result on the pull request.
 
 ![The OpenCodeReview review queue](site/app-reviews.png)
 
 ## Features
 
-- **Your own AI.** Reviews run on the Claude Code CLI (Claude Opus 5.5, medium effort), the Codex CLI or the Gemini CLI, signed in with your Claude, ChatGPT or Google account, or on OpenCode with its free models or your OpenCode Go key. There is no OpenCodeReview account.
+- **Your own AI.** Reviews run on the Claude Code CLI (Claude Opus 5.5, medium effort) or the Codex CLI, signed in with your Claude or ChatGPT account. There is no OpenCodeReview account.
 - **Several accounts with failover.** Connect more than one account, of any provider, and order them. When an account hits its usage limit, the review continues on the next one, and the limited account comes back after its window resets. Settings shows how much of each Claude and ChatGPT plan is left.
 - **Codebase indexing.** Each selected repository is indexed locally: file metadata, a package and import graph, and lightweight symbols. Reviews get the callers, dependencies and tests of the changed code, plus your convention files (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `REVIEW.md` and others).
 - **Usage.** See the tokens reviews used by day, pull request, repository, model and account, with findings, time and cache reuse. A pull request opens into each of its runs.
@@ -33,7 +33,7 @@ git clone https://github.com/BridgLabs/opencodereview && cd opencodereview && do
 Open [http://localhost:1421](http://localhost:1421) and follow onboarding:
 
 1. **GitHub**: sign in with the GitHub device flow.
-2. **Your plan**: connect at least one account. Claude uses `claude setup-token` (you paste back the code it shows); ChatGPT uses the `codex login` browser flow or a device code; Gemini uses the Gemini CLI's Google sign-in (you paste back the code it shows); OpenCode works with no account on its free models, or takes an OpenCode Go key, which OpenCode checks before it is saved.
+2. **Your plan**: connect at least one account. Claude uses `claude setup-token` (you paste back the code it shows); ChatGPT uses the `codex login` browser flow or a device code.
 3. **Repositories**: choose the repositories to monitor. They are cloned and indexed in the background.
 4. **First review**: pick an open pull request. After that, new pull requests in monitored repositories are reviewed automatically.
 
@@ -51,9 +51,9 @@ Set `OCR_VERSION` (for example `OCR_VERSION=0.2.0`) to stay on one release; the 
 - A GitHub account with access to the repositories you want reviewed.
 - At least one of:
   - a Claude subscription that works with Claude Code (Pro, Max, Team or Enterprise);
-  - a ChatGPT plan that includes Codex;
-  - a Google account that can use the Gemini CLI, or
-  - nothing: OpenCode's free models need no account, and an OpenCode Go key unlocks its paid models. Local models through Ollama or similar are not supported: the review egress proxy refuses private networks by design.
+  - a ChatGPT plan that includes Codex.
+
+Local models through Ollama or similar are not supported: the review egress proxy refuses private networks by design.
 
 You do not need Node, pnpm or Rust on the host to run OpenCodeReview. Every AI CLI ships in the image at a pinned, checksum-verified version.
 
@@ -89,8 +89,8 @@ browser ──> web (nginx, :1421) ──/api──> server (Rust API, 127.0.0.1
 | --- | --- |
 | `web` | Serves the React UI and proxies `/api` to `server`. |
 | `server` | Rust HTTP API: GitHub polling through the `gh` CLI, indexing, review orchestration, publication and background jobs. |
-| `review-runner` | Runs Claude Code, Codex, the Gemini CLI or OpenCode on a frozen snapshot of the pull request, one review stage per container at a time. 20 replicas by default (`OCR_REVIEW_RUNNERS`); idle ones use almost no memory. Each receives only a private socket and a read-only copy of the sign-in. |
-| `review-egress` | Outbound proxy that allows only `api.anthropic.com`, `chatgpt.com`, `api.openai.com`, `auth.openai.com`, `oauth2.googleapis.com`, `cloudcode-pa.googleapis.com` and `opencode.ai`, on port 443 and public addresses only. |
+| `review-runner` | Runs Claude Code or Codex on a frozen snapshot of the pull request, one review stage per container at a time. 20 replicas by default (`OCR_REVIEW_RUNNERS`); idle ones use almost no memory. Each receives only a private socket and a read-only copy of the sign-in. |
+| `review-egress` | Outbound proxy that allows only `api.anthropic.com`, `chatgpt.com`, `api.openai.com` and `auth.openai.com`, on port 443 and public addresses only. |
 
 A review fetches the live base and head of the pull request, selects the scope (full, incremental, base sync or stacked), builds context from the index, freezes the evidence into an archive, runs the AI in a runner (split into chunks for large PRs), validates the report and publishes it. On GitHub, OpenCodeReview posts a collapsed summary comment that it updates on each push, a result comment that replaces the previous one, and the validated findings as a single non-blocking review with inline comments. It never approves a pull request on its own.
 
@@ -130,4 +130,4 @@ Licensed under the [PolyForm Small Business License 1.0.0](LICENSE). Individuals
 
 See [NOTICE](NOTICE) for attribution and third-party notices.
 
-OpenCodeReview is an independent source-available project and is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, Google or OpenCode. Their product names are used only to describe compatibility.
+OpenCodeReview is an independent source-available project and is not affiliated with, endorsed by, or sponsored by Anthropic or OpenAI. Their product names are used only to describe compatibility.

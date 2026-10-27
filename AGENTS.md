@@ -6,7 +6,7 @@ Guide for contributors and AI coding agents working on OpenCodeReview. Read it b
 
 ```text
 src/, src/platform/                      React frontend: onboarding, reviews, indexing, skills, settings
-backend/src/providers/                   AI CLIs: claude.rs (fixed model and effort, tool policy), codex.rs, gemini.rs, opencode.rs
+backend/src/providers/                   AI CLIs: claude.rs (fixed model and effort, tool policy), codex.rs
 backend/src/accounts/                    AI account credentials, plan usage, sign-in projection into runners
 backend/src/sandbox/                     ocr-sandbox: runner, egress proxy, read commands, tool guard
 backend/src/review/                      Review orchestration, scope, coverage, evidence, findings, validation
@@ -39,7 +39,7 @@ docker-compose.yml, docker/              Docker runtime, Dockerfiles, smoke and 
 ## Product rules
 
 - OpenCodeReview is reviews, indexing and skills. Do not add unrelated product areas without a discussion in an issue first.
-- Claude reviews run `claude --print` with one fixed model and effort (`MODEL` and `EFFORT` in `backend/src/providers/claude.rs`). Codex reviews run `codex exec` with medium reasoning effort and the CLI's default model. Gemini reviews run the Gemini CLI headless with its default model and web tools denied. OpenCode reviews run `opencode run` on a free model, or on an OpenCode Go model with the account's Go key. Do not add model pickers or other providers without a product discussion.
+- Claude reviews run `claude --print` with one fixed model and effort (`MODEL` and `EFFORT` in `backend/src/providers/claude.rs`). Codex reviews run `codex exec` with medium reasoning effort and the CLI's default model. Do not add model pickers or other providers without a product discussion.
 - All AI CLIs are baked into the image at pinned, checksum-verified versions. Do not add runtime CLI installs or auto-updates.
 - Accounts are tried in priority order across providers (`pick_ai_account`); a usage limit rests the account and the same stage reruns on the next one.
 - Usage is reported in tokens only. Do not add currency or cost estimates.

@@ -10,6 +10,6 @@ BRIDG LABS LTDA also permits, under the same terms, (1) use by an individual for
 non-commercial purposes that are not for the benefit of any company, and (2) use by non-profit
 organizations, of any size.
 
-OpenCodeReview runs the Claude Code, Codex, Gemini and OpenCode CLIs inside its Docker containers.
+OpenCodeReview runs the Claude Code and Codex CLIs inside its Docker containers.
 These CLIs are installed from their vendors when the image is built and are covered by their own
 licenses.

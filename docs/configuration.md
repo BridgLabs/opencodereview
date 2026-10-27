@@ -6,7 +6,7 @@ Most configuration lives in the app under **Settings**. Environment variables co
 
 | Section | What it controls |
 | --- | --- |
-| Accounts | Claude, ChatGPT, Gemini and OpenCode accounts, their priority order, remaining plan usage (Claude and ChatGPT) and which account the next review uses. |
+| Accounts | Claude and ChatGPT accounts, their priority order, remaining plan usage and which account the next review uses. |
 | Repository access | GitHub organizations and repositories to monitor. Only selected repositories are indexed, polled and reviewed. An organization can be monitored as a whole, including repositories created later. |
 | PR selection | Review scope (`Assigned` to you or your teams, or `All PRs`), the maximum number of files per PR (default 100; larger PRs are skipped before any AI call), poll interval and title keywords that skip a PR (for example `renovate`, `chore(deps)`). |
 | Integrations | GitHub and AI CLI status and versions, re-check and sign out. |
