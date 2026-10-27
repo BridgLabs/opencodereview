@@ -2,7 +2,7 @@
   "name": "opencodereview",
   "version": "0.1.0",
   "description": "Self-hosted AI code review for GitHub pull requests.",
-  "license": "FSL-1.1-ALv2",
+  "license": "PolyForm-Small-Business-1.0.0",
   "author": "BRIDG LABS LTDA (https://github.com/BridgLabs)",
   "homepage": "https://github.com/BridgLabs/opencodereview#readme",
   "repository": {

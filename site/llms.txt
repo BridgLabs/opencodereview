@@ -3,7 +3,7 @@
 > OpenCodeReview is a self-hosted, source-available AI code reviewer for GitHub pull requests. It reviews every pull request with the Claude Code, Codex, Gemini or OpenCode CLI, signed in with the Claude, ChatGPT or Google account you already have, or with OpenCode's free models, and posts the findings on the pull request. It is built for indie hackers and solo SaaS builders who have nobody else to review their code.
 
 - Runs on your own machine or server with one Docker command: `git clone https://github.com/BridgLabs/opencodereview && cd opencodereview && docker compose up --build`, then open http://localhost:1421.
-- Free for individuals and companies of any size, including commercial use, under the Functional Source License 1.1 (FSL-1.1-ALv2). The only restriction is selling it as a competing product or service; each version becomes Apache 2.0 two years after release.
+- Free for individuals and companies under 100 people and USD 1M in yearly revenue, including commercial use, under the PolyForm Small Business License 1.0.0. Larger companies need a commercial license from BRIDG LABS LTDA (contato@bridglabs.com).
 - There is no OpenCodeReview account and no per-seat price. The only cost is the AI plan you already pay for.
 - Your code stays on the machine that runs OpenCodeReview; reviews call your AI provider with your own sign-in or key.
 - Supported plans: Claude Pro, Max or Team (Claude Code), ChatGPT plans that include Codex, a Google account (Gemini CLI), OpenCode free models or an OpenCode Go key. Local models are not supported.
