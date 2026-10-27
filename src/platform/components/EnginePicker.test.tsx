@@ -122,8 +122,10 @@ it("shows the next review's engine and changes model, effort and provider", asyn
 
 it("switches to another account of the provider, resuming a paused one and skipping one at its limit", async () => {
   const paused = { ...account(2, "claude", "Brito"), enabled: false };
+  // Paused and still at its limit: resuming it would not start reviews on it, so it can't be picked.
   const limited = {
     ...account(3, "claude", "Bruna"),
+    enabled: false,
     status: "limited" as const,
     limitedUntil: Date.now() + 3_600_000,
   };

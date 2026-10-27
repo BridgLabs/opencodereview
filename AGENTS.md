@@ -41,7 +41,7 @@ docker-compose.yml, docker/              Docker runtime, Dockerfiles, smoke and 
 - OpenCodeReview is reviews, indexing and skills. Do not add unrelated product areas without a discussion in an issue first.
 - Claude reviews run `claude --print` with one fixed model and effort (`MODEL` and `EFFORT` in `backend/src/providers/claude.rs`). Codex reviews run `codex exec` with medium reasoning effort and the CLI's default model. Do not add model pickers or other providers without a product discussion.
 - All AI CLIs are baked into the image at pinned, checksum-verified versions. Do not add runtime CLI installs or auto-updates.
-- Accounts are tried in priority order across providers (`pick_ai_account`); a usage limit rests the account and the same stage reruns on the next one.
+- Accounts are tried in priority order, the first usable account's provider before the other (`pick_ai_account`, mirrored by `nextAccountId` in the UI); a usage limit rests the account and the same stage reruns on the next one.
 - Usage is reported in tokens only. Do not add currency or cost estimates.
 - GitHub access goes through the authenticated `gh` CLI. Do not add OpenCodeReview-managed GitHub tokens.
 - Configuration lives in Settings (Accounts, Repository access, PR selection, Integrations). Review execution and publishing are fixed defaults, not settings.

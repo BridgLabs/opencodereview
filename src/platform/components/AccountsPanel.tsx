@@ -21,8 +21,9 @@ type Health = "ready" | "resting" | "signed-out" | "paused";
 
 export function accountHealth(account: AiAccount, now = Date.now()): Health {
   if (!account.signedIn || account.status === "auth_failed") return "signed-out";
-  if (!account.enabled) return "paused";
+  // A limit outranks a pause: resuming an account still at its limit would not start reviews on it.
   if (account.status === "limited" && (account.limitedUntil ?? 0) > now) return "resting";
+  if (!account.enabled) return "paused";
   return "ready";
 }
 

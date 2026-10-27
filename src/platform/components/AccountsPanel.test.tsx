@@ -66,6 +66,9 @@ it("describes each account by what reviews will do with it", () => {
   );
   expect(accountHealth(account(5, { signedIn: false }), now)).toBe("signed-out");
   expect(accountStatusText(account(6, { enabled: false }), now)).toBe("Paused · reviews skip this account");
+  expect(accountStatusText(account(8, { enabled: false, status: "limited", limitedUntil: now + 3_600_000 }), now)).toBe(
+    "Usage limit reached · resets in 1 h",
+  );
 });
 
 const menuItem = async (container: HTMLElement, accountLabel: string, item: string) => {
