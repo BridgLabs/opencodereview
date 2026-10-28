@@ -209,7 +209,7 @@ def runner_pool(image, count):
         subprocess.run(["docker", "volume", "rm", f"{name}-ipc", f"{name}-auth"], capture_output=True)
 
 
-def authorize(run_dir, requested, authorized, provider, label):
+def authorize(run_dir, requested, authorized, provider, label, marker="authorized.json"):
     """The paid-run gate: inference is spent only with an explicit budget, once per run directory."""
     if authorized is None:
         raise SystemExit(
@@ -219,7 +219,7 @@ def authorize(run_dir, requested, authorized, provider, label):
     if authorized < requested:
         raise SystemExit(f"--authorize-paid-run {authorized} is below the {requested} reviews this run needs")
     run_dir.mkdir(parents=True, exist_ok=True)
-    marker = run_dir / "authorized.json"
+    marker = run_dir / marker
     try:
         with open(marker, "x") as handle:
             json.dump({"provider": provider, "reviews": requested, "at": time.time()}, handle)

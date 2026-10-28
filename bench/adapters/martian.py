@@ -18,6 +18,7 @@ bench/README.md for that route. Needs an authenticated `gh` for the pull request
 """
 
 import argparse
+import fcntl
 import json
 import os
 import pathlib
@@ -48,16 +49,26 @@ def main():
     parser.add_argument("--image", default=os.environ.get("OCR_BENCH_IMAGE", "opencodereview-bench:local"))
     parser.add_argument("--authorize-paid-run", type=int, metavar="REVIEWS")
     parser.add_argument("--jobs", type=int, default=1, help="pull requests reviewed at a time")
+    parser.add_argument("--shard", default="1/1", metavar="K/N",
+                        help="review only the K-th of N slices, so N processes (one per account) split the set")
     args = parser.parse_args()
     common.check_provider(args.provider)
 
     tool = args.tool or f"opencodereview-{args.provider}"
     data_path = args.martian_dir / "results" / "benchmark_data.json"
     data = json.loads(data_path.read_text())
-    urls = [url for url, entry in data.items() if not any(review["tool"] == tool for review in entry.get("reviews") or [])]
+    shard, shards = (int(part) for part in args.shard.split("/"))
+    if not 1 <= shard <= shards:
+        raise SystemExit("--shard must be K/N with 1 <= K <= N")
+    # Slices of the whole set, so a pull request stays in its slice when a rerun skips the done ones.
+    urls = [
+        url for index, url in enumerate(sorted(data))
+        if index % shards == shard - 1 and not any(review["tool"] == tool for review in data[url].get("reviews") or [])
+    ]
     urls = urls[: args.limit] if args.limit else urls
     run_dir = common.BENCH / "results" / "martian" / tool
-    common.authorize(run_dir, len(urls), args.authorize_paid_run, args.provider, "Martian")
+    marker = "authorized.json" if shards == 1 else f"authorized-{shard}-of-{shards}.json"
+    common.authorize(run_dir, len(urls), args.authorize_paid_run, args.provider, "Martian", marker)
     backup = data_path.with_suffix(".before-opencodereview.json")
     if not backup.exists():
         shutil.copyfile(data_path, backup)
@@ -91,8 +102,10 @@ def main():
             ],
             "ocr_status": (export or {}).get("status"),
         }
-        # Re-read before each write: the file is the benchmark's working state, shared by the jobs.
-        with write_lock:
+        # Re-read before each write: the file is the benchmark's working state, shared by the jobs
+        # and by the other shards' processes.
+        with write_lock, open(data_path.with_suffix(".lock"), "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
             data = json.loads(data_path.read_text())
             data[url].setdefault("reviews", [])
             data[url]["reviews"] = [item for item in data[url]["reviews"] or [] if item["tool"] != tool] + [review]

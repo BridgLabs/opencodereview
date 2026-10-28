@@ -97,6 +97,8 @@ python3 bench/adapters/reviewbench.py --reviewbench-dir ../ReviewBench --set tes
 # Martian: 50 PRs, then their judge (needs their .env with a judge key)
 git clone https://github.com/withmartian/code-review-benchmark ../code-review-benchmark
 python3 bench/adapters/martian.py --martian-dir ../code-review-benchmark/offline --provider claude --authorize-paid-run 50
+# Or split the set across accounts: one process per slice, each with its own token
+# (CLAUDE_CODE_OAUTH_TOKEN=... python3 bench/adapters/martian.py ... --shard 1/4, then 2/4, ...)
 (cd ../code-review-benchmark/offline && uv sync \
   && uv run python -m code_review_benchmark.step2_extract_comments --tool opencodereview-claude \
   && uv run python -m code_review_benchmark.step2_5_dedup_candidates --tool opencodereview-claude \
