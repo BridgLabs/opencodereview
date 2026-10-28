@@ -9,6 +9,7 @@ import {
   groupFindingCandidates,
   prepareEmptyFindingDecision,
   reviewBodyHasPostableFinding,
+  reviewBodySuggestions,
   reviewPointKind,
   selectedFindingIds,
 } from "./findings";
@@ -235,5 +236,16 @@ describe("findingDisplayBody", () => {
 
   it("leaves a body without those lines as it is", () => {
     expect(findingDisplayBody("Plain text.")).toBe("Plain text.");
+  });
+});
+
+describe("reviewBodySuggestions", () => {
+  it("returns the suggestions section and never counts it as a finding", () => {
+    const section = "### 💡 Suggestions\n\nLower-priority points.\n\n- `a.rs:3` **Stale test name**. Rename it";
+    expect(reviewBodySuggestions(`No findings.\n\n${section}`)).toBe(section);
+    expect(reviewBodySuggestions(section)).toBe(section);
+    expect(reviewBodySuggestions("No findings.")).toBe("");
+    expect(reviewBodySuggestions(null)).toBe("");
+    expect(reviewBodyHasPostableFinding(section)).toBe(false);
   });
 });

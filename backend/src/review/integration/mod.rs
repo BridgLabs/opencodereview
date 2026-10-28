@@ -14,6 +14,8 @@ pub(super) struct Payload {
     pub sources: Value,
     candidates: BTreeMap<String, Value>,
     notes: Vec<(Vec<String>, Value)>,
+    /// The chunks' validated suggestions, listed in the final summary as they are.
+    pub suggestions: Vec<Value>,
 }
 
 impl Payload {
@@ -22,6 +24,7 @@ impl Payload {
             sources: json!({"commit_id":head,"comments":[]}),
             candidates: BTreeMap::new(),
             notes: vec![],
+            suggestions: vec![],
         }
     }
 
@@ -30,12 +33,22 @@ impl Payload {
             sources,
             candidates: BTreeMap::new(),
             notes: vec![],
+            suggestions: vec![],
         };
         let originals = payload.sources["comments"]
             .as_array()
             .ok_or("Missing integration candidates")?;
         for result in results {
-            let report = serde_json::from_str::<Value>(&result.summary).ok();
+            let mut report = serde_json::from_str::<Value>(&result.summary).ok();
+            if let Some(suggestions) = report
+                .as_mut()
+                .and_then(Value::as_object_mut)
+                .and_then(|report| report.remove("suggestions"))
+            {
+                payload
+                    .suggestions
+                    .extend(suggestions.as_array().cloned().unwrap_or_default());
+            }
             let candidates = originals
                 .iter()
                 .filter(|candidate| candidate["chunkId"].as_u64() == Some(result.chunk.id as u64))

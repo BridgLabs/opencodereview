@@ -1790,3 +1790,33 @@ fn a_batch_skipped_for_time_keeps_its_chunk_findings_unconfirmed() {
     assert!(!warnings.is_empty());
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn chunk_suggestions_go_to_the_final_summary_not_to_the_final_pass() {
+    let suggestion =
+        json!({"path":"src/a.rs","line":2,"title":"Stale test name","detail":"Detail","action":"Rename it"});
+    let result = ChunkResult {
+        cached: false,
+        chunk: ReviewChunk {
+            id: 1,
+            files: vec!["src/a.rs".into()],
+            related_files: vec![],
+            global_context_files: vec![],
+            omitted_convention_files: vec![],
+            risk_triggers: vec![],
+            cross_chunk_group_ids: vec![],
+        },
+        summary: json!({"reviewedFiles":["src/a.rs"],"missingEvidence":[],"findings":[],"suggestions":[suggestion]})
+            .to_string(),
+        comments_json: Some(json!({"commit_id":HEAD,"comments":[]}).to_string()),
+        evidence_warnings: vec![],
+        usage: RunUsage::default(),
+    };
+    let results = vec![result];
+    let payload = Payload::from_results(&results, merge_chunk_findings(&results, HEAD)).unwrap();
+    assert_eq!(payload.suggestions, [suggestion]);
+    assert!(payload
+        .notes
+        .iter()
+        .all(|(_, note)| note["report"].get("suggestions").is_none()));
+}

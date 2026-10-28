@@ -908,6 +908,56 @@ fn relocated_selected_findings_survive_comment_publication() {
 }
 
 #[test]
+fn suggestions_post_with_the_review_but_never_on_their_own_after_duplicates() {
+    let suggestions = format!(
+        "{}\n\n{}\n\n- `a.rs:3` **Stale test name**. Detail Suggested change: Rename it",
+        crate::review::SUGGESTIONS_HEADING,
+        crate::review::SUGGESTIONS_INTRO
+    );
+    let dedupe = |comments: serde_json::Value, suppressed| github::DedupeResult {
+        post_comments: comments,
+        annotated_comments_json: "{\"comments\":[]}".into(),
+        suppressed_count: suppressed,
+    };
+    let only = review_run(
+        Some(&format!("No findings.\n\n{suggestions}")),
+        Some(r#"{"comments":[]}"#),
+    );
+    assert!(review_has_findings(
+        only.comments_json.as_deref(),
+        only.review_body.as_deref()
+    ));
+    assert!(!crate::review::findings::actionable(
+        only.comments_json.as_deref(),
+        only.review_body.as_deref()
+    ));
+    for event in ["COMMENT", "APPROVE"] {
+        let draft = finish_review_post(&only, event, false, dedupe(serde_json::json!([]), 0), "");
+        assert!(draft.body.contains("**Stale test name**"), "{event}");
+        assert!(!draft.body.contains("No findings."), "{event}");
+    }
+    let inline = review_run(
+        Some(&format!(
+            "Automated review produced 1 inline comment(s).\n\n{suggestions}"
+        )),
+        Some(r#"{"comments":[{"body":"[Finding] issue","path":"a.rs","line":3}]}"#),
+    );
+    let draft = finish_review_post(
+        &inline,
+        "COMMENT",
+        false,
+        dedupe(
+            serde_json::json!([{"body":"[Finding] issue","path":"a.rs","line":3}]),
+            0,
+        ),
+        "",
+    );
+    assert!(draft.body.contains("**Stale test name**"));
+    let draft = finish_review_post(&inline, "COMMENT", false, dedupe(serde_json::json!([]), 1), "");
+    assert!(draft.body.is_empty());
+}
+
+#[test]
 fn empty_selected_publication_fails_unless_all_comments_are_proven_duplicates() {
     let run = review_run(
         Some("2 review comments selected for publication."),

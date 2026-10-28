@@ -935,3 +935,73 @@ fn an_anchor_given_as_a_line_of_the_diff_file_moves_to_that_line_of_its_own_file
     assert!(materialize(&report_path, &root, &files, "head", diff, &summary, &comments).is_err());
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn suggestions_are_validated_and_listed_in_the_summary_instead_of_posted_inline() {
+    let root = std::env::temp_dir().join(format!("ocr-suggestions-{}", crate::sandbox::secret().unwrap()));
+    fs::create_dir_all(root.join("changed/src")).unwrap();
+    fs::write(root.join("changed/src/auth.rs"), "allow_all();\nlog();\n").unwrap();
+    let (report_path, summary, comments) = (
+        root.join("report.json"),
+        root.join("summary.md"),
+        root.join("comments.json"),
+    );
+    let files = vec!["src/auth.rs".to_string()];
+    let diff = "diff --git a/src/auth.rs b/src/auth.rs\n--- /dev/null\n+++ b/src/auth.rs\n@@ -0,0 +1,2 @@\n+allow_all();\n+log();\n";
+    let reference = json!({"path":"src/auth.rs","line":1,"quote":"allow_all();"});
+    let suggestion = json!({"title":"No test covers allow_all","detail":"The new call is untested.","action":"Add a test for the tenant check.","path":"src/auth.rs","line":2,"evidence":[{"path":"src/auth.rs","line":2,"quote":"log();"}],"counterEvidence":[reference]});
+    let report = json!({"reviewedFiles":files,"missingEvidence":[],"findings":[{"kind":"finding","title":"Authorization boundary","detail":"All tenants are allowed","action":"Enforce tenant ownership","path":"src/auth.rs","line":1,"side":"RIGHT","evidence":[reference],"counterEvidence":[reference]}],"suggestions":[suggestion, suggestion]});
+    fs::write(&report_path, report.to_string()).unwrap();
+    materialize(&report_path, &root, &files, "head", diff, &summary, &comments).unwrap();
+    let output: serde_json::Value = serde_json::from_str(&fs::read_to_string(&comments).unwrap()).unwrap();
+    assert_eq!(output["comments"].as_array().unwrap().len(), 1);
+    let body = fs::read_to_string(&summary).unwrap();
+    let (points, section) = crate::review::split_suggestions(&body);
+    assert!(!points.contains("Suggestions"));
+    assert!(section.starts_with(crate::review::SUGGESTIONS_HEADING));
+    assert_eq!(
+        section
+            .matches("- `src/auth.rs:2` **No test covers allow_all**")
+            .count(),
+        1
+    );
+    assert!(!crate::review::findings::actionable(None, Some(section)));
+    crate::review::validate_review_templates(&body, Some(&output.to_string())).unwrap();
+    // A suggestion is held to the same evidence rules as a finding, and its error names it.
+    let mut invalid = report.clone();
+    invalid["suggestions"][1]["evidence"][0]["quote"] = json!("invented();");
+    fs::write(&report_path, invalid.to_string()).unwrap();
+    let error = materialize(&report_path, &root, &files, "head", diff, &summary, &comments).unwrap_err();
+    assert!(error.contains("[suggestions[1].evidence[0]]"), "{error}");
+    // A defect cannot move to the suggestions to skip the counter-evidence checks.
+    let mut invalid = report.clone();
+    invalid["suggestions"][0]["counterEvidence"] = json!([]);
+    fs::write(&report_path, invalid.to_string()).unwrap();
+    let error = materialize(&report_path, &root, &files, "head", diff, &summary, &comments).unwrap_err();
+    assert!(error.contains("suggestions[0].counterEvidence"), "{error}");
+    let mut invalid = report;
+    invalid["suggestions"][0]["path"] = json!("src/other.rs");
+    fs::write(&report_path, invalid.to_string()).unwrap();
+    let error = materialize(&report_path, &root, &files, "head", diff, &summary, &comments).unwrap_err();
+    assert!(
+        error.contains("suggestions[0] has invalid required fields: assigned path"),
+        "{error}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_review_with_only_suggestions_keeps_its_summary_as_written() {
+    let body = format!(
+        "No findings.\n\n{}",
+        suggestions_section(&[
+            json!({"path":"a.rs","line":3,"title":"Stale test name","detail":"The test name still says the feature is missing.","action":"Rename the test."})
+        ])
+    );
+    assert_eq!(
+        crate::review::repair_body_only_review_point(body.clone(), Some(r#"{"comments":[]}"#)),
+        body
+    );
+    crate::review::validate_review_templates(&body, Some(r#"{"comments":[]}"#)).unwrap();
+    assert!(suggestions_section(&[]).is_empty());
+}

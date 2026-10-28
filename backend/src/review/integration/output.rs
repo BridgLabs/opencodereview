@@ -183,6 +183,7 @@ pub(crate) fn combine(
     let mut bodies = Vec::new();
     let mut reports = Vec::new();
     let mut evidence_warnings = Vec::new();
+    let mut suggestions = payload.suggestions.clone();
     for output in outputs {
         evidence_warnings.extend(output.evidence_warnings);
         let mut remap = Vec::new();
@@ -206,9 +207,12 @@ pub(crate) fn combine(
             }
             decisions.push(decision);
         }
-        if is_structured_review_point(&output.body) && !bodies.contains(&output.body) {
-            bodies.push(output.body);
+        let (body, _) = crate::review::split_suggestions(&output.body);
+        let body = body.trim_end().to_string();
+        if is_structured_review_point(&body) && !bodies.contains(&body) {
+            bodies.push(body);
         }
+        suggestions.extend(output.report["suggestions"].as_array().cloned().unwrap_or_default());
         reports.push(output.report);
     }
     let raw = require_valid_comments(&json!({"commit_id":head,"comments":comments}).to_string(), head, diff)?;
@@ -216,7 +220,7 @@ pub(crate) fn combine(
     let decisions =
         json!({"contractVersion":2,"snapshotId":archive.archive.descriptor().id,"decisions":decisions}).to_string();
     crate::review::findings::validate_decisions(&payload.sources, Some(&decisions), &raw)?;
-    let body = if bodies.is_empty() {
+    let mut body = if bodies.is_empty() {
         if comments.is_empty() {
             "No findings.".into()
         } else {
@@ -225,6 +229,11 @@ pub(crate) fn combine(
     } else {
         bodies.join("\n\n")
     };
+    let section = crate::review::evidence::suggestions_section(&suggestions);
+    if !section.is_empty() {
+        body.push_str("\n\n");
+        body.push_str(&section);
+    }
     validate_review_templates(&body, Some(&raw))?;
     fs::create_dir_all(merge).map_err(|error| error.to_string())?;
     fs::write(merge.join("finding_decisions.json"), decisions).map_err(|error| error.to_string())?;

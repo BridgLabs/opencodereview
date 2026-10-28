@@ -377,11 +377,12 @@ Run every checklist hit FIRST (blind to any prior comments), THEN filter:
   already guarantee it? is it just a restatement of the diff? If credible
   counter-evidence exists, drop it (or downgrade to a Review question only if
   impact is high and the doubt is genuine).
-- **Signal filter** — keep every actionable finding with concrete evidence,
+- **Signal filter** — keep every actionable point with concrete evidence,
   whatever its severity: correctness and reliability defects, test gaps for
   changed behavior, docs/comments the change contradicts, evidenced
   maintainability and API-shape regressions, accessibility and performance
-  gaps, and high-impact review questions. Drop speculation, taste, and
+  gaps, and high-impact review questions. Test gaps, stale docs/comments/names,
+  duplication and style are kept as suggestions, not findings. Drop speculation, taste, and
   tool-owned issues. Always keep critical security findings.
 - **Confidence** — emit High (concrete failure + direct evidence) and Medium
   (concrete failure + indirect evidence, or high impact with one unknown)
@@ -407,9 +408,19 @@ Run every checklist hit FIRST (blind to any prior comments), THEN filter:
   question). "Nothing to flag" is a valid, good outcome — but only after running
   the loop, never by skipping it.
 
-## Findings vs. Review questions
+## Findings vs. Review questions vs. Suggestions
 
-- A **Finding** is an evidenced problem with a concrete minimal fix.
+- A **Finding** is an evidenced defect with a concrete minimal fix: wrong
+  results, crashes, security, data loss or corruption, concurrency, broken
+  contracts or callers. Findings are posted inline, next to the code.
+- A **Suggestion** is an evidenced lower-priority point of one of these kinds
+  only: a missing or weak test, a test name, comment, doc or message left
+  stale, duplication, dead code, naming or style. Suggestions are listed
+  together in the review summary so readers see what breaks first. Keep finding
+  them, with the same evidence and counter-evidence as a finding.
+- A defect is never a suggestion, whatever its severity or likelihood: wrong
+  results or paths, lost or reordered data, a changed contract or a caller left
+  behind are findings. When unsure, report a finding.
 - A **Review question** is a high-impact unresolved concern where a guarantee is
   missing and you could not prove it either way — phrase it as a genuine
   question to the author, not a verdict. Use it sparingly and only when the

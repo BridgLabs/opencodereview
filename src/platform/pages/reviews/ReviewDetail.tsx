@@ -8,7 +8,7 @@ import type { ReviewCard, ReviewContextPlan, ReviewRun, UsageStats } from "../..
 import { ArrowTabs } from "../../components/ArrowTabs";
 import { FindingSelection } from "../../components/FindingSelection";
 import { ReviewDecisionCarousel } from "../../components/ReviewDecisionCarousel";
-import { reviewBodyHasPostableFinding, reviewPointKind } from "../../lib/findings";
+import { reviewBodyHasPostableFinding, reviewBodySuggestions, reviewPointKind } from "../../lib/findings";
 import { parseChunkProgress } from "../../lib/reviewFlow";
 import { ContextView, PlatformChunkProgress, RiskView, UsageView } from "./RunDetails";
 import { parseComments, parseRisk, type ReviewDecision, shortSha, streamStatusLabel } from "./reviewHelpers";
@@ -59,6 +59,7 @@ export function ReviewDetail({
   const displayRun = run;
   const comments = parseComments(displayRun?.commentsJson ?? null);
   const hasBodyFindings = reviewBodyHasPostableFinding(displayRun?.reviewBody ?? null);
+  const suggestions = reviewBodySuggestions(displayRun?.reviewBody ?? null);
   const hasFindings = comments.length > 0 || hasBodyFindings;
   const hasActionableFindings =
     comments.some(
@@ -90,7 +91,7 @@ export function ReviewDetail({
         ? "Record that another run already posted them."
         : "Share findings without a GitHub verdict.",
       tone: "secondary",
-      enabled: hasFindings,
+      enabled: hasFindings || Boolean(suggestions),
     },
     {
       value: "approve_post",
@@ -280,6 +281,7 @@ export function ReviewDetail({
                   <span>Final findings</span>
                   <span className="text-caption font-normal text-fg-subtle">
                     {comments.length} inline{hasBodyFindings ? " · general review" : ""}
+                    {suggestions ? " · suggestions" : ""}
                   </span>
                 </summary>
                 <div className="finding-group-list grid min-w-0 gap-3 flex flex-col gap-3 p-4">
@@ -312,10 +314,16 @@ export function ReviewDetail({
                       </div>
                     ))}
                   </div>
-                  {(hasBodyFindings || comments.length === 0) && (
+                  {hasBodyFindings || comments.length === 0 ? (
                     <div className="review-comment rounded-lg border border-line bg-surface p-4">
                       <Markdown>{displayRun?.reviewBody ?? ""}</Markdown>
                     </div>
+                  ) : (
+                    suggestions && (
+                      <div className="review-comment review-suggestions rounded-lg border border-line bg-surface p-4">
+                        <Markdown>{suggestions}</Markdown>
+                      </div>
+                    )
                   )}
                 </div>
               </details>

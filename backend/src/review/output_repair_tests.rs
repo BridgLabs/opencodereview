@@ -662,4 +662,20 @@ fn findings_that_stay_invalid_are_dropped_but_never_all_of_them() {
     let kept = read_json(&fixture.directory.join("report.json")).unwrap();
     assert_eq!(kept["findings"].as_array().unwrap().len(), 1);
     assert_eq!(kept["questions"], json!([]));
+
+    // So is a suggestion.
+    let suggestion = json!({
+        "title": "No test covers the retry", "detail": "Fixture detail", "action": "Add a test",
+        "path": "code.rs", "line": 1, "evidence": invalid["evidence"].clone(),
+        "counterEvidence": invalid["counterEvidence"].clone(),
+    });
+    let mut suggested = fixture.report.clone();
+    suggested["suggestions"] = json!([suggestion]);
+    fixture.write(&suggested);
+    fixture
+        .run(&AtomicBool::new(false), |_| panic!("an absent path is not repairable"))
+        .unwrap();
+    let kept = read_json(&fixture.directory.join("report.json")).unwrap();
+    assert_eq!(kept["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(kept["suggestions"], json!([]));
 }

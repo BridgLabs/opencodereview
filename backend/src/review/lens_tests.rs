@@ -37,6 +37,24 @@ fn merge_appends_only_new_findings_and_questions() {
 }
 
 #[test]
+fn merge_appends_only_new_suggestions() {
+    let suggestion = |path: &str, line: i64, title: &str| json!({"path": path, "line": line, "title": title});
+    let first = json!({"findings": [], "suggestions": [suggestion("a.rs", 3, "Stale test name")]});
+    let second = json!({
+        "findings": [],
+        "suggestions": [suggestion("a.rs", 9, "stale test name"), suggestion("a.rs", 9, "No test covers the retry")],
+    });
+    let merged = merge(first, &second);
+    let titles = merged["suggestions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["title"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(titles, ["Stale test name", "No test covers the retry"]);
+}
+
+#[test]
 fn lens_prompt_maps_to_the_runner_like_its_stage() {
     let root = std::env::temp_dir().join(format!("ocr-lens-{}", crate::sandbox::secret().unwrap()));
     let stage = root.join("chunks").join("001");
