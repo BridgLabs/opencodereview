@@ -701,6 +701,8 @@ pub(crate) fn run_inner(
         )
     })?;
     let stage_started_at = now_millis();
+    let reviewing = Instant::now();
+    budget::with(inputs, |budget| budget.plan(1, 1));
     let execution = spawn_and_supervise(
         inputs,
         cancel,
@@ -754,6 +756,7 @@ pub(crate) fn run_inner(
                 )
             },
         )?;
+        budget::with(inputs, |budget| budget.reviewed(reviewing.elapsed()));
         let materialize_to = |report: &Path, context: &Path, summary: &Path, comments: &Path| {
             frozen::materialize(
                 inputs,

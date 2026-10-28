@@ -206,6 +206,7 @@ pub(crate) fn start_review_job_with_intent(
                 review_parallel_chunks: settings.review_parallel_chunks.clamp(1, 20) as usize,
                 db_handle: Some(db_handle.clone()),
                 archive_dir: state.config.archive_dir(),
+                budget: None,
             };
             Ok(inputs)
         })();

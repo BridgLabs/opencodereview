@@ -1,4 +1,5 @@
 mod accounts;
+pub mod bench;
 pub mod db;
 pub mod github;
 pub mod indexer;

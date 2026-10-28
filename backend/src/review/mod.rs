@@ -7,6 +7,7 @@ pub(crate) mod progress;
 pub(crate) mod scope;
 pub(crate) mod warnings;
 
+pub(crate) mod budget;
 mod context_support;
 #[cfg(test)]
 mod diagnostics;
@@ -189,6 +190,8 @@ pub struct ReviewInputs {
     pub db_handle: Option<crate::db::Db>,
     /// Where frozen review archives are stored.
     pub archive_dir: PathBuf,
+    /// The time this review has, when it has a fixed one (`ocr-bench`); None runs every step.
+    pub budget: Option<std::sync::Arc<budget::Budget>>,
 }
 
 impl ReviewInputs {

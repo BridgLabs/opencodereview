@@ -91,6 +91,9 @@ pub(crate) fn run_sharded_review(
     let config_path = run_dir.join("claude.settings.json");
     fs::write(&config_path, review_settings_json()).map_err(|error| error.to_string())?;
     let total_chunks = chunks.len();
+    budget::with(inputs, |budget| {
+        budget.plan(total_chunks, chunk_worker_count(inputs, total_chunks))
+    });
     if inputs.frozen.is_some() {
         let prepared = (|| -> Result<(), String> {
             let mut stages = Vec::new();
@@ -503,8 +506,24 @@ pub(crate) fn run_adaptive_final(
     );
     let mut outputs = Vec::new();
     let mut final_usage = Vec::new();
+    budget::with(inputs, |budget| budget.integrating());
     for (index, stage) in stages.iter().enumerate() {
         check_cancel(cancel)?;
+        if !budget::allows(inputs, budget::Step::FinalBatch) {
+            if let Ok(output) = integration::unconfirmed(stage, &payload, head) {
+                progress(
+                    &sharded_phase_json("final", "running"),
+                    &format!(
+                        "Final integration batch {}/{} skipped: the review's time ran short, so its findings stay as validated in their chunks",
+                        index + 1,
+                        stages.len()
+                    ),
+                );
+                outputs.push(output);
+                continue;
+            }
+        }
+        let integrating = Instant::now();
         let transcript = stage.directory.join("transcript.json");
         let fingerprint = context_fingerprint(&stage.context)?;
         let started = now_millis();
@@ -578,6 +597,7 @@ pub(crate) fn run_adaptive_final(
             started,
             now_millis(),
         );
+        budget::with(inputs, |budget| budget.batch_done(integrating.elapsed()));
         final_usage.push(usage);
         // A batch whose output never validates leaves its candidates as their chunks validated
         // them, marked unconfirmed, as when the final pass leaves one undecided.
@@ -822,7 +842,12 @@ pub(crate) fn run_review_chunk_batch(
                     );
                     finished_at.insert(id, Instant::now());
                     match result {
-                        Ok(result) => results.push(result),
+                        Ok(result) => {
+                            if let Some(comments) = &result.comments_json {
+                                budget::with(inputs, |budget| budget.validated(comments));
+                            }
+                            results.push(result)
+                        }
                         Err(error) => {
                             batch_cancel.store(true, Ordering::Relaxed);
                             if error == "cancelled" {
@@ -1259,6 +1284,7 @@ pub(crate) fn run_review_chunk(
         });
         execution
     };
+    let reviewing = Instant::now();
     let execution = if inputs.frozen.is_none() {
         recovery::run(
             inputs,
@@ -1306,6 +1332,7 @@ pub(crate) fn run_review_chunk(
                 )
             },
         )?;
+        budget::with(inputs, |budget| budget.reviewed(reviewing.elapsed()));
         let materialize_to = |report: &Path, context: &Path, summary: &Path, comments: &Path| {
             frozen::materialize(
                 inputs,

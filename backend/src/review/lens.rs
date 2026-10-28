@@ -32,6 +32,13 @@ pub(super) fn run(
     if !enabled(inputs) {
         return Ok((false, RunUsage::default()));
     }
+    if !budget::allows(inputs, budget::Step::Lens) {
+        progress(
+            &spawn_phase_json(paths),
+            "Lens pass skipped: the review's remaining time is kept for required work",
+        );
+        return Ok((false, RunUsage::default()));
+    }
     let lens = stage.join("lens");
     let started_at = now_millis();
     let result = execute(inputs, cancel, progress, paths, stage, context, &lens, &mut materialize);

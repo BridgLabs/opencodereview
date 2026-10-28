@@ -348,6 +348,7 @@ fn legacy_merge_with_only_excluded_delta_finishes_without_inference() {
         review_parallel_chunks: 1,
         db_handle: Some(db.handle()),
         archive_dir: std::env::temp_dir().join(format!("ocr-review-archives-{}", crate::sandbox::secret().unwrap())),
+        budget: None,
     };
     let output = crate::review::execute(&input, &AtomicBool::new(false), &mut |_, _| {}).unwrap();
     assert!(output.no_new_changes);
@@ -504,6 +505,7 @@ fn stacked_child_integration_finishes_without_inference(integration: &str) {
         review_parallel_chunks: 1,
         db_handle: Some(db.handle()),
         archive_dir: std::env::temp_dir().join(format!("ocr-review-archives-{}", crate::sandbox::secret().unwrap())),
+        budget: None,
     };
     let output = crate::review::execute(&input, &cancel, &mut |_, _| {})
         .expect("Reviewed child must be skipped before model preparation");

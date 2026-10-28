@@ -78,6 +78,7 @@ pub(super) fn review_inputs(depth: &str, threshold: usize, chunk_size: usize) ->
         review_parallel_chunks: 1,
         db_handle: Some(crate::db::Db::for_test()),
         archive_dir: std::path::PathBuf::from("review-archives"),
+        budget: None,
     }
 }
 

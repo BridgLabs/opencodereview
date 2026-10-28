@@ -189,6 +189,7 @@ pub(super) fn validate<T>(
         paths.transcript,
         cancel,
         paths.progress_phase == "final",
+        budget::allows(inputs, budget::Step::Repair),
         validate,
         |diagnostic| {
             progress(
@@ -233,15 +234,24 @@ pub(super) fn run<T>(
     transcript: &Path,
     cancel: &AtomicBool,
     requires_decisions: bool,
+    repair: bool,
     mut validate: impl FnMut() -> Result<T, String>,
     mut launch: impl FnMut(&str) -> Result<(), String>,
 ) -> Result<T, String> {
-    let error = match validate() {
+    let mut error = match validate() {
         Ok(value) => return Ok(value),
         Err(error) => error,
     };
     if !repairable(&error) {
         return drop_invalid(directory, error, validate);
+    }
+    // Without time for a repair, dropping the invalid points keeps the rest; an error that names
+    // no point, or a report that would be left empty, still gets the repair.
+    if !repair && invalid_point(&error).is_some() {
+        match drop_invalid(directory, error, &mut validate) {
+            Ok(value) => return Ok(value),
+            Err(remaining) => error = remaining,
+        }
     }
     check_cancel(cancel)?;
     let report_path = directory.join("report.json");

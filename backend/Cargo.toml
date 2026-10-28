@@ -17,6 +17,10 @@ path = "src/main_server.rs"
 name = "ocr-sandbox"
 path = "src/main_sandbox.rs"
 
+[[bin]]
+name = "ocr-bench"
+path = "src/main_bench.rs"
+
 [lib]
 name = "opencodereview_server"
 

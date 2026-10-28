@@ -1206,6 +1206,7 @@ fn final_output_repair_preserves_distinct_findings_and_decision_indices() {
             &stage.directory.join("transcript.json"),
             &AtomicBool::new(false),
             true,
+            true,
             || validate_output(&inputs, stage, &payload, HEAD),
             |_| {
                 attempts += 1;

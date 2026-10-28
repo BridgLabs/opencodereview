@@ -87,6 +87,7 @@ impl Fixture {
             &self.directory.join("transcript.json"),
             cancel,
             false,
+            true,
             || self.validate(),
             launch,
         )
@@ -345,6 +346,7 @@ fn repair_runs_beside_missing_evidence_but_never_changes_it() {
             &fixture.directory.join("transcript.json"),
             &AtomicBool::new(false),
             false,
+            true,
             validate,
             |_| {
                 launched = true;
@@ -689,4 +691,33 @@ fn findings_that_stay_invalid_are_dropped_but_never_all_of_them() {
     let kept = read_json(&fixture.directory.join("report.json")).unwrap();
     assert_eq!(kept["findings"].as_array().unwrap().len(), 1);
     assert_eq!(kept["suggestions"], json!([]));
+}
+
+#[test]
+fn without_time_for_a_repair_invalid_findings_are_dropped_instead() {
+    let fixture = Fixture::new();
+    let mut invalid = fixture.report["findings"][0].clone();
+    invalid["title"] = json!("Anchored outside the diff");
+    invalid["line"] = json!(999);
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([fixture.report["findings"][0].clone(), invalid]);
+    fixture.write(&report);
+    run(
+        &fixture.directory,
+        &fixture.context,
+        &fixture.directory.join("prompt.md"),
+        &fixture.directory.join("transcript.json"),
+        &AtomicBool::new(false),
+        false,
+        false,
+        || fixture.validate(),
+        |_| panic!("the budget left no time for a repair"),
+    )
+    .unwrap();
+    let kept = read_json(&fixture.directory.join("report.json")).unwrap();
+    assert_eq!(kept["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        read_json(&fixture.directory.join(DROPPED)).unwrap(),
+        json!([{"path":"code.rs","title":"Anchored outside the diff"}])
+    );
 }
