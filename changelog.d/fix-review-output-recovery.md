@@ -21,3 +21,5 @@
   as Sonnet sometimes does, is read instead of failing the stage.
 - The review prompt now says every finding needs at least one counter-evidence reference, which
   models left empty and then needed an output repair for.
+- A finding anchored to a line number of the pull request's diff file, instead of the changed
+  file's own line number, is moved to the right line instead of being dropped or repaired.

@@ -62,6 +62,48 @@ pub(crate) fn diff_anchor_lines(diff: &str) -> std::collections::HashMap<(String
     anchors
 }
 
+/// The anchor that line `number` (1-based) of `diff` itself adds or removes, if any. Models that
+/// read PR_DIFF.patch with line numbers sometimes report that line number instead of the file's.
+pub(crate) fn diff_line_anchor(diff: &str, number: i64) -> Option<(String, i64, String)> {
+    let mut path = String::new();
+    let mut old_line = 0i64;
+    let mut new_line = 0i64;
+    for (index, line) in diff.lines().enumerate() {
+        let here = index as i64 + 1 == number;
+        if line.starts_with("diff --git ") {
+            path.clear();
+        } else if let Some(raw) = line.strip_prefix("+++ ").or_else(|| line.strip_prefix("--- ")) {
+            if let Some(decoded) = crate::review_archive::decoded_git_path(raw) {
+                if let Some(relative) = decoded.strip_prefix("a/").or_else(|| decoded.strip_prefix("b/")) {
+                    path = relative.into();
+                }
+            }
+        } else if line.starts_with("@@") {
+            if let Some((old_start, new_start)) = parse_hunk_header(line) {
+                old_line = old_start;
+                new_line = new_start;
+            }
+        } else if line.starts_with('+') {
+            if here {
+                return Some((path, new_line, "RIGHT".into()));
+            }
+            new_line += 1;
+        } else if line.starts_with('-') {
+            if here {
+                return Some((path, old_line, "LEFT".into()));
+            }
+            old_line += 1;
+        } else if !line.starts_with("index ") {
+            old_line += 1;
+            new_line += 1;
+        }
+        if here {
+            return None;
+        }
+    }
+    None
+}
+
 pub(crate) fn parse_hunk_header(line: &str) -> Option<(i64, i64)> {
     let mut parts = line.split_whitespace();
     parts.next()?;

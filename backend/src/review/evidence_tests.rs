@@ -894,3 +894,44 @@ fn quotes_bind_to_the_nearest_line_that_holds_them() {
     assert_eq!(quoted_line(content, 2, "let z = 3;"), None);
     assert_eq!(quoted_line("same\nother\nsame\n", 2, "same"), None);
 }
+
+#[test]
+fn an_anchor_given_as_a_line_of_the_diff_file_moves_to_that_line_of_its_own_file() {
+    let root = std::env::temp_dir().join(format!("ocr-diff-lines-{}", crate::sandbox::secret().unwrap()));
+    fs::create_dir_all(root.join("changed/src")).unwrap();
+    fs::write(root.join("changed/src/a.rs"), "first();\nsecond();\n").unwrap();
+    fs::write(root.join("changed/src/b.rs"), "allow_all();\n").unwrap();
+    let (report_path, summary, comments) = (
+        root.join("report.json"),
+        root.join("summary.md"),
+        root.join("comments.json"),
+    );
+    let files = vec!["src/a.rs".to_string(), "src/b.rs".to_string()];
+    let diff = "diff --git a/src/a.rs b/src/a.rs\n--- /dev/null\n+++ b/src/a.rs\n@@ -0,0 +1,2 @@\n+first();\n+second();\ndiff --git a/src/b.rs b/src/b.rs\n--- /dev/null\n+++ b/src/b.rs\n@@ -0,0 +1 @@\n+allow_all();\n";
+    let finding = |path: &str, line: i64, quote: &str| {
+        let reference = json!({"path":path,"line":1,"quote":quote});
+        json!({"kind":"finding","title":"Boundary","detail":"Detail","action":"Fix","path":path,"line":line,"side":"RIGHT","evidence":[reference],"counterEvidence":[reference]})
+    };
+    // Line 11 of the diff adds src/b.rs line 1, and line 5 adds src/a.rs line 1.
+    let report = json!({"reviewedFiles":files,"missingEvidence":[],"findings":[finding("src/b.rs", 11, "allow_all();"), finding("src/a.rs", 5, "first();")]});
+    fs::write(&report_path, report.to_string()).unwrap();
+    materialize(&report_path, &root, &files, "head", diff, &summary, &comments).unwrap();
+    let output: serde_json::Value = serde_json::from_str(&fs::read_to_string(&comments).unwrap()).unwrap();
+    let lines = output["comments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|comment| {
+            (
+                comment["path"].as_str().unwrap().to_string(),
+                comment["line"].as_i64().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(lines, [("src/b.rs".to_string(), 1), ("src/a.rs".to_string(), 1)]);
+    // A diff line that belongs to another file is not this finding's line.
+    let report = json!({"reviewedFiles":files,"missingEvidence":[],"findings":[finding("src/a.rs", 11, "first();")]});
+    fs::write(&report_path, report.to_string()).unwrap();
+    assert!(materialize(&report_path, &root, &files, "head", diff, &summary, &comments).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
