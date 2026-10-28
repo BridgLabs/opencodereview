@@ -740,6 +740,14 @@ fn drop_unmatched_closers(text: &str) -> String {
     output
 }
 
+/// Where an object opening with the `report` key starts, for a sentence the model ran straight
+/// into the object.
+fn report_object(text: &str) -> Option<usize> {
+    text.match_indices('{')
+        .map(|(index, _)| index)
+        .find(|&index| text[index + 1..].trim_start().starts_with("\"report\""))
+}
+
 fn final_response(transcript: Option<&str>) -> Result<(String, Option<String>), String> {
     let raw = transcript.ok_or("Review final response is missing: no transcript")?;
     parse_final_response(&crate::providers::claude::final_result(raw)?, false)
@@ -754,7 +762,8 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
         return Err("Review final response is empty".into());
     }
     // Only the final answer counts, never earlier steps or tool output. Claude may wrap the
-    // object in a fence or put a short sentence before it; exactly one object is read.
+    // object in a fence or put a short sentence before it, on its own line or right before the
+    // object; exactly one object is read.
     let fence = text.find("```");
     let start = match fence {
         _ if text.starts_with('{') => 0,
@@ -764,12 +773,16 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
                 .ok_or("Review final response has an unclosed JSON fence")?
                 + 1
         }
-        None => text.find("\n{").map(|line| line + 1).ok_or_else(|| {
-            format!(
-                "Review final response has no JSON object ({} characters of text)",
-                text.chars().count()
-            )
-        })?,
+        None => text
+            .find("\n{")
+            .map(|line| line + 1)
+            .or_else(|| report_object(text))
+            .ok_or_else(|| {
+                format!(
+                    "Review final response has no JSON object ({} characters of text)",
+                    text.chars().count()
+                )
+            })?,
     };
     let parse = |body: &str| {
         let mut objects = serde_json::Deserializer::from_str(body).into_iter::<FinalResponse>();

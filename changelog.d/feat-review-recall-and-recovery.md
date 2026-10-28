@@ -23,3 +23,5 @@
   models left empty and then needed an output repair for.
 - A finding anchored to a line number of the pull request's diff file, instead of the changed
   file's own line number, is moved to the right line instead of being dropped or repaired.
+- A final answer that runs a sentence straight into the report object, with no line break before
+  it, is read instead of failing the review.

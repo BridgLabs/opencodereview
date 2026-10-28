@@ -597,3 +597,12 @@ fn final_response_moves_a_report_identity_written_beside_it_into_the_report() {
     );
     assert!(parse_final_response(&json!({"title":"x","report":{}}).to_string(), false).is_err());
 }
+
+#[test]
+fn final_response_reads_an_object_written_right_after_a_sentence() {
+    let report = json!({"reviewedFiles":["a.go"],"missingEvidence":[],"findings":[]});
+    let output = format!("I checked every caller. {}", json!({"report":report}));
+    let (actual, _) = parse_final_response(&output, false).unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&actual).unwrap(), report);
+    assert!(parse_final_response("I found {two} issues but wrote no object.", false).is_err());
+}
