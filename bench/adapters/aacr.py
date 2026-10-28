@@ -32,6 +32,8 @@ def main():
     parser.add_argument("--image", default=os.environ.get("OCR_BENCH_IMAGE", "opencodereview-bench:local"))
     parser.add_argument("--authorize-paid-run", type=int, metavar="REVIEWS")
     parser.add_argument("--jobs", type=int, default=1, help="instances reviewed at a time")
+    parser.add_argument("--shard", default="1/1", metavar="K/N",
+                        help="review only the K-th of N slices, so N processes (one per account) split the set")
     args = parser.parse_args()
     common.check_provider(args.provider)
 
@@ -40,8 +42,17 @@ def main():
     instances = instances[: args.limit] if args.limit else instances
     run_id = args.run_id or f"opencodereview-{args.provider}"
     results = args.aacr_dir / "results" / dataset.stem / "ocr" / run_id
-    pending = [item for item in instances if not (results / result_name(item)).exists()]
-    common.authorize(common.BENCH / "results" / "aacr" / run_id, len(pending), args.authorize_paid_run, args.provider, "AACR-Bench")
+    shard, shards = (int(part) for part in args.shard.split("/"))
+    if not 1 <= shard <= shards:
+        raise SystemExit("--shard must be K/N with 1 <= K <= N")
+    # Slices of the whole set, so an instance stays in its slice when a rerun skips the done ones.
+    pending = [
+        item for index, item in enumerate(instances)
+        if index % shards == shard - 1 and not (results / result_name(item)).exists()
+    ]
+    suffix = "" if shards == 1 else f"-{shard}-of-{shards}"
+    common.authorize(common.BENCH / "results" / "aacr" / run_id, len(pending), args.authorize_paid_run, args.provider,
+                     "AACR-Bench", f"authorized{suffix}.json")
 
     def one(index, item):
         nwo = item["repo"]
@@ -83,7 +94,7 @@ def main():
         return {"instance_id": item["instance_id"], "status": payload["status"], "findings": len(findings["findings"])}
 
     summary = common.run_all(pending, args.jobs, one)
-    (common.BENCH / "results" / "aacr" / run_id / "summary.json").write_text(json.dumps(summary, indent=2))
+    (common.BENCH / "results" / "aacr" / run_id / f"summary{suffix}.json").write_text(json.dumps(summary, indent=2))
     common.log(f"done: results in {results}")
 
 

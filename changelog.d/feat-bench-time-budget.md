@@ -7,3 +7,4 @@
   validated instead of none.
 - The Martian benchmark adapter can split its pull requests across several processes, one per
   account, without them overwriting each other's results.
+- The AACR-Bench adapter can split its instances across accounts the same way.
