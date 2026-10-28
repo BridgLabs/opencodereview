@@ -145,6 +145,16 @@ pub(crate) fn changed_files_local(repo_path: &Path, range: &str, cancel: &Atomic
 }
 
 /// Blobs a diff of `range` reads. Reading trees only, so it never triggers a lazy fetch.
+/// The paths in a `git diff --raw -z --no-renames` listing.
+fn diff_paths(raw: &[u8]) -> Vec<String> {
+    let fields = raw.split(|byte| *byte == 0).collect::<Vec<_>>();
+    fields
+        .windows(2)
+        .filter(|pair| pair[0].first() == Some(&b':'))
+        .map(|pair| String::from_utf8_lossy(pair[1]).into_owned())
+        .collect()
+}
+
 pub(crate) fn diff_blob_ids(raw: &[u8]) -> Vec<String> {
     let mut ids = raw
         .split(|byte| *byte == 0)
@@ -176,19 +186,46 @@ pub(crate) fn prefetch_diff_blobs(repo_path: &Path, range: &str, cancel: &Atomic
     if ids.is_empty() {
         return Ok(());
     }
-    // Docker's Git 2.39 aborts `cat-file --batch-check` on a missing promisor object, so list
-    // the objects present locally instead.
-    let present = crate::indexer::git_frozen_with_input(
+    // Docker's Git 2.39 aborts `cat-file --batch-check` on a missing promisor object and fails
+    // `rev-list` on a missing tip, and listing every object overflows the capture budget on large
+    // repositories. So walk only the diff's paths from the range's commits, which are always
+    // present: `--missing=print` marks the absent blobs with `?` without fetching them.
+    let (from, to) = range
+        .split_once("...")
+        .or_else(|| range.split_once(".."))
+        .ok_or("Invalid diff range")?;
+    let mut input = format!("{from}\n{to}\n");
+    if range.contains("...") {
+        let base = git_capture(repo_path, &["merge-base", from, to], cancel, 30)?;
+        input.push_str(String::from_utf8_lossy(&base).trim());
+        input.push('\n');
+    }
+    input.push_str("--\n");
+    for path in diff_paths(&raw) {
+        input.push_str(&path);
+        input.push('\n');
+    }
+    let listed = crate::indexer::git_frozen_with_input(
         repo_path,
-        &["cat-file", "--batch-all-objects", "--batch-check=%(objectname)"],
+        &[
+            "--literal-pathspecs",
+            "rev-list",
+            "--objects",
+            "--no-walk",
+            "--no-object-names",
+            "--missing=print",
+            "--stdin",
+        ],
         cancel,
-        &[],
+        input.as_bytes(),
     )?;
-    let present = String::from_utf8_lossy(&present)
+    let ids = ids.into_iter().collect::<std::collections::HashSet<_>>();
+    let missing = String::from_utf8_lossy(&listed)
         .lines()
+        .filter_map(|line| line.strip_prefix('?'))
+        .filter(|id| ids.contains(*id))
         .map(str::to_string)
-        .collect::<std::collections::HashSet<_>>();
-    let missing = ids.into_iter().filter(|id| !present.contains(id)).collect::<Vec<_>>();
+        .collect::<Vec<_>>();
     for batch in missing.chunks(128) {
         let mut fetch = vec![
             "-c",
@@ -251,8 +288,10 @@ pub(crate) fn diff_local_paths(repo_path: &Path, range: &str, paths: &[String], 
     if paths.is_empty() {
         return String::new();
     }
+    // Paths are names, not globs: `[key].ts` must not match `k.ts`.
+    let literal = paths.iter().map(|path| format!(":(literal){path}")).collect::<Vec<_>>();
     let mut args: Vec<&str> = vec!["diff", range, "--"];
-    args.extend(paths.iter().map(String::as_str));
+    args.extend(literal.iter().map(String::as_str));
     git_capture(repo_path, &args, cancel, 90)
         .map(|output| String::from_utf8_lossy(&output).to_string())
         .unwrap_or_default()
@@ -271,7 +310,15 @@ pub(crate) fn is_ancestor(repo_path: &Path, ancestor: &str, descendant: &str, ca
 
 /// Read a file's content at a given ref/sha from the local git object DB.
 pub(crate) fn show_blob(repo_path: &Path, reference: &str, path: &str, cancel: &AtomicBool) -> Option<String> {
-    let output = git_capture(repo_path, &["show", &format!("{reference}:{path}")], cancel, 30).ok()?;
+    // `cat-file` reads exactly that blob and fails when it is absent; `show` prints nothing and
+    // succeeds for a deleted path such as `[key].ts`.
+    let output = git_capture(
+        repo_path,
+        &["cat-file", "blob", &format!("{reference}:{path}")],
+        cancel,
+        30,
+    )
+    .ok()?;
     String::from_utf8(output).ok()
 }
 

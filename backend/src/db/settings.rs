@@ -60,6 +60,12 @@ impl Database {
             .and_then(|value| value.parse().ok())
             .filter(|value| *value > 0)
             .unwrap_or(100);
+        let review_focus_files = self
+            .setting("review_focus_files")?
+            .and_then(|value| value.parse().ok())
+            .filter(|value| *value >= 0)
+            .unwrap_or(0);
+        let review_lens_pass = self.setting("review_lens_pass")?.is_some_and(|value| value == "true");
         let dismiss_stale_approvals = self
             .setting("dismiss_stale_approvals")?
             .map(|value| value == "true")
@@ -125,6 +131,8 @@ impl Database {
             review_chunk_size,
             review_parallel_chunks,
             review_max_files,
+            review_focus_files,
+            review_lens_pass,
             dismiss_stale_approvals,
             auto_index_stale_repos,
             auto_post_mode,
@@ -156,6 +164,8 @@ impl Database {
         "review_chunk_size",
         "review_parallel_chunks",
         "review_max_files",
+        "review_focus_files",
+        "review_lens_pass",
         "dismiss_stale_approvals",
         "auto_index_stale_repos",
         "auto_post_mode",
@@ -201,6 +211,12 @@ impl Database {
         ) && value.parse::<i64>().ok().filter(|value| *value > 0).is_none()
         {
             return Err("Review numeric settings must be positive.".to_string());
+        }
+        if key == "review_focus_files" && value.parse::<i64>().ok().filter(|value| *value >= 0).is_none() {
+            return Err("review_focus_files must be zero or a positive number of files.".to_string());
+        }
+        if key == "review_lens_pass" && !matches!(value, "true" | "false") {
+            return Err("review_lens_pass must be true or false.".to_string());
         }
         self.conn
             .execute(
@@ -284,6 +300,7 @@ impl Database {
                 "review_chunk_size" => Some(2..=20),
                 "review_parallel_chunks" => Some(1..=20),
                 "review_max_files" => Some(1..=i64::MAX),
+                "review_focus_files" => Some(0..=i64::MAX),
                 "review_archive_retention_days" => Some(1..=365),
                 _ => None,
             };

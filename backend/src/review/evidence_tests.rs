@@ -879,3 +879,18 @@ fn report_shape_errors_name_the_field_path() {
     extra["findings"][0]["severity"] = json!("high");
     assert_eq!(super::schema_report_fields(extra), report);
 }
+
+#[test]
+fn quotes_bind_to_the_nearest_line_that_holds_them() {
+    let content = "fn a() {\n    let x = 1;\n    let y = 2;\n    x + y\n}\n";
+    assert_eq!(quoted_line(content, 2, "let x = 1;"), Some(2));
+    // Miscounted by up to three lines: the text is exact, so the line is corrected.
+    assert_eq!(quoted_line(content, 4, "let x = 1;"), Some(2));
+    assert_eq!(quoted_line(content, 1, "x + y"), Some(4));
+    // Past the end of the file, but within reach of the quoted line.
+    assert_eq!(quoted_line(content, 7, "x + y"), Some(4));
+    // Too far, absent, or equally near in both directions: still a mismatch.
+    assert_eq!(quoted_line(content, 6, "let x = 1;"), None);
+    assert_eq!(quoted_line(content, 2, "let z = 3;"), None);
+    assert_eq!(quoted_line("same\nother\nsame\n", 2, "same"), None);
+}

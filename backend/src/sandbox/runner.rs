@@ -683,6 +683,9 @@ pub(crate) fn read_output(path: &Path, limit: u64) -> Result<Option<String>, Str
 struct FinalResponse {
     report: serde_json::Value,
     finding_decisions: Option<serde_json::Value>,
+    // Some models put the report's identity beside it instead of inside it.
+    contract_version: Option<serde_json::Value>,
+    snapshot_id: Option<serde_json::Value>,
 }
 
 /// Escapes backslashes the model left unescaped inside JSON strings, as in a quoted `\d`.
@@ -705,6 +708,34 @@ fn escape_stray_backslashes(text: &str) -> String {
             },
             _ => output.push(c),
         }
+    }
+    output
+}
+
+/// Drops closing brackets that close nothing open, as in a finding the model ended with `}}`.
+/// Only structure changes: every string keeps its exact bytes.
+fn drop_unmatched_closers(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut open = Vec::new();
+    let (mut in_string, mut escaped) = (false, false);
+    for c in text.chars() {
+        if in_string {
+            in_string = escaped || c != '"';
+            escaped = !escaped && c == '\\';
+        } else {
+            match c {
+                '"' => in_string = true,
+                '{' | '[' => open.push(c),
+                '}' | ']' => {
+                    if open.last() != Some(&if c == '}' { '{' } else { '[' }) {
+                        continue;
+                    }
+                    open.pop();
+                }
+                _ => {}
+            }
+        }
+        output.push(c);
     }
     output
 }
@@ -748,8 +779,12 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
             .map(|response| (response, body[objects.byte_offset()..].trim_start().starts_with("```")))
             .map_err(|error| format!("Review final response is not valid structured JSON ({error})"))
     };
-    let (response, closed) =
-        parse(&text[start..]).or_else(|error| parse(&escape_stray_backslashes(&text[start..])).map_err(|_| error))?;
+    let (response, closed) = parse(&text[start..]).or_else(|error| {
+        let escaped = escape_stray_backslashes(&text[start..]);
+        parse(&escaped)
+            .or_else(|_| parse(&drop_unmatched_closers(&escaped)))
+            .map_err(|_| error)
+    })?;
     if fence.is_some() && !text.starts_with('{') && !closed {
         return Err("Review final response has an unclosed JSON fence".into());
     }
@@ -759,7 +794,17 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
         }
         value => value,
     };
-    let report = unwrap(response.report);
+    let mut report = unwrap(response.report);
+    for (key, value) in [
+        ("contractVersion", response.contract_version),
+        ("snapshotId", response.snapshot_id),
+    ] {
+        let (Some(value), Some(fields)) = (value, report.as_object_mut()) else {
+            continue;
+        };
+        // The report's own value wins; validation checks it against the stage either way.
+        fields.entry(key).or_insert(value);
+    }
     let decisions = response.finding_decisions.map(unwrap);
     let decisions = if lenient {
         decisions
@@ -1160,6 +1205,7 @@ pub fn serve() -> Result<(), String> {
             _ => return Err("Runner socket is already active or inaccessible".into()),
         }
     }
+    let kept = kept_work_entries(std::env::var("OCR_RUNNER_KEEP").ok().as_deref())?;
     let listener = UnixListener::bind(&socket).map_err(|e| e.to_string())?;
     for stream in listener.incoming() {
         let mut stream = stream.map_err(|e| e.to_string())?;
@@ -1176,6 +1222,9 @@ pub fn serve() -> Result<(), String> {
         for directory in ["/work", "/output", "/scratch", "/tmp", "/evidence"] {
             for entry in fs::read_dir(directory).map_err(|e| e.to_string())? {
                 let path = entry.map_err(|e| e.to_string())?.path();
+                if directory == "/work" && kept.iter().any(|name| path == Path::new("/work").join(name)) {
+                    continue;
+                }
                 if fs::symlink_metadata(&path).map_err(|e| e.to_string())?.is_dir() {
                     fs::remove_dir_all(path)
                 } else {
@@ -1186,6 +1235,27 @@ pub fn serve() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Entries directly under `/work` that the runner leaves in place between jobs: the benchmark
+/// image (`ocr-bench`) mounts its inputs there. Stage files never use these names. Unset in the
+/// product, where `/work` is the runner's own tmpfs.
+pub(crate) fn kept_work_entries(raw: Option<&str>) -> Result<Vec<String>, String> {
+    let names = raw
+        .unwrap_or_default()
+        .split(',')
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    for name in &names {
+        if name.len() > 32
+            || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            || matches!(name.as_str(), "context" | "integration" | "prompt.md")
+        {
+            return Err("Invalid OCR_RUNNER_KEEP entry".into());
+        }
+    }
+    Ok(names)
 }
 
 #[cfg(test)]

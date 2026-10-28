@@ -60,6 +60,7 @@ pub(super) fn review_inputs(depth: &str, threshold: usize, chunk_size: usize) ->
         number: 1,
         base_ref: "main".to_string(),
         fixed_head_sha: None,
+        offline: false,
         expected_scope: None,
         prior_scope: None,
         last_reviewed_sha: None,

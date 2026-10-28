@@ -439,6 +439,16 @@ fn final_response_escapes_stray_backslashes_in_quoted_code() {
 }
 
 #[test]
+fn final_response_drops_closers_that_close_nothing() {
+    let raw = r#"{"report":{"findings":[{"title":"a","counterEvidence":[{"quote":"if (x) {"}]}},{"title":"b ]}"}]}}"#;
+    let (report, _) = final_response(Some(&final_transcript(json!(raw)))).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&report).unwrap(),
+        json!({"findings":[{"title":"a","counterEvidence":[{"quote":"if (x) {"}]},{"title":"b ]}"}]})
+    );
+}
+
+#[test]
 fn final_response_rejects_missing_malformed_and_unsuccessful_results() {
     for raw in [
         None,
@@ -557,4 +567,33 @@ fn final_response_materializes_report_and_decisions_without_model_written_files(
         0
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn kept_work_entries_accept_plain_names_and_never_stage_paths() {
+    assert!(kept_work_entries(None).unwrap().is_empty());
+    assert_eq!(kept_work_entries(Some("repo,pr,out")).unwrap(), ["repo", "pr", "out"]);
+    for invalid in ["../etc", "repo/x", "context", "integration", "prompt.md", "a b"] {
+        assert!(kept_work_entries(Some(invalid)).is_err(), "{invalid}");
+    }
+}
+
+#[test]
+fn final_response_moves_a_report_identity_written_beside_it_into_the_report() {
+    let report = json!({"reviewedFiles":["a.ts"],"missingEvidence":[],"findings":[]});
+    let output = json!({"contractVersion":2,"snapshotId":"snapshot","report":report}).to_string();
+    let (actual, _) = parse_final_response(&output, false).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+        json!({"contractVersion":2,"snapshotId":"snapshot","reviewedFiles":["a.ts"],"missingEvidence":[],"findings":[]})
+    );
+    let same = json!({"snapshotId":"snapshot","report":{"snapshotId":"snapshot","findings":[]}}).to_string();
+    assert!(parse_final_response(&same, false).is_ok());
+    let conflicting = json!({"snapshotId":"other","report":{"snapshotId":"snapshot","findings":[]}}).to_string();
+    let (report, _) = parse_final_response(&conflicting, false).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&report).unwrap()["snapshotId"],
+        "snapshot"
+    );
+    assert!(parse_final_response(&json!({"title":"x","report":{}}).to_string(), false).is_err());
 }

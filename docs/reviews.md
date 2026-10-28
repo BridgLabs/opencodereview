@@ -72,7 +72,7 @@ Related code comes from the [index](indexing.md): owning and dependent packages,
 
 GitHub file links pinned to a commit, branch or tag in the PR description, and submodules, are resolved to exact commits and added as read-only supporting evidence.
 
-The whole permitted repository at the pinned revisions is also available to the AI as a read-only archive. Symlinks, binary, generated and non-UTF-8 files, oversized files and private configuration paths (including agent folders such as `.claude`, `.agents`, `.cursor`) are excluded. Path rules do not guarantee that arbitrary code contains no secrets.
+The whole permitted repository at the pinned revisions is also available to the AI as a read-only archive. Symlinks, binary, generated and non-UTF-8 files, oversized files and private configuration paths (`.git`, `.ssh`, `.gnupg`, `.mcp.json`, and the settings, MCP servers, sign-ins and session state inside agent folders such as `.claude`, `.agents`, `.cursor`) are excluded. Committed agent instructions, skills and scripts in those folders are reviewed from the archive only: they are never copied into the AI's workspace, where its CLI could load them as configuration. Path rules do not guarantee that arbitrary code contains no secrets.
 
 ## Depth and chunking
 

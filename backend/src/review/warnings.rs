@@ -55,11 +55,15 @@ pub(crate) fn append(body: &str, warnings: &[EvidenceWarning]) -> String {
             "file_unavailable" => "reported unavailable supporting evidence",
             "evidence_excluded" => "reported excluded supporting evidence",
             "insufficient_evidence" => "reported insufficient supporting evidence",
+            "unconfirmed_candidate" => {
+                "has a finding kept as validated in its chunk; the final pass gave it no decision"
+            }
             _ => "reported an evidence limitation",
         };
         result.push_str(&format!("\n> - {affected}: {reason}. "));
         match &warning.reference {
             Some(reference) => result.push_str(&markdown(reference)),
+            None if matches!(warning.reason.as_str(), "unconfirmed_candidate" | "dropped_finding") => {}
             None => result.push_str("The missing supporting reference was not specified."),
         }
     }

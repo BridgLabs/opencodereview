@@ -271,28 +271,42 @@ impl SourceEntry {
     }
 }
 
+/// Paths inside an AI tool's configuration folder. They are reviewed from the frozen archive only,
+/// never copied into a runner's workspace, where an AI CLI could load them as its own
+/// configuration (the runner refuses such stage files).
+pub(crate) fn in_agent_folder(path: &str) -> bool {
+    path.to_ascii_lowercase().split('/').any(|part| {
+        matches!(
+            part,
+            ".devin" | ".agents" | ".claude" | ".gemini" | ".cursor" | ".windsurf" | ".opencode" | ".zed"
+        )
+    })
+}
+
 pub(crate) fn path_exclusion(path: &str) -> Result<Option<Exclusion>, Error> {
     safe_path(path)?;
     let path = path.to_ascii_lowercase();
     let parts = path.split('/').collect::<Vec<_>>();
-    if parts.iter().any(|part| {
-        matches!(
-            *part,
-            ".git"
-                | ".devin"
-                | ".agents"
-                | ".claude"
-                | ".cursor"
-                | ".windsurf"
-                | ".opencode"
-                | ".zed"
-                | ".ssh"
-                | ".gnupg"
-        )
-    }) {
+    let name = parts.last().ok_or(Error::Path)?;
+    if parts.iter().any(|part| matches!(*part, ".git" | ".ssh" | ".gnupg")) {
         return Ok(Some(Exclusion::PrivateConfiguration));
     }
-    let name = parts.last().ok_or(Error::Path)?;
+    // Committed agent instructions, skills and scripts are reviewable code; their settings, MCP
+    // servers, sign-ins and session state are not.
+    if *name == ".mcp.json"
+        || (in_agent_folder(&path)
+            && (name.contains(".local.")
+                || name.contains("credentials")
+                || matches!(
+                    *name,
+                    "settings.json" | "mcp.json" | "auth.json" | "oauth_creds.json" | "history.jsonl"
+                )
+                || parts
+                    .iter()
+                    .any(|part| matches!(*part, "projects" | "sessions" | "todos" | "shell-snapshots" | "statsig"))))
+    {
+        return Ok(Some(Exclusion::PrivateConfiguration));
+    }
     if name.starts_with(".env")
         || matches!(
             *name,

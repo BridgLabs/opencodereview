@@ -169,6 +169,12 @@ pub fn run_index_for_ref(
         let package_path = manifest_dir(path);
         let content = batch.read_blob(sha).unwrap_or_default();
         if let Some(parsed) = parse_manifest(path, &content) {
+            // One package per directory (`setup.py` next to `requirements.txt`): the first manifest
+            // names it, and every manifest there adds its dependencies.
+            if let Some((_, existing)) = pending_deps.iter_mut().find(|(from, _)| *from == package_path) {
+                existing.extend(parsed.deps);
+                continue;
+            }
             package_names.insert(parsed.name.clone());
             packages.push(RepoIndexPackageInput {
                 package_path: package_path.clone(),
@@ -197,8 +203,9 @@ pub fn run_index_for_ref(
     }
     // internal deps only (point to workspace packages)
     for (from_path, dep_list) in pending_deps {
+        let mut seen = HashSet::new();
         for (name, dev) in dep_list {
-            if package_names.contains(&name) {
+            if package_names.contains(&name) && seen.insert(name.clone()) {
                 deps.push(RepoIndexPkgDepInput {
                     from_package_path: from_path.clone(),
                     to_package_name: name,

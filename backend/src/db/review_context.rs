@@ -377,7 +377,9 @@ impl Database {
 
         let mut candidates: HashMap<String, (i64, Vec<&'static str>)> = HashMap::new();
         let mut add_candidate = |path: String, score: i64, reason: &'static str| {
-            if changed_set.contains(path.as_str()) {
+            // The snapshot leaves out private configuration, so the runner would refuse it as context.
+            if changed_set.contains(path.as_str()) || !matches!(crate::review_archive::path_exclusion(&path), Ok(None))
+            {
                 return;
             }
             let entry = candidates.entry(path).or_insert_with(|| (0, Vec::new()));

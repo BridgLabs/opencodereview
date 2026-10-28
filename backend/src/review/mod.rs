@@ -13,6 +13,7 @@ mod diagnostics;
 pub(crate) mod frozen;
 mod git;
 mod integration;
+mod lens;
 pub(crate) mod output_repair;
 mod paths;
 mod recovery;
@@ -69,7 +70,7 @@ const DEFAULT_REVIEW_SHARD_THRESHOLD: usize = 20;
 const DEFAULT_MAX_PARALLEL_REVIEW_CHUNKS: usize = 6;
 const CHUNK_SCOPE_NOTE: &str = "Business-context checks are resolved in Final.\n";
 const GIT_TIMEOUT_SECS: u64 = 120;
-pub(crate) const REVIEW_PROMPT_VERSION: &str = "review-v12-review-only";
+pub(crate) const REVIEW_PROMPT_VERSION: &str = "review-v15-counter-evidence";
 /// Accounts a single stage may move through after usage limits or rejected sign-ins.
 pub(crate) const MAX_ACCOUNT_FAILOVERS: usize = 8;
 static CLAUDE_HOME_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -160,6 +161,9 @@ pub struct ReviewInputs {
     pub number: i64,
     pub base_ref: String,
     pub fixed_head_sha: Option<String>,
+    /// Review a local clone that already holds the pinned base and head (`ocr-bench`): no fetch
+    /// from origin, no GitHub API. Requires `fixed_head_sha` and a SHA `base_ref`.
+    pub offline: bool,
     pub expected_scope: Option<crate::review::scope::ReviewScope>,
     pub prior_scope: Option<crate::review::scope::ReviewScope>,
     /// Head SHA of the last review that produced output, if any. When it is an

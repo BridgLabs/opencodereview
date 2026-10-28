@@ -63,8 +63,9 @@ docker-compose.yml, docker/              Docker runtime, Dockerfiles, smoke and 
 ## Review invariants
 
 - Scope uses the live immediate base, head and merge-base. A failed fetch fails preparation; never fall back to stale refs or the default branch.
-- Evidence is frozen and validated for every stage before any inference. Findings must quote the snapshot exactly and anchor to changed lines; invalid reports fail, they are never relabelled clean.
-- Output repair allows at most one extra execution per stage.
+- Evidence is frozen and validated for every stage before any inference. Findings must quote the snapshot exactly and anchor to changed lines; invalid reports fail, they are never relabelled clean. After output repair, a finding or general question that still fails validation is dropped and reported as a warning while the valid ones stand; a report left with nothing valid still fails. A candidate the final pass leaves without a usable decision keeps the comment validated in its chunk, marked unconfirmed, and so does every candidate of a final batch whose output never validates. A quote's line may be miscounted by up to three lines: validation moves it to the one nearest line holding the exact text, and a tie or a farther quote still fails. A cited path missing its leading directories is completed only when exactly one file at that revision ends with it and holds the exact text there.
+- Output repair allows at most one extra execution per stage. It may run beside reported missing evidence. It only corrects lines, sides, quotes and empty counter-evidence; anything else it changes is put back as first reported, and the result is validated as usual.
+- With `review_lens_pass` on, each stage gets one lens execution after its report validates. The lens only adds findings, its report is validated on its own and again once merged, and any lens failure leaves the first report as it stands.
 - Publication is idempotent and bound to the exact validated selection. Nothing approves automatically.
 - Archive retention deletes only frozen code of merged pull requests; never delete review results, audits, Git data or coverage.
 

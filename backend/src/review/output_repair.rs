@@ -1,5 +1,5 @@
 use super::*;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 fn read_json(path: &Path) -> Result<Value, String> {
     let metadata = fs::symlink_metadata(path).map_err(|_| "Output repair requires the original structured output")?;
@@ -53,6 +53,23 @@ fn identity(mut value: Value) -> Value {
     value
 }
 
+/// The repaired decisions with each decision's reason put back as first given, when both list the
+/// same candidates in the same order.
+fn restore_reasons(original: &Value, mut repaired: Value) -> Option<Value> {
+    let before = original["decisions"].as_array()?;
+    let after = repaired["decisions"].as_array_mut()?;
+    if before.len() != after.len() {
+        return None;
+    }
+    for (before, after) in before.iter().zip(after.iter_mut()) {
+        if before["candidateId"] != after["candidateId"] {
+            return None;
+        }
+        after.as_object_mut()?.insert("reason".into(), before["reason"].clone());
+    }
+    Some(repaired)
+}
+
 fn preserves_report(before: Value, after: Value) -> bool {
     let before = identity(before);
     let mut after = identity(after);
@@ -75,6 +92,48 @@ fn preserves_report(before: Value, after: Value) -> bool {
         }
     }
     before == after
+}
+
+/// `original` with the corrections a repair may make taken from `repaired`: finding line and side,
+/// reference line and quote, and counter-evidence where the original had none. `None` when the
+/// two do not have the same findings, questions and references to pair up.
+fn mechanical_fixes(original: &Value, repaired: &Value) -> Option<Value> {
+    let mut merged = original.clone();
+    for field in ["findings", "questions"] {
+        let Some(points) = merged.get_mut(field).and_then(Value::as_array_mut) else {
+            continue;
+        };
+        let fixed = repaired.get(field)?.as_array()?;
+        if points.len() != fixed.len() {
+            return None;
+        }
+        for (point, fixed) in points.iter_mut().zip(fixed) {
+            if field == "findings" {
+                for key in ["line", "side"] {
+                    point[key] = fixed.get(key)?.clone();
+                }
+            }
+            for references in ["evidence", "counterEvidence"] {
+                let Some(list) = point.get_mut(references).and_then(Value::as_array_mut) else {
+                    continue;
+                };
+                let corrected = fixed.get(references)?.as_array()?;
+                if list.is_empty() && references == "counterEvidence" {
+                    list.clone_from(corrected);
+                    continue;
+                }
+                if list.len() != corrected.len() {
+                    return None;
+                }
+                for (reference, corrected) in list.iter_mut().zip(corrected) {
+                    for key in ["line", "quote"] {
+                        reference[key] = corrected.get(key)?.clone();
+                    }
+                }
+            }
+        }
+    }
+    Some(merged)
 }
 
 /// A citation whose quote or line does not match the frozen source it names.
@@ -179,21 +238,22 @@ pub(super) fn run<T>(
         Err(error) => error,
     };
     if !repairable(&error) {
-        return Err(error);
+        return drop_invalid(directory, error, validate);
     }
     check_cancel(cancel)?;
     let report_path = directory.join("report.json");
     let report = read_json(&report_path)?;
-    if ["missingEvidence", "requestedFiles"].iter().any(|key| {
-        report
-            .get(*key)
-            .is_some_and(|value| value.as_array().is_none_or(|items| !items.is_empty()))
-    }) {
+    // Missing evidence may stay: the repair has to return it unchanged, so it stays a warning.
+    if report
+        .get("requestedFiles")
+        .is_some_and(|value| value.as_array().is_none_or(|items| !items.is_empty()))
+    {
         return Err(error);
     }
     let rejected = directory.join("rejected-report.json");
     if rejected.exists() || directory.join("transcript.retry-1.json").exists() {
-        return Err(format!("{error} Output repair limit reached."));
+        return drop_invalid(directory, error, validate)
+            .map_err(|error| format!("{error} Output repair limit reached."));
     }
     let fingerprint = context_fingerprint(context)?;
     let prompt = fs::read_to_string(prompt_path).map_err(|error| error.to_string())?;
@@ -243,27 +303,115 @@ pub(super) fn run<T>(
         if context_fingerprint(context)? != fingerprint {
             return Err("Incomplete review: frozen evidence changed during output repair".into());
         }
-        if !preserves_report(
-            crate::review::evidence::schema_report_fields(report),
-            read_json(&report_path)?,
-        ) {
-            return Err("Incomplete review: output repair changed findings, coverage or evidence identities".into());
+        let original = crate::review::evidence::schema_report_fields(report);
+        let repaired = read_json(&report_path)?;
+        if !preserves_report(original.clone(), repaired.clone()) {
+            // A repair that also rewords keeps the original wording: only its line, side, quote
+            // and newly filled counter-evidence corrections are taken, then validated as usual.
+            let merged = mechanical_fixes(&original, &repaired)
+                .filter(|merged| preserves_report(original.clone(), merged.clone()))
+                .ok_or("Incomplete review: output repair changed findings, coverage or evidence identities")?;
+            fs::write(&report_path, merged.to_string()).map_err(|error| error.to_string())?;
         }
-        if let Some(decisions) = decisions {
-            if identity(read_json(&decisions_path)?) != identity(decisions) {
-                return Err("Incomplete review: output repair changed candidate decisions".into());
+        if let Some(decisions) = &decisions {
+            let repaired = read_json(&decisions_path)?;
+            if identity(repaired.clone()) != identity(decisions.clone()) {
+                // A repair that only rewords a decision's reason keeps the reason first given.
+                let restored = restore_reasons(decisions, repaired)
+                    .filter(|restored| identity(restored.clone()) == identity(decisions.clone()))
+                    .ok_or("Incomplete review: output repair changed candidate decisions")?;
+                fs::write(&decisions_path, restored.to_string()).map_err(|error| error.to_string())?;
             }
         }
         validate()
     })();
     fs::write(prompt_path, prompt).map_err(|error| error.to_string())?;
-    result.map_err(|failure| {
-        if failure == "cancelled" {
-            failure
-        } else {
-            format!("{diagnostic} Repair unsuccessful: {failure}")
+    let failure = match result {
+        Ok(value) => return Ok(value),
+        Err(failure) if failure == "cancelled" => return Err(failure),
+        Err(failure) => failure,
+    };
+    // A repaired report that still has invalid findings drops them; any other failure goes back to
+    // the report as first written and drops its invalid findings instead. When nothing can be
+    // dropped, the repair's own failure is reported.
+    let pending = if invalid_point(&failure).is_some() {
+        failure.clone()
+    } else {
+        fs::copy(&rejected, &report_path).map_err(|error| error.to_string())?;
+        if let Some(decisions) = &decisions {
+            fs::write(&decisions_path, decisions.to_string()).map_err(|error| error.to_string())?;
         }
-    })
+        error
+    };
+    drop_invalid(directory, pending, validate).map_err(|_| format!("{diagnostic} Repair unsuccessful: {failure}"))
+}
+
+/// Findings output repair dropped from a stage's report, beside that report.
+pub(crate) const DROPPED: &str = "dropped-findings.json";
+
+/// The finding or general question a validation error names (`findings[N]`, `questions[N]`).
+fn invalid_point(error: &str) -> Option<(&'static str, usize)> {
+    let (field, start) = ["findings", "questions"]
+        .into_iter()
+        .filter_map(|field| Some((field, error.rfind(&format!("{field}["))? + field.len() + 1)))
+        .max_by_key(|(_, start)| *start)?;
+    Some((field, error[start..].split(']').next()?.parse().ok()?))
+}
+
+/// Drops each finding or general question validation still rejects and lists it in
+/// `dropped-findings.json`, which materialization reports as a warning, so one invalid point never
+/// fails the points that passed. A report left with no point keeps its error: dropping never turns
+/// a review clean.
+fn drop_invalid<T>(
+    directory: &Path,
+    mut error: String,
+    mut validate: impl FnMut() -> Result<T, String>,
+) -> Result<T, String> {
+    let report_path = directory.join("report.json");
+    let decisions_path = directory.join("finding_decisions.json");
+    let first = error.clone();
+    loop {
+        let Some((field, index)) = invalid_point(&error) else {
+            return Err(error);
+        };
+        let Ok(mut report) = read_json(&report_path) else {
+            return Err(error);
+        };
+        let points = ["findings", "questions"]
+            .iter()
+            .map(|field| report[*field].as_array().map_or(0, Vec::len))
+            .sum::<usize>();
+        let Some(items) = report[field].as_array_mut() else {
+            return Err(error);
+        };
+        if index >= items.len() || points <= 1 {
+            return Err(first);
+        }
+        let dropped = items.remove(index);
+        let path = directory.join(DROPPED);
+        let mut listed = read_json(&path).unwrap_or_else(|_| json!([]));
+        if let Some(listed) = listed.as_array_mut() {
+            listed.push(json!({"path": dropped["path"], "title": dropped["title"]}));
+        }
+        fs::write(&path, listed.to_string()).map_err(|error| error.to_string())?;
+        fs::write(&report_path, report.to_string()).map_err(|error| error.to_string())?;
+        // Candidate decisions point at findings only.
+        if let Some(mut decisions) = (field == "findings").then(|| read_json(&decisions_path).ok()).flatten() {
+            if let Some(entries) = decisions["decisions"].as_array_mut() {
+                entries.retain(|entry| entry["commentIndex"].as_u64() != Some(index as u64));
+                for entry in entries {
+                    if let Some(at) = entry["commentIndex"].as_u64().filter(|at| *at > index as u64) {
+                        entry["commentIndex"] = json!(at - 1);
+                    }
+                }
+                fs::write(&decisions_path, decisions.to_string()).map_err(|error| error.to_string())?;
+            }
+        }
+        error = match validate() {
+            Ok(value) => return Ok(value),
+            Err(error) => error,
+        };
+    }
 }
 
 #[cfg(test)]

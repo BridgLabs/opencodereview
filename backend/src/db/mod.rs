@@ -80,6 +80,12 @@ pub struct Settings {
     pub review_chunk_size: i64,
     pub review_parallel_chunks: i64,
     pub review_max_files: i64,
+    /// Above this many changed files a review covers only the highest-priority ones and lists
+    /// the rest as not reviewed. `0` reviews every file.
+    pub review_focus_files: i64,
+    /// Runs one more execution per review stage that looks for what the first pass usually
+    /// misses (tests, docs, maintainability, API shape) and adds only new findings.
+    pub review_lens_pass: bool,
     pub dismiss_stale_approvals: bool,
     pub auto_index_stale_repos: bool,
     /// Opt-in auto-post mode when a finished review HAS findings, instead of waiting

@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, VecDeque};
 mod output;
 mod prepare;
 
-pub(super) use output::{combine, validate_output};
+pub(super) use output::{combine, unconfirmed, validate_output};
 pub(super) use prepare::{prepare, scoped_diff};
 
 const BATCH_INSTRUCTIONS: &str = "\nThis is one final-integration batch of the same complete PR review. Other batches cover the remaining assigned paths and candidates; do not interpret their absence here as missing implementation. Review exactly the paths in this batch's STAGE.json, while consulting the same full frozen archive for cross-file contracts and counter-evidence. Each candidate keeps its original candidateId. A candidate may contain its original structured point instead of repeated rendered Markdown; preserve its title, details, action and evidence when reasoning. Chunk notes retain contextQuestions, general questions and coverage metadata; their reviewedFiles are context, not your assigned coverage. Resolve every provided candidate explicitly. Do not invent decisions for candidates assigned to another batch.\n";

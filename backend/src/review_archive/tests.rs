@@ -194,8 +194,12 @@ fn archive_never_loads_policy_exclusions() {
         "credentials.toml",
         "config/hosts.yml",
         "key.pem",
-        "nested/.claude/rules.md",
-        ".windsurf/config.json",
+        "nested/.claude/settings.local.json",
+        ".gemini/oauth_creds.json",
+        ".claude/.credentials.json",
+        ".claude/projects/session.jsonl",
+        ".git/config",
+        "home/.ssh/config",
         "dist/code.js",
         "nested/build/code.js",
         "pnpm-lock.yaml",
@@ -224,6 +228,73 @@ fn archive_never_loads_policy_exclusions() {
             "{path}"
         );
     }
+}
+
+#[test]
+fn committed_agent_instructions_are_reviewable() {
+    for path in [
+        ".claude/agents/reviewer.md",
+        "src/user/.agents/skills/root-cause-tracing/find-polluter.sh",
+        ".cursor/rules/style.mdc",
+        "src/projects/main.rs",
+    ] {
+        assert_eq!(path_exclusion(path).unwrap(), None, "{path}");
+    }
+    for path in [
+        ".claude/settings.json",
+        ".cursor/mcp.json",
+        ".mcp.json",
+        "tools/.gemini/settings.json",
+    ] {
+        assert_eq!(
+            path_exclusion(path).unwrap(),
+            Some(Exclusion::PrivateConfiguration),
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn agent_folder_files_stay_out_of_the_runner_workspace() {
+    let directory = Directory::new();
+    let context = directory.0.join("context");
+    let agent = ".claude/agents/reviewer.md";
+    let archive = build(&[
+        ("code.rs", &scope().head_sha, b"call();\n"),
+        (agent, &scope().head_sha, b"Review carefully.\n"),
+    ]);
+    for path in ["PR.md", "skill/SKILL.md", "related/.agents/skills/a/SKILL.md"] {
+        let target = context.join(path);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(target, "Prepared context").unwrap();
+    }
+    archive
+        .prepare_stage(&context, &[agent.into(), "code.rs".into()], "", &scope().merge_base_sha)
+        .unwrap();
+    assert!(context.join("changed/code.rs").is_file());
+    assert!(!context.join("changed/.claude").exists());
+    assert!(!context.join("related/.agents/skills/a/SKILL.md").exists());
+    let files: BTreeMap<String, String> = [
+        "PR.md",
+        "skill/SKILL.md",
+        "changed/code.rs",
+        "PR_DIFF.patch",
+        "FROZEN.json",
+        "STAGE.json",
+    ]
+    .into_iter()
+    .map(|path| {
+        (
+            format!("context/{path}"),
+            std::fs::read_to_string(context.join(path)).unwrap(),
+        )
+    })
+    .collect();
+    archive.validate_stage_files(&files).unwrap();
+    assert_eq!(
+        archive.resolve(&scope().head_sha, agent).unwrap(),
+        "Review carefully.\n"
+    );
 }
 
 #[test]

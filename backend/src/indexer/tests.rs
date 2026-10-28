@@ -132,6 +132,48 @@ fn oversized_manifests_fail_indexing_instead_of_disappearing() {
 }
 
 #[test]
+fn manifests_in_one_directory_make_one_package() {
+    let dir = std::env::temp_dir().join(format!(
+        "ocr-shared-manifest-dir-{}-{}",
+        std::process::id(),
+        crate::db::now_millis()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    run_git(&dir, &["init", "-q"]);
+    write_file(&dir, "requirements.txt", "requests==2.32.0\n");
+    write_file(&dir, "setup.py", "from setuptools import setup\nsetup(name='tool')\n");
+    write_file(&dir, "tool/__init__.py", "");
+    run_git(&dir, &["add", "-A"]);
+    run_git(&dir, &["commit", "-qm", "python package"]);
+    let write = run_index(&dir, None, &AtomicBool::new(false), &mut |_| {}).expect("index");
+    assert_eq!(
+        write
+            .packages
+            .iter()
+            .filter(|package| package.package_path.is_empty())
+            .count(),
+        1,
+        "{:?}",
+        write
+            .packages
+            .iter()
+            .map(|package| &package.package_path)
+            .collect::<Vec<_>>()
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn pyproject_comments_do_not_break_dependency_parsing() {
+    let text = "[project]\nname = \"ingest\"\ndependencies = [\n    \"biolink-model\", # pull 'master' for now, until \"x\n    \"bmt>=1.4\", # a lone \" quote\n]\n";
+    assert_eq!(
+        manifests::toml_array_strings_in_section(text, "project", "dependencies"),
+        ["biolink-model", "bmt>=1.4"]
+    );
+    assert_eq!(manifests::unquote("\""), None);
+}
+
+#[test]
 fn parses_market_language_manifests() {
     let node = parse_manifest(
         "package.json",

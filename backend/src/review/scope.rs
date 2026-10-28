@@ -108,6 +108,50 @@ pub(crate) fn exclude_policy_paths(changed: &mut Vec<String>, selection: &mut Sc
     Ok(())
 }
 
+/// Above `cap` files, keeps the `cap` highest-priority ones in `changed`, in their original order,
+/// and returns the rest. Source code comes before docs, config and lockfiles, then the files with
+/// the most changed lines. `cap` 0 keeps every file.
+pub(crate) fn focus_files(changed: &mut Vec<String>, diff: &str, cap: usize) -> Vec<String> {
+    if cap == 0 || changed.len() <= cap {
+        return Vec::new();
+    }
+    let mut churn = std::collections::HashMap::<String, usize>::new();
+    let mut current = None::<String>;
+    for line in diff.lines() {
+        if let Some(raw) = line.strip_prefix("+++ ") {
+            current = crate::review_archive::decoded_git_path(raw)
+                .and_then(|path| path.strip_prefix("b/").map(str::to_string))
+                .or(current.take());
+        } else if let Some(raw) = line.strip_prefix("--- ") {
+            current = crate::review_archive::decoded_git_path(raw)
+                .and_then(|path| path.strip_prefix("a/").map(str::to_string));
+        } else if line.starts_with('+') || line.starts_with('-') {
+            if let Some(path) = &current {
+                *churn.entry(path.clone()).or_default() += 1;
+            }
+        }
+    }
+    let source = |path: &str| {
+        let name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
+        let extension = name.rsplit_once('.').map(|(_, extension)| extension).unwrap_or("");
+        !matches!(
+            extension,
+            "" | "md" | "mdx" | "txt" | "rst" | "json" | "yml" | "yaml" | "toml" | "lock" | "po" | "svg" | "csv"
+        )
+    };
+    let mut ranked = changed.clone();
+    ranked.sort_by_key(|path| {
+        (
+            std::cmp::Reverse(source(path)),
+            std::cmp::Reverse(churn.get(path).copied().unwrap_or(0)),
+        )
+    });
+    let kept = ranked[..cap].iter().cloned().collect::<std::collections::HashSet<_>>();
+    let deferred = changed.iter().filter(|path| !kept.contains(*path)).cloned().collect();
+    changed.retain(|path| kept.contains(path));
+    deferred
+}
+
 pub(crate) fn reprocess_files(previous: &[String], current: &[String]) -> Result<Vec<String>, String> {
     if previous.is_empty() || previous.iter().collect::<std::collections::HashSet<_>>().len() != previous.len() {
         return Err("Previous analysis scope is empty or duplicated; choose Re-run full".into());

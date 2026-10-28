@@ -257,6 +257,7 @@ fn clean_reviews_are_completed_without_finding_selection_even_with_auto_post_ena
         number: 1,
         base_ref: "main".to_string(),
         fixed_head_sha: None,
+        offline: false,
         expected_scope: None,
         prior_scope: None,
         last_reviewed_sha: None,
