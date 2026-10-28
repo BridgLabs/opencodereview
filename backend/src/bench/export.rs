@@ -88,6 +88,35 @@ pub(crate) fn points(comments_json: &str, diff: &str) -> Result<Vec<Finding>, St
     Ok(points)
 }
 
+/// The suggestions a review summary lists (`evidence::suggestions_section`), as findings on their
+/// head line, after the inline ones: a benchmark scores everything the review shows its reader.
+pub(crate) fn suggestions(body: &str) -> Vec<Finding> {
+    let (_, section) = crate::review::split_suggestions(body);
+    let unescape = |text: &str| text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
+    section
+        .lines()
+        .filter_map(|item| {
+            let (location, rest) = item.strip_prefix("- `")?.split_once("` **")?;
+            let (path, number) = location.rsplit_once(':')?;
+            let (title, rest) = rest.split_once("**. ")?;
+            let (detail, action) = rest.split_once(" Suggested change: ")?;
+            let line = number.parse::<i64>().ok()?.max(1);
+            Some(Finding {
+                kind: "suggestion".into(),
+                path: path.trim_start_matches("./").into(),
+                side: "RIGHT".into(),
+                start_line: line,
+                end_line: line,
+                mapped_from_left: false,
+                title: unescape(title),
+                detail: unescape(detail),
+                action: unescape(action),
+                body: item.to_string(),
+            })
+        })
+        .collect()
+}
+
 struct Parsed {
     kind: String,
     title: String,

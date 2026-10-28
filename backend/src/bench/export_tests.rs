@@ -109,3 +109,27 @@ fn a_cancelled_review_reports_what_its_finished_chunks_validated_once() {
         serde_json::from_str(&crate::bench::finished_chunk_comments(&budget).unwrap()).unwrap();
     assert_eq!(merged, serde_json::json!({"comments":[comment, other]}));
 }
+
+#[test]
+fn summary_suggestions_export_as_findings_on_their_line() {
+    let body = format!(
+        "No findings.\n\n{}",
+        crate::review::evidence::suggestions_section(&[
+            serde_json::json!({"path":"src/a.rs","line":7,"title":"No test covers <empty> input","detail":"Nothing checks it.","action":"Add a test for empty input."}),
+        ])
+    );
+    let found = suggestions(&body);
+    assert_eq!(found.len(), 1);
+    let finding = &found[0];
+    assert_eq!(
+        (finding.kind.as_str(), finding.path.as_str()),
+        ("suggestion", "src/a.rs")
+    );
+    assert_eq!((finding.start_line, finding.end_line), (7, 7));
+    assert_eq!(finding.title, "No test covers <empty> input");
+    assert_eq!(
+        finding.message(),
+        "No test covers <empty> input. Nothing checks it. Suggested fix: Add a test for empty input."
+    );
+    assert!(suggestions("No findings.").is_empty());
+}

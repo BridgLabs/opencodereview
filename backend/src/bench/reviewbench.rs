@@ -126,10 +126,11 @@ pub fn run_from_env() -> Result<(), String> {
     let elapsed = started.elapsed().as_millis() as i64;
     let (status, error, points, usage, engine_label, summary) = match result {
         Ok(reviewed) => {
-            let points = match reviewed.output.comments_json.as_deref() {
+            let mut points = match reviewed.output.comments_json.as_deref() {
                 Some(raw) => export::points(raw, &diff)?,
                 None => Vec::new(),
             };
+            points.extend(export::suggestions(&reviewed.output.body));
             let usage = &reviewed.output.usage;
             (
                 "ok",
