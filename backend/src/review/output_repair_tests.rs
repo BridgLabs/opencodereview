@@ -679,3 +679,31 @@ fn findings_that_stay_invalid_are_dropped_but_never_all_of_them() {
     assert_eq!(kept["findings"].as_array().unwrap().len(), 1);
     assert_eq!(kept["suggestions"], json!([]));
 }
+
+#[test]
+fn the_only_finding_is_never_dropped_for_a_suggestion_left_alone() {
+    let fixture = Fixture::new();
+    let valid = &fixture.report["findings"][0];
+    let suggestion = json!({
+        "title": "No test covers the retry", "detail": "Fixture detail", "action": "Add a test",
+        "path": valid["path"].clone(), "line": valid["line"].clone(), "evidence": valid["evidence"].clone(),
+        "counterEvidence": valid["counterEvidence"].clone(),
+    });
+    let mut invalid = valid.clone();
+    invalid["evidence"][0]["path"] = json!("absent/elsewhere.rs");
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([invalid]);
+    report["suggestions"] = json!([suggestion]);
+    fixture.write(&report);
+    let error = fixture
+        .run(&AtomicBool::new(false), |_| panic!("an absent path is not repairable"))
+        .unwrap_err();
+    assert!(error.contains("absent"), "{error}");
+    assert_eq!(
+        read_json(&fixture.directory.join("report.json")).unwrap()["findings"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}

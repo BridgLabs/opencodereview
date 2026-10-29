@@ -381,7 +381,13 @@ fn drop_invalid<T>(
         let Ok(mut report) = read_json(&report_path) else {
             return Err(error);
         };
-        let points = ["findings", "questions", "suggestions"]
+        // A suggestion left alone never stands in for a dropped finding or question.
+        let counted: &[&str] = if field == "suggestions" {
+            &["findings", "questions", "suggestions"]
+        } else {
+            &["findings", "questions"]
+        };
+        let points = counted
             .iter()
             .map(|field| report[*field].as_array().map_or(0, Vec::len))
             .sum::<usize>();
