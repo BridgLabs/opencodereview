@@ -734,6 +734,10 @@ pub(crate) fn handle_completed_review(
                 let superseded = github::live_pr_state(&inputs.full_name, inputs.number)
                     .is_ok_and(|live| live.state != "OPEN" || live.head_sha != run.head_sha);
                 if superseded {
+                    log_auto_post(
+                        inputs,
+                        &format!("superseded by a new PR head after auto-post failed: {error}"),
+                    );
                     let _ = db.mark_review_superseded_after_post(
                         run.id,
                         inputs.pr_id,
@@ -758,6 +762,7 @@ pub(crate) fn handle_completed_review(
                     false,
                     None,
                 );
+                let _ = db.note_auto_post_failure(run.id, &reason);
             }
         }
     } else {
