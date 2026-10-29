@@ -115,7 +115,7 @@ fn summary_suggestions_export_as_findings_on_their_line() {
     let body = format!(
         "No findings.\n\n{}",
         crate::review::evidence::suggestions_section(&[
-            serde_json::json!({"path":"src/a.rs","line":7,"title":"No test covers <empty> input","detail":"Nothing checks it.","action":"Add a test for empty input."}),
+            serde_json::json!({"path":"src/a.rs","line":7,"title":"No test covers <empty> input","detail":"Nothing checks `parse`.","action":"Add a test for empty input."}),
         ])
     );
     let found = suggestions(&body);
@@ -129,7 +129,7 @@ fn summary_suggestions_export_as_findings_on_their_line() {
     assert_eq!(finding.title, "No test covers <empty> input");
     assert_eq!(
         finding.message(),
-        "No test covers <empty> input. Nothing checks it. Suggested fix: Add a test for empty input."
+        "No test covers <empty> input. Nothing checks `parse`. Suggested fix: Add a test for empty input."
     );
     assert!(suggestions("No findings.").is_empty());
 }

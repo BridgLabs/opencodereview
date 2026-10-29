@@ -92,7 +92,6 @@ pub(crate) fn points(comments_json: &str, diff: &str) -> Result<Vec<Finding>, St
 /// head line, after the inline ones: a benchmark scores everything the review shows its reader.
 pub(crate) fn suggestions(body: &str) -> Vec<Finding> {
     let (_, section) = crate::review::split_suggestions(body);
-    let unescape = |text: &str| text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
     section
         .lines()
         .filter_map(|item| {
