@@ -383,15 +383,21 @@ pub(super) fn validate_chunk<T>(
 ) -> Result<T, String> {
     match self::validate(inputs, cancel, progress, paths, context, &mut validate) {
         Err(error) if inputs.frozen.is_some() && error != "cancelled" && invalid_point(&error).is_some() => {
-            drop_points(
-                paths.prompt.parent().ok_or("Missing review stage")?,
-                error,
-                validate,
-                false,
-            )
+            drop_every_invalid(paths.prompt.parent().ok_or("Missing review stage")?, validate)
         }
         result => result,
     }
+}
+
+/// Drops every point of the report as it stands now, the last one too. It validates again first:
+/// a drop that kept the last point returns the error from before its drops, whose index may no
+/// longer exist.
+fn drop_every_invalid<T>(directory: &Path, mut validate: impl FnMut() -> Result<T, String>) -> Result<T, String> {
+    let error = match validate() {
+        Ok(value) => return Ok(value),
+        Err(error) => error,
+    };
+    drop_points(directory, error, validate, false)
 }
 
 fn drop_points<T>(

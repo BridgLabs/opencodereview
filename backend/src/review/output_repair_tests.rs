@@ -649,7 +649,7 @@ fn findings_that_stay_invalid_are_dropped_but_never_all_of_them() {
     assert_eq!(read_json(&fixture.directory.join("report.json")).unwrap(), only);
     // A chunk drops that last point too, so the other chunks' findings stand; it stays a warning.
     fs::remove_file(fixture.directory.join(DROPPED)).unwrap();
-    drop_points(&fixture.directory, error, || fixture.validate(), false).unwrap();
+    drop_every_invalid(&fixture.directory, || fixture.validate()).unwrap();
     assert_eq!(
         read_json(&fixture.directory.join("report.json")).unwrap()["findings"],
         json!([])
@@ -689,4 +689,32 @@ fn findings_that_stay_invalid_are_dropped_but_never_all_of_them() {
     let kept = read_json(&fixture.directory.join("report.json")).unwrap();
     assert_eq!(kept["findings"].as_array().unwrap().len(), 1);
     assert_eq!(kept["suggestions"], json!([]));
+}
+
+#[test]
+fn a_chunk_drops_every_invalid_point_after_a_drop_that_kept_the_last() {
+    let fixture = Fixture::new();
+    let mut invalid = fixture.report["findings"][0].clone();
+    invalid["evidence"][0]["path"] = json!("absent/elsewhere.rs");
+    let question = json!({
+        "title": "Is the retry meant to be unbounded?", "detail": "Fixture detail",
+        "action": "Confirm the bound", "evidence": invalid["evidence"].clone(), "counterEvidence": invalid["counterEvidence"].clone(),
+    });
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([invalid]);
+    report["questions"] = json!([question]);
+    fixture.write(&report);
+    // The repair drops the finding, keeps the last point and returns the finding's error, whose
+    // index no longer exists.
+    let error = fixture
+        .run(&AtomicBool::new(false), |_| panic!("an absent path is not repairable"))
+        .unwrap_err();
+    assert!(error.contains("findings[0]"), "{error}");
+    assert!(drop_points(&fixture.directory, error, || fixture.validate(), false).is_err());
+    drop_every_invalid(&fixture.directory, || fixture.validate()).unwrap();
+    let kept = read_json(&fixture.directory.join("report.json")).unwrap();
+    assert_eq!(
+        (kept["findings"].clone(), kept["questions"].clone()),
+        (json!([]), json!([]))
+    );
 }
