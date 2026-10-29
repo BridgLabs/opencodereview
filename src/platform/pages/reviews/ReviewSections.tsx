@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { cx, toneDot, toneText } from "../../../components/DesignSystem";
 import type { ReviewCard } from "../../../types";
 import { Avatar } from "./Avatar";
-import { byRecent, itemTime, labelLane, laneTone } from "./reviewHelpers";
+import { byRecent, itemTime, labelCard, laneTone } from "./reviewHelpers";
 
 export type ReviewSection = {
   id: string;
@@ -96,8 +96,8 @@ export function ReviewSections({
               key={card.id}
               type="button"
               aria-pressed={selectedId === card.id}
-              aria-label={`${card.title} · ${labelLane(card.lane)}`}
-              title={`${card.title}\n${card.repoFullName.split("/").pop()} #${card.number} · ${labelLane(card.lane)}`}
+              aria-label={`${card.title} · ${labelCard(card)}`}
+              title={`${card.title}\n${card.repoFullName.split("/").pop()} #${card.number} · ${labelCard(card)}`}
               className={cx(
                 "relative grid size-12 cursor-pointer place-items-center rounded-xl transition-colors",
                 selectedId === card.id ? "bg-surface-muted" : "hover:bg-surface-muted/50",
@@ -202,7 +202,7 @@ export function ReviewSections({
                           )}
                         >
                           <span className={cx("size-1.5 rounded-full", toneDot[laneTone(card.lane)])} />
-                          {labelLane(card.lane)}
+                          {labelCard(card)}
                         </span>
                       </div>
                     </div>

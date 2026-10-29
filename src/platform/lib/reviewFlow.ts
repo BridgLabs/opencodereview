@@ -66,15 +66,17 @@ export function reviewResultSummary(
     return { status: "Outdated result", detail: "Re-run for the latest changes", state: "superseded" };
   const noFindings = findingCount === 0 && questionCount === 0;
   const detail =
-    questionCount > 0
-      ? `${findingCount ?? 0} findings · ${questionCount} questions`
-      : noFindings || result === "clean"
-        ? "No findings"
-        : findingCount !== undefined && findingCount > 0
-          ? `${findingCount} finding${findingCount === 1 ? "" : "s"}`
-          : result === "findings_local" || result === "findings_posted"
-            ? "Findings generated"
-            : "View findings and details";
+    card.suggestionsOnly && !findingCount && questionCount === 0
+      ? "Suggestions only"
+      : questionCount > 0
+        ? `${findingCount ?? 0} findings · ${questionCount} questions`
+        : noFindings || result === "clean"
+          ? "No findings"
+          : findingCount !== undefined && findingCount > 0
+            ? `${findingCount} finding${findingCount === 1 ? "" : "s"}`
+            : result === "findings_local" || result === "findings_posted"
+              ? "Findings generated"
+              : "View findings and details";
   if (publication === "failed")
     return { status: "Publication failed", detail: "Open result to retry", state: "failed" };
   if (publication === "pending" || publication === "posting")

@@ -571,3 +571,17 @@ it("counts processed tokens without the cache reads every model turn repeats", (
     totalTokens({ inputTokens: 1_000, outputTokens: 500, cacheReadTokens: 1_200_000, cacheCreationTokens: 40_000 }),
   ).toBe(41_500);
 });
+
+describe("suggestions-only reviews", () => {
+  it("say so on the result instead of reporting no findings", () => {
+    const posted = {
+      ...card,
+      lane: "auto_posted",
+      resultState: "findings_posted",
+      suggestionsOnly: true,
+    } as ReviewCard;
+    const run = { status: "posted", headSha: "current" } as ReviewRun;
+    expect(reviewResultSummary(posted, run, 0, 0).detail).toBe("Suggestions only");
+    expect(reviewResultSummary({ ...posted, suggestionsOnly: false }, run, 0, 0).detail).toBe("No findings");
+  });
+});

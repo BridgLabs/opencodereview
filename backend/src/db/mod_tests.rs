@@ -2295,6 +2295,30 @@ fn an_auto_post_failure_reaches_the_board_and_a_new_result_clears_it() {
         card(&db).result_error.as_deref(),
         Some("Auto-post failed: PR base/diff scope changed")
     );
-    db.reserve_review_result(&input).unwrap();
+    assert!(!card(&db).suggestions_only);
+    // A review whose only points are summary suggestions is marked so on the board.
+    let section = crate::review::evidence::suggestions_section(&[serde_json::json!(
+        {"path":"src/a.rs","line":2,"title":"Stale test name","detail":"Detail","action":"Rename it"}
+    )]);
+    db.conn
+        .execute(
+            "UPDATE review_runs SET review_body = $1, comments_json = $2 WHERE id = $3",
+            params![
+                format!("0 review comments selected for publication.\n\n{section}"),
+                r#"{"comments":[]}"#,
+                run
+            ],
+        )
+        .unwrap();
+    assert!(card(&db).suggestions_only);
+    // The next review's result clears it.
+    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,created_at,updated_at) VALUES ($1,'head','preview','**[Finding] Bug**',2,2)", [pr]).unwrap();
+    let next = db.conn.last_insert_rowid();
+    db.reserve_review_result(&ReviewResultInput {
+        run_id: next,
+        actionable_run_id: Some(next),
+        ..input
+    })
+    .unwrap();
     assert_eq!(card(&db).result_error, None);
 }

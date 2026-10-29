@@ -67,6 +67,13 @@ pub fn actionable(comments_json: Option<&str>, body: Option<&str>) -> bool {
     }) || body.is_some_and(|body| matches!(point_kind(body), "finding" | "mixed"))
 }
 
+/// Whether a run's review has nothing but the summary's suggestions: no inline comment, no finding
+/// or question in its body, and a suggestions section.
+pub fn suggestions_only(comments_json: Option<&str>, body: Option<&str>) -> bool {
+    let (points, section) = crate::review::split_suggestions(body.unwrap_or_default());
+    comments(comments_json).is_empty() && point_kind(points) == "unknown" && !section.trim().is_empty()
+}
+
 /// (findings, questions) among a run's inline comments. A comment that is both counts as both;
 /// one without a marker counts as a finding. Older runs stored the comments as a bare array.
 pub fn point_counts(comments_json: Option<&str>) -> (i64, i64) {

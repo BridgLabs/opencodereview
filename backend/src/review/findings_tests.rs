@@ -109,3 +109,21 @@ fn a_saved_selection_keeps_the_summary_suggestions() {
     assert_eq!(body.matches(crate::review::SUGGESTIONS_HEADING).count(), 1, "{body}");
     assert!(body.starts_with("**[Finding] General**"), "{body}");
 }
+
+#[test]
+fn a_review_with_only_summary_suggestions_is_suggestions_only() {
+    let section = crate::review::evidence::suggestions_section(&[
+        json!({"path":"src/a.rs","line":2,"title":"Stale test name","detail":"Detail","action":"Rename it"}),
+    ]);
+    let only = format!("0 review comments selected for publication.\n\n{section}");
+    assert!(suggestions_only(Some(r#"{"comments":[]}"#), Some(&only)));
+    // A finding inline or in the body, or no suggestions at all, is not.
+    let inline =
+        json!({"comments":[{"path":"src/a.rs","line":3,"side":"RIGHT","body":"**[Finding] Bug**"}]}).to_string();
+    assert!(!suggestions_only(Some(&inline), Some(&only)));
+    assert!(!suggestions_only(
+        None,
+        Some(&format!("**[Finding] Bug**\n\n{section}"))
+    ));
+    assert!(!suggestions_only(None, Some("No findings.")));
+}

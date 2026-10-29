@@ -1,8 +1,9 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewCard } from "../../../types";
 import { type ReviewSection, ReviewSections } from "./ReviewSections";
+import { labelCard } from "./reviewHelpers";
 
 const sections: ReviewSection[] = [
   { id: "needs_you", title: "Needs you", lanes: ["manual_required"], defaultOpen: true },
@@ -51,4 +52,12 @@ it("keeps what is collapsed during a search out of the saved sections", async ()
   } finally {
     await act(async () => root.unmount());
   }
+});
+
+describe("labelCard", () => {
+  it("says a published review had only suggestions", () => {
+    expect(labelCard({ lane: "auto_posted", suggestionsOnly: true })).toBe("Suggestions posted");
+    expect(labelCard({ lane: "posted", suggestionsOnly: false })).toBe("Findings posted");
+    expect(labelCard({ lane: "ready", suggestionsOnly: true })).toBe("Ready to post");
+  });
 });

@@ -46,7 +46,8 @@ impl Database {
                 ELSE res.effective_state
               END,
               res.observation, res.observed_head_sha, res.reviewed_head_sha,
-              res.prior_result_head_sha, res.publication_status, res.error_message
+              res.prior_result_head_sha, res.publication_status, res.error_message,
+              lr.review_body, lr.comments_json
        FROM pull_requests pr
        JOIN repos r ON r.id = pr.repo_id
        JOIN subscriptions s ON s.repo_id = r.id AND s.enabled = 1
@@ -85,6 +86,10 @@ impl Database {
                     result_prior_head_sha: row.get(23)?,
                     result_publication_status: row.get(24)?,
                     result_error: row.get(25)?,
+                    suggestions_only: crate::review::findings::suggestions_only(
+                        row.get::<_, Option<String>>(27)?.as_deref(),
+                        row.get::<_, Option<String>>(26)?.as_deref(),
+                    ),
                     result_inherited: row.get::<_, Option<String>>(20)?.as_deref() == Some("no_new_changes"),
                 })
             })

@@ -121,8 +121,14 @@ const LANE_LABELS: Record<string, string> = {
 };
 
 /** A short status for a review lane. */
-export function labelLane(lane: string) {
+function labelLane(lane: string) {
   return LANE_LABELS[lane] ?? lane.replaceAll("_", " ");
+}
+
+/** A card's status: its lane, except that a review published with nothing but suggestions says so. */
+export function labelCard(card: Pick<ReviewCard, "lane" | "suggestionsOnly">) {
+  if (card.suggestionsOnly && ["auto_posted", "posted"].includes(card.lane)) return "Suggestions posted";
+  return labelLane(card.lane);
 }
 
 /** Each outcome gets its own colour: posted findings are green, a clean review stays grey. */
