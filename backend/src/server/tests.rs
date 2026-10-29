@@ -910,11 +910,10 @@ fn relocated_selected_findings_survive_comment_publication() {
 
 #[test]
 fn suggestions_post_with_the_review_but_never_on_their_own_after_duplicates() {
-    let suggestions = format!(
-        "{}\n\n{}\n\n- `a.rs:3` **Stale test name**. Detail Suggested change: Rename it",
-        crate::review::SUGGESTIONS_HEADING,
-        crate::review::SUGGESTIONS_INTRO
-    );
+    // As the review writes it: a collapsed block, not just its opening.
+    let suggestions = crate::review::evidence::suggestions_section(&[serde_json::json!(
+        {"path":"a.rs","line":3,"title":"Stale test name","detail":"Detail","action":"Rename it"}
+    )]);
     let dedupe = |comments: serde_json::Value, suppressed| github::DedupeResult {
         post_comments: comments,
         annotated_comments_json: "{\"comments\":[]}".into(),
