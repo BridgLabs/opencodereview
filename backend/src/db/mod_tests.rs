@@ -2250,3 +2250,51 @@ fn a_repository_leaving_the_workspace_keeps_its_review_history() {
         .unwrap();
     assert!(removed.is_none());
 }
+
+#[test]
+fn an_auto_post_failure_reaches_the_board_and_a_new_result_clears_it() {
+    let db = Db::for_test().open().unwrap();
+    db.conn.execute("INSERT INTO repos (owner,name,full_name,is_private,created_at,updated_at) VALUES ('acme','api','acme/api',1,1,1)", []).unwrap();
+    let repo = db.conn.last_insert_rowid();
+    db.save_repo_subscription(repo, true, "manual", false, false).unwrap();
+    db.conn.execute("INSERT INTO pull_requests (repo_id,number,title,author,head_sha,review_lane,status_reason,last_synced_at,created_at,updated_at) VALUES ($1,1,'PR','a','head','ready','Stacked PR: reviewing a → b',1,1,1)", [repo]).unwrap();
+    let pr = db.conn.last_insert_rowid();
+    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,created_at,updated_at) VALUES ($1,'head','preview','**[Finding] Bug**',1,1)", [pr]).unwrap();
+    let run = db.conn.last_insert_rowid();
+    let input = ReviewResultInput {
+        pr_id: pr,
+        run_id: run,
+        actionable_run_id: Some(run),
+        observed_head_sha: "head",
+        reviewed_head_sha: "head",
+        prior_result_state: None,
+        prior_result_head_sha: None,
+        observation: "findings",
+        effective_state: "awaiting_action",
+        publication_status: "disabled",
+        body: None,
+        github_review_id: None,
+        github_review_url: None,
+        reviewer_version: "fixture",
+        skill_version: "fixture",
+    };
+    db.reserve_review_result(&input).unwrap();
+    db.note_auto_post_failure(run, "Auto-post failed: PR base/diff scope changed")
+        .unwrap();
+    let card = |db: &Database| {
+        db.list_review_board()
+            .unwrap()
+            .into_iter()
+            .flat_map(|group| group.items)
+            .find(|card| card.id == pr)
+            .unwrap()
+    };
+    // The board shows its own text in status_reason for a run awaiting a decision; the failure
+    // travels on the result instead.
+    assert_eq!(
+        card(&db).result_error.as_deref(),
+        Some("Auto-post failed: PR base/diff scope changed")
+    );
+    db.reserve_review_result(&input).unwrap();
+    assert_eq!(card(&db).result_error, None);
+}

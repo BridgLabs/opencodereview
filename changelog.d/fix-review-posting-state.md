@@ -2,8 +2,8 @@
 
 - PR summaries on private repositories fetch the pull request with the GitHub token, like every
   other fetch, instead of failing with "could not read Username".
-- A review waiting for a decision because automatic publication failed now says why above the
-  decision panel.
+- A review waiting for a decision because automatic publication failed now shows why on the
+  review, and polling no longer hides the reason behind the stacked-PR note.
 
 ### Changed
 
