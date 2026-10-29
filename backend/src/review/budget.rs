@@ -47,12 +47,14 @@ impl State {
         mean(&self.batches).unwrap_or_else(|| self.stage().mul_f64(FINAL_PER_CHUNK))
     }
 
-    /// The work the review still requires after the step being decided.
-    fn required(&self) -> Duration {
+    /// The work the review still requires after the step being decided. A repair is decided while
+    /// its stage is still being validated, before `reviewed` records it, so that stage is not pending.
+    fn required(&self, step: Step) -> Duration {
         if self.in_final {
             return Duration::ZERO;
         }
-        let pending = self.chunks.saturating_sub(self.reviewed.len()) as f64;
+        let current = usize::from(step == Step::Repair);
+        let pending = self.chunks.saturating_sub(self.reviewed.len() + current) as f64;
         let chunks = self.stage().mul_f64(pending / self.parallel.max(1) as f64);
         let integration = if self.chunks > 1 {
             self.stage().mul_f64(FINAL_PER_CHUNK * self.chunks as f64)
@@ -136,7 +138,7 @@ impl Budget {
     }
 
     fn allows_at(&self, step: Step, now: Instant) -> bool {
-        let needed = self.with(|state| state.cost(step) + state.required());
+        let needed = self.with(|state| state.cost(step) + state.required(step));
         now + needed + MARGIN <= self.deadline
     }
 }
@@ -190,6 +192,20 @@ mod tests {
         budget.batch_done(3 * MINUTE);
         assert!(budget.allows_at(Step::FinalBatch, now + 24 * MINUTE));
         assert!(!budget.allows_at(Step::FinalBatch, now + 26 * MINUTE));
+    }
+
+    #[test]
+    fn a_repair_does_not_reserve_time_for_its_own_stage_again() {
+        let now = Instant::now();
+        // A single-stage review validated 9 minutes in, with 7 minutes left: a
+        // repair (~2 min with the first-stage estimate) fits, and no other stage is pending.
+        let budget = Budget::until(now + 16 * MINUTE);
+        budget.plan(1, 1);
+        assert!(budget.allows_at(Step::Repair, now + 9 * MINUTE));
+        // Two stages: the other one still is.
+        let two = Budget::until(now + 16 * MINUTE);
+        two.plan(2, 1);
+        assert!(!two.allows_at(Step::Repair, now + 9 * MINUTE));
     }
 
     #[test]
