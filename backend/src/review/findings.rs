@@ -518,11 +518,16 @@ pub fn selection_payload(audit: &FindingAudit) -> (String, String) {
             bodies.push(candidate.body.clone());
         }
     }
-    let body = if bodies.is_empty() {
+    let mut body = if bodies.is_empty() {
         format!("{} review comments selected for publication.", comments.len())
     } else {
         bodies.join("\n\n")
     };
+    // Suggestions are no candidates: they stay listed in the summary whatever is selected.
+    let (_, suggestions) = crate::review::split_suggestions(&audit.original_body);
+    if !suggestions.trim().is_empty() {
+        body = format!("{body}\n\n{}", suggestions.trim());
+    }
     (
         body,
         json!({ "commit_id": audit.head_sha, "comments": comments }).to_string(),
