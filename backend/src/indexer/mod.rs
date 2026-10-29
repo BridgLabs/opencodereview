@@ -163,17 +163,33 @@ pub fn run_index_for_ref(
     let mut deps: Vec<RepoIndexPkgDepInput> = Vec::new();
     let mut package_names: HashSet<String> = HashSet::new();
     let mut pending_deps: Vec<(String, Vec<(String, bool)>)> = Vec::new();
+    // Directories whose package name came from requirements.txt, which declares none.
+    let mut unnamed: HashSet<String> = HashSet::new();
 
     for (processed, (path, sha)) in manifest_shas.iter().enumerate() {
         check_cancel_kill(cancel, &mut batch)?;
         let package_path = manifest_dir(path);
         let content = batch.read_blob(sha).unwrap_or_default();
         if let Some(parsed) = parse_manifest(path, &content) {
-            // One package per directory (`setup.py` next to `requirements.txt`): the first manifest
-            // names it, and every manifest there adds its dependencies.
+            // One package per directory (`setup.py` next to `requirements.txt`): every manifest
+            // there adds its dependencies, and a declared name replaces the one requirements.txt
+            // makes up, which sorts first.
             if let Some((_, existing)) = pending_deps.iter_mut().find(|(from, _)| *from == package_path) {
                 existing.extend(parsed.deps);
+                if !path.ends_with("requirements.txt") {
+                    if let Some(package) = packages
+                        .iter_mut()
+                        .find(|package| package.package_path == package_path && unnamed.remove(&package_path))
+                    {
+                        package_names.remove(&package.name);
+                        package_names.insert(parsed.name.clone());
+                        package.name = parsed.name;
+                    }
+                }
                 continue;
+            }
+            if path.ends_with("requirements.txt") {
+                unnamed.insert(package_path.clone());
             }
             package_names.insert(parsed.name.clone());
             packages.push(RepoIndexPackageInput {
