@@ -452,6 +452,14 @@ fn pr_description_evidence_is_snapshot_bound_and_not_sufficient_for_a_finding() 
         quote: "Persistence is deferred".into(),
     };
     assert!(verify_reference(&reference, &root).is_ok());
+    // A miscounted line is never moved here, so it would be published wrong: it fails.
+    fs::write(
+        root.join("PR.md"),
+        "Intro.\nPersistence is deferred to the backend task.\n",
+    )
+    .unwrap();
+    assert!(verify_reference(&reference, &root).is_err());
+    fs::write(root.join("PR.md"), "Persistence is deferred to the backend task.\n").unwrap();
     assert!(verify_reference(
         &Reference {
             quote: "Invented contract".into(),
