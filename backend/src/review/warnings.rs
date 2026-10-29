@@ -58,6 +58,7 @@ pub(crate) fn append(body: &str, warnings: &[EvidenceWarning]) -> String {
             "unconfirmed_candidate" => {
                 "has a finding kept as validated in its chunk; the final pass gave it no decision"
             }
+            "dropped_finding" => "had a point dropped because its evidence did not validate",
             _ => "reported an evidence limitation",
         };
         result.push_str(&format!("\n> - {affected}: {reason}. "));
@@ -94,5 +95,21 @@ mod tests {
         assert!(!rendered.contains("\n> injected"));
         assert!(!rendered.contains("<script>"));
         assert_eq!(append("Result", &[]), "Result");
+    }
+
+    #[test]
+    fn a_dropped_finding_says_why_it_was_dropped() {
+        let rendered = append(
+            "Result",
+            &[EvidenceWarning {
+                reason: "dropped_finding".into(),
+                path: Some("src/a.rs".into()),
+                reference: None,
+            }],
+        );
+        assert!(
+            rendered.contains("src/a.rs: had a point dropped because its evidence did not validate."),
+            "{rendered}"
+        );
     }
 }
