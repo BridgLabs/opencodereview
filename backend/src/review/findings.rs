@@ -515,7 +515,13 @@ pub fn selection_payload(audit: &FindingAudit) -> (String, String) {
         if let Some(comment) = &candidate.comment {
             comments.push(canonical(comment));
         } else {
-            bodies.push(candidate.body.clone());
+            // A body candidate can end with the summary's suggestions, which are appended once below.
+            bodies.push(
+                crate::review::split_suggestions(&candidate.body)
+                    .0
+                    .trim_end()
+                    .to_string(),
+            );
         }
     }
     let mut body = if bodies.is_empty() {

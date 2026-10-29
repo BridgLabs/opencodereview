@@ -20,12 +20,23 @@ impl FindingAuditView {
         self.editable
             && self.selection_saved
             && self.audit.as_ref().is_some_and(|audit| {
-                audit.candidates.iter().any(|candidate| candidate.selected)
+                (only_suggestions(audit) || audit.candidates.iter().any(|candidate| candidate.selected))
                     && audit.candidates.iter().all(|candidate| {
                         candidate.selected == (candidate.default_selected && candidate.blocked_reason.is_none())
                     })
             })
     }
+}
+
+/// A complete audit with no candidates whose review lists suggestions: there is something to post
+/// and nothing for a selection to choose.
+fn only_suggestions(audit: &findings::FindingAudit) -> bool {
+    audit.complete
+        && audit.candidates.is_empty()
+        && !crate::review::split_suggestions(&audit.original_body)
+            .1
+            .trim()
+            .is_empty()
 }
 
 impl Database {
@@ -193,7 +204,8 @@ impl Database {
             .filter(|candidate| candidate.default_selected && candidate.blocked_reason.is_none())
             .map(|candidate| candidate.id.clone())
             .collect::<Vec<_>>();
-        if selected_ids.is_empty() {
+        // A review with only suggestions confirms an empty selection, as a person saving it would.
+        if selected_ids.is_empty() && !only_suggestions(&audit) {
             tx.commit().map_err(|error| error.to_string())?;
             return Ok(None);
         }
