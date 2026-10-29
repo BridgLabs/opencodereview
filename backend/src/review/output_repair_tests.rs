@@ -663,3 +663,26 @@ fn findings_that_stay_invalid_are_dropped_but_never_all_of_them() {
     assert_eq!(kept["findings"].as_array().unwrap().len(), 1);
     assert_eq!(kept["questions"], json!([]));
 }
+
+#[test]
+fn a_repair_that_changes_the_frozen_context_fails_without_a_fallback() {
+    let fixture = Fixture::new();
+    let mut invalid = fixture.report["findings"][0].clone();
+    invalid["title"] = json!("Anchored outside the diff");
+    invalid["line"] = json!(99);
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([fixture.report["findings"][0].clone(), invalid]);
+    fixture.write(&report);
+    let error = fixture
+        .run(&AtomicBool::new(false), |_| {
+            fixture.write(&fixture.report);
+            fs::write(fixture.context.join("PR.md"), "Changed").unwrap();
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(
+        error.contains("frozen evidence changed during output repair"),
+        "{error}"
+    );
+    assert!(!fixture.directory.join(DROPPED).exists());
+}
