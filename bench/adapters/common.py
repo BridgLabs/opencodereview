@@ -88,6 +88,9 @@ def _checkout(nwo, clone_url, base, head, pr_number):
     shutil.rmtree(work, ignore_errors=True)
     work.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "clone", "-q", "--local", "--no-checkout", str(cache), str(work)], check=True)
+    # A shallow cache is cloned without --local, which copies only branches and tags.
+    if not has_commits(work, base, head):
+        git(work, "fetch", "-q", "origin", "+refs/bench/*:refs/bench/*")
     git(work, "checkout", "-q", "--detach", head)
     # The benchmark's clones have no route to the original repository.
     git(work, "remote", "remove", "origin", check=False)
