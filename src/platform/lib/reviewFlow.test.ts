@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewCard, ReviewPhase, ReviewRun, ReviewRunStage } from "../../types";
 import {
+  autoPostFailureReason,
   buildReviewChunks,
   buildReviewFlow,
   isReviewResultView,
@@ -570,4 +571,12 @@ it("counts processed tokens without the cache reads every model turn repeats", (
   expect(
     totalTokens({ inputTokens: 1_000, outputTokens: 500, cacheReadTokens: 1_200_000, cacheCreationTokens: 40_000 }),
   ).toBe(41_500);
+});
+
+describe("autoPostFailureReason", () => {
+  it("returns why automatic publication failed, and nothing for other reasons", () => {
+    expect(autoPostFailureReason("Auto-post failed: PR base/diff scope changed")).toBe("PR base/diff scope changed");
+    expect(autoPostFailureReason("Confirm finding selection before publishing")).toBeNull();
+    expect(autoPostFailureReason(null)).toBeNull();
+  });
 });

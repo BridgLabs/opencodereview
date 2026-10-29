@@ -9,7 +9,7 @@ import { ArrowTabs } from "../../components/ArrowTabs";
 import { FindingSelection } from "../../components/FindingSelection";
 import { ReviewDecisionCarousel } from "../../components/ReviewDecisionCarousel";
 import { reviewBodyHasPostableFinding, reviewBodySuggestions, reviewPointKind } from "../../lib/findings";
-import { parseChunkProgress } from "../../lib/reviewFlow";
+import { autoPostFailureReason, parseChunkProgress } from "../../lib/reviewFlow";
 import { ContextView, PlatformChunkProgress, RiskView, UsageView } from "./RunDetails";
 import { parseComments, parseRisk, type ReviewDecision, shortSha, streamStatusLabel } from "./reviewHelpers";
 
@@ -73,6 +73,7 @@ export function ReviewDetail({
   const allFindingsDuplicated = comments.length > 0 && duplicateCount === comments.length && !hasBodyFindings;
   const canCancel = card.lane === "queued" || run?.status === "running" || run?.status === "pending";
   const canDecide = run?.status === "preview" && card.lane === "ready";
+  const autoPostFailure = autoPostFailureReason(card.statusReason);
   const live = run?.status === "running" || run?.status === "pending";
   const ownPr = Boolean(viewerLogin && card.author && viewerLogin.toLowerCase() === card.author.toLowerCase());
   const chunkProgress = live ? parseChunkProgress(run?.tail ?? "") : null;
@@ -346,6 +347,11 @@ export function ReviewDetail({
           className="review-decision-footer flex flex-none flex-col gap-3 border-t border-line bg-surface px-5 py-3 [&[hidden]]:hidden"
           hidden={resultSection !== "findings"}
         >
+          {autoPostFailure && (
+            <p className="review-auto-post-failure m-0 text-small text-danger">
+              Not posted automatically: {autoPostFailure}
+            </p>
+          )}
           <p className="m-0 text-small text-fg-muted">
             {ownPr
               ? "This is your PR. GitHub blocks self-approval and request-changes; mark reviewed locally or skip."

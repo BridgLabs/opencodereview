@@ -775,3 +775,9 @@ export function flowStateLabel(state: ReviewFlowState) {
   if (state === "unknown") return "Unknown";
   return "Pending";
 }
+
+/** Why automatic publication failed for a PR waiting on a decision, from its status reason; null otherwise. */
+export function autoPostFailureReason(statusReason: string | null | undefined): string | null {
+  const match = statusReason?.match(/^Auto-post failed:\s*(.+)$/s);
+  return match ? match[1] : null;
+}
