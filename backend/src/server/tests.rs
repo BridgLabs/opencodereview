@@ -1383,3 +1383,15 @@ fn spawn_single_flight_runs_once_and_recovers() {
     assert!(spawn_single_flight(&SINGLE_FLIGHT_GATE, || {}));
     wait_gate();
 }
+
+#[test]
+fn a_review_with_only_suggestions_has_nothing_to_select() {
+    let section = crate::review::evidence::suggestions_section(&[
+        serde_json::json!({"path":"src/a.rs","line":2,"title":"Stale test name","detail":"Detail","action":"Rename it"}),
+    ]);
+    let body = format!("No findings.\n\n{section}");
+    assert!(publication::review_has_findings(None, Some(&body)));
+    assert!(!publication::review_has_selectable_points(None, Some(&body)));
+    let comments = serde_json::json!({"commit_id":"head","comments":[{"path":"src/a.rs","line":3,"side":"RIGHT","body":"Finding"}]}).to_string();
+    assert!(publication::review_has_selectable_points(Some(&comments), Some(&body)));
+}
