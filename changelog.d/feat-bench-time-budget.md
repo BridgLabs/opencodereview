@@ -10,3 +10,5 @@
 - The AACR-Bench adapter can split its instances across accounts the same way.
 - Benchmark exports include the suggestions a review lists in its summary, after its inline
   findings.
+- A benchmark pull request whose diff holds a file in another encoding is reviewed instead of
+  failing before the review: the benchmark reads the diff as the product does.

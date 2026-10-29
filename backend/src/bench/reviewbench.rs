@@ -242,7 +242,8 @@ fn git_diff(repo: &Path, pr: &PullRequest) -> Result<String, String> {
     if !output.status.success() {
         return Err("Could not diff the pull request in the local clone".into());
     }
-    String::from_utf8(output.stdout).map_err(|_| "The pull request diff is not UTF-8".into())
+    // As the product reads a pull request diff: a file in another encoding never fails the review.
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Writes `path` readable by the benchmark driver, which reads the mount as another user.

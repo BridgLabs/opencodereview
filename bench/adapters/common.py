@@ -36,7 +36,8 @@ def log(message):
 def git(repo, *args, check=True):
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
-        text=True, capture_output=True, env={**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"},
+        # A diff can carry bytes that are not UTF-8; they pass through unchanged.
+        text=True, errors="surrogateescape", capture_output=True, env={**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"},
     )
     if check and result.returncode:
         raise RuntimeError(f"git {' '.join(args[:2])} failed: {result.stderr.strip()}")
@@ -123,7 +124,9 @@ def review(image, repo, nwo, pr_number, base, head, title, body, out_dir, provid
     for directory in (pr_dir, out):
         shutil.rmtree(directory, ignore_errors=True)
         directory.mkdir(parents=True)
-    (pr_dir / "diff.patch").write_text(git(repo, "diff", "--no-color", f"{base}...{head}") + "\n")
+    (pr_dir / "diff.patch").write_text(
+        git(repo, "diff", "--no-color", f"{base}...{head}") + "\n", errors="surrogateescape"
+    )
     (pr_dir / "pr.json").write_text(json.dumps({
         "repo": f"https://github.com/{nwo}", "pr_number": int(pr_number), "base": base, "head": head,
         "nwo": nwo, "title": title or "", "body": body or "",
