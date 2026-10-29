@@ -183,3 +183,50 @@ it("switches to another account of the provider, resuming a paused one and skipp
     client.clear();
   }
 });
+
+it("says when a used-up account resets, before any review has hit its limit", async () => {
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(1, "claude", "Bruno"), account(2, "claude", "Brisa")]);
+  vi.mocked(setupApi.reviewEngines).mockResolvedValue(engines);
+  vi.mocked(setupApi.accountUsage).mockResolvedValue([
+    { accountId: 1, windows: [{ windowMins: 300, usedPercent: 100, resetsAt: null }] },
+    {
+      accountId: 2,
+      windows: [
+        { windowMins: 300, usedPercent: 100, resetsAt: new Date(Date.now() + 3_600_000).toISOString() },
+        { windowMins: 10_080, usedPercent: 100, resetsAt: Date.now() + 7_200_000 },
+      ],
+    },
+  ]);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const radio = (text: string) =>
+    [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Account"] [role="radio"]')].find((item) =>
+      item.textContent?.includes(text),
+    )!;
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <EnginePicker />
+        </QueryClientProvider>,
+      ),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>("button[aria-haspopup]")!.click());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    // Without a reset time there is nothing better to say than how much is left.
+    expect(radio("Bruno").textContent).toContain("0% left");
+    // Both windows used up: the account is back only when the later one resets.
+    expect(radio("Brisa").textContent).toContain("Resets in 2 h");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    client.clear();
+  }
+});
