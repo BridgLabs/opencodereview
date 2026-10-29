@@ -626,8 +626,9 @@ pub(crate) fn suggestions_section(suggestions: &[serde_json::Value]) -> String {
         return String::new();
     }
     format!(
-        "{}\n\n{}\n\n{}",
+        "{} ({})</summary>\n\n{}\n\n{}\n\n</details>",
         crate::review::SUGGESTIONS_HEADING,
+        items.len(),
         crate::review::SUGGESTIONS_INTRO,
         items.join("\n")
     )

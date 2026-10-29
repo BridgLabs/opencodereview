@@ -967,6 +967,16 @@ fn suggestions_are_validated_and_listed_in_the_summary_instead_of_posted_inline(
     let (points, section) = crate::review::split_suggestions(&body);
     assert!(!points.contains("Suggestions"));
     assert!(section.starts_with(crate::review::SUGGESTIONS_HEADING));
+    // Collapsed on GitHub: one "💡 Suggestions (n)" line until the reader opens it.
+    assert!(
+        section.starts_with("<details>\n<summary>💡 Suggestions (1)</summary>\n\n"),
+        "{section}"
+    );
+    assert!(section.trim_end().ends_with("</details>"), "{section}");
+    // Reviews stored before the section was collapsed still split at their heading.
+    let legacy =
+        "**[Finding] Bug**\n\n### 💡 Suggestions\n\n- `a.rs:3` **Stale name**. Old. Suggested change: Rename it";
+    assert_eq!(crate::review::split_suggestions(legacy).0, "**[Finding] Bug**\n\n");
     assert_eq!(
         section
             .matches("- `src/auth.rs:2` **No test covers allow_all**")
