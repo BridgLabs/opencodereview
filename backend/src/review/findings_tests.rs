@@ -101,4 +101,11 @@ fn a_saved_selection_keeps_the_summary_suggestions() {
     );
     assert!(body.ends_with(section.trim()), "{body}");
     assert!(comments.contains("Finding body"));
+    // A general finding in the body carries the section too; it is listed once.
+    let mut general = audit.clone();
+    general.candidates[0].comment = None;
+    general.candidates[0].body = format!("**[Finding] General**\n\nDetail\n\n{section}");
+    let (body, _) = selection_payload(&general);
+    assert_eq!(body.matches(crate::review::SUGGESTIONS_HEADING).count(), 1, "{body}");
+    assert!(body.starts_with("**[Finding] General**"), "{body}");
 }
