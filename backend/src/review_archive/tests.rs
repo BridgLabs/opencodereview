@@ -1365,3 +1365,39 @@ fn a_store_with_an_unimported_sqlite_index_refuses_to_open_and_keeps_its_archive
     assert!(report.unwrap_err().contains("import-sqlite"));
     assert!(sealed.exists());
 }
+
+#[test]
+fn a_repository_over_budget_keeps_the_reviewed_paths_first() {
+    let head = "a".repeat(40);
+    let sources = vec![
+        source("a/big.rs", &head, &[b'a'; 60]),
+        source("a/copy.rs", &head, &[b'a'; 60]),
+        source("b/other.rs", &head, &[b'b'; 50]),
+        source("z/changed.rs", &head, &[b'z'; 50]),
+    ];
+    let priority = BTreeSet::from(["z/changed.rs".to_string()]);
+    // 120 blob bytes: the changed file first, then a/big.rs (60); its duplicate costs nothing more;
+    // b/other.rs no longer fits and stays listed as excluded.
+    let (kept, excluded) = plan_budget(&sources, &priority, u64::MAX, 120).unwrap();
+    assert_eq!(kept, vec![true; 4]);
+    assert_eq!(excluded, BTreeSet::from([(head.clone(), "b/other.rs".to_string())]));
+    // A manifest with room for two entries keeps the changed file and the first other one.
+    let room = 2 * ENTRY_OVERHEAD + "z/changed.rs".len() as u64 + "a/big.rs".len() as u64;
+    let (kept, _) = plan_budget(&sources, &priority, room, u64::MAX).unwrap();
+    assert_eq!(kept, vec![true, false, false, true]);
+
+    let archive = Archive::build_planned(scope(), sources.clone(), &excluded, &AtomicBool::new(false), |entry| {
+        Ok(vec![entry.path.as_bytes()[0]; entry.bytes as usize])
+    })
+    .unwrap();
+    assert_eq!(archive.resolve(&head, "z/changed.rs").unwrap(), "z".repeat(50));
+    assert_eq!(
+        archive.resolve(&head, "b/other.rs"),
+        Err(Error::Excluded(Exclusion::Budget))
+    );
+    // The budget exclusion survives the archive's own integrity check.
+    let raw = archive.manifest_bytes().unwrap();
+    Archive::decode(&archive.descriptor(), &raw, archive.data.clone()).unwrap();
+    // And so does the runner's transfer check.
+    transfer::transfer_manifest(&archive.descriptor(), &raw).unwrap();
+}

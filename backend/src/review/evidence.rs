@@ -1008,6 +1008,7 @@ impl EvidenceResolver<'_> {
                         Exclusion::Generated => "generated file",
                         Exclusion::Binary => "binary content",
                         Exclusion::NonUtf8 => "non-UTF-8 content",
+                        Exclusion::Budget => "repository larger than the snapshot budget",
                         Exclusion::Oversized => unreachable!(),
                     }
                 ),

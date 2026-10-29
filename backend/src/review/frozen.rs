@@ -42,7 +42,17 @@ pub fn capture(
         prior_sha: plan.prior_sha.clone().filter(|_| plan.incremental),
     };
     crate::review_archive::hydrate(&inputs.repo_path, &scope, cancel).map_err(|e| e.to_string())?;
-    let archive = crate::review_archive::capture(&inputs.repo_path, scope, cancel).map_err(|e| e.to_string())?;
+    // A repository larger than the archive's budgets keeps what the review is about first.
+    let priority = plan
+        .changed_files
+        .iter()
+        .chain(plan.related_files.iter().map(|file| &file.path))
+        .chain(&plan.test_files)
+        .chain(&plan.convention_files)
+        .cloned()
+        .collect();
+    let archive = crate::review_archive::capture_prioritized(&inputs.repo_path, scope, &priority, cancel)
+        .map_err(|e| e.to_string())?;
     // An offline review has the checkout and nothing else: no submodules and no linked
     // repositories to pin, so its archive is the checkout's own.
     let archive = if inputs.offline {
