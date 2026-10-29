@@ -20,7 +20,8 @@ impl FindingAuditView {
         self.editable
             && self.selection_saved
             && self.audit.as_ref().is_some_and(|audit| {
-                audit.candidates.iter().any(|candidate| candidate.selected)
+                (audit.complete && audit.candidates.is_empty()
+                    || audit.candidates.iter().any(|candidate| candidate.selected))
                     && audit.candidates.iter().all(|candidate| {
                         candidate.selected == (candidate.default_selected && candidate.blocked_reason.is_none())
                     })
@@ -193,7 +194,9 @@ impl Database {
             .filter(|candidate| candidate.default_selected && candidate.blocked_reason.is_none())
             .map(|candidate| candidate.id.clone())
             .collect::<Vec<_>>();
-        if selected_ids.is_empty() {
+        // A complete audit with no candidates (a review with only suggestions) confirms an empty
+        // selection, as a person saving it would.
+        if selected_ids.is_empty() && !(audit.complete && audit.candidates.is_empty()) {
             tx.commit().map_err(|error| error.to_string())?;
             return Ok(None);
         }
