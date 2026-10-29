@@ -957,6 +957,16 @@ fn suggestions_post_with_the_review_but_never_on_their_own_after_duplicates() {
     assert!(draft.body.contains(suggestions.trim()), "{}", draft.body);
     let draft = finish_review_post(&inline, "COMMENT", false, dedupe(serde_json::json!([]), 1), "");
     assert!(draft.body.is_empty());
+    // A review stored before the section was collapsed still posts its suggestions.
+    let legacy = review_run(
+        Some(
+            "No findings.\n\n### 💡 Suggestions\n\n- `a.rs:3` **Stale test name**. Detail Suggested change: Rename it",
+        ),
+        Some(r#"{"comments":[]}"#),
+    );
+    let draft = finish_review_post(&legacy, "COMMENT", false, dedupe(serde_json::json!([]), 0), "");
+    assert!(draft.body.contains("### 💡 Suggestions"), "{}", draft.body);
+    assert!(draft.body.contains("**Stale test name**"));
 }
 
 #[test]
