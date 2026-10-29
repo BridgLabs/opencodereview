@@ -78,7 +78,9 @@ impl Payload {
                 note.as_object_mut().ok_or("Invalid chunk report")?.remove("findings");
                 json!({"chunkId":result.chunk.id,"report":note})
             } else {
-                json!({"chunkId":result.chunk.id,"summary":result.summary})
+                // Without the suggestions taken out above, which go to the final summary as written.
+                let summary = report.as_ref().map_or_else(|| result.summary.clone(), Value::to_string);
+                json!({"chunkId":result.chunk.id,"summary":summary})
             };
             payload.notes.push((result.chunk.files.clone(), note));
         }
