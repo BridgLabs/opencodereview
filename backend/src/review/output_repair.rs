@@ -248,10 +248,14 @@ pub(super) fn run<T>(
     // Without time for a repair, dropping the invalid points keeps the rest; an error that names
     // no point, or a report that would be left empty, still gets the repair.
     if !repair && invalid_point(&error).is_some() {
-        match drop_invalid(directory, error, &mut validate) {
-            Ok(value) => return Ok(value),
-            Err(remaining) => error = remaining,
+        // A drop that kept the last point returns its first error; the repair needs the current one.
+        if let Ok(value) = drop_invalid(directory, error, &mut validate) {
+            return Ok(value);
         }
+        error = match validate() {
+            Ok(value) => return Ok(value),
+            Err(current) => current,
+        };
     }
     check_cancel(cancel)?;
     let report_path = directory.join("report.json");

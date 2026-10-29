@@ -749,3 +749,33 @@ fn a_chunk_drops_every_invalid_point_after_a_drop_that_kept_the_last() {
         (json!([]), json!([]))
     );
 }
+
+#[test]
+fn without_time_for_a_repair_the_repair_gets_the_error_of_the_point_left() {
+    let fixture = Fixture::new();
+    let mut first = fixture.report["findings"][0].clone();
+    first["title"] = json!("First anchored outside the diff");
+    first["line"] = json!(99);
+    let mut second = fixture.report["findings"][0].clone();
+    second["line"] = json!(98);
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([first, second]);
+    fixture.write(&report);
+    let mut diagnostic = String::new();
+    let _ = run(
+        &fixture.directory,
+        &fixture.context,
+        &fixture.directory.join("prompt.md"),
+        &fixture.directory.join("transcript.json"),
+        &AtomicBool::new(false),
+        false,
+        false,
+        || fixture.validate(),
+        |text| {
+            diagnostic = text.to_string();
+            Err("stop after the diagnostic".into())
+        },
+    );
+    // The first finding was dropped; the repair is told about the one left, at line 98.
+    assert!(diagnostic.contains("code.rs:98"), "{diagnostic}");
+}
