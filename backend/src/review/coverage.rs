@@ -383,6 +383,13 @@ pub(crate) fn source_json(resolution: Option<&CoverageResolution>) -> Option<Str
     })
 }
 
+/// What a review that deferred some files covers: the patch id of the diff it reviewed, and no
+/// per-commit ids, which would mark every commit, deferred files included, as reviewed. The next
+/// review then finds its commits uncovered and reviews from the base again.
+pub(crate) fn partial_ids(repo: &Path, reviewed_diff: &str, cancel: &AtomicBool) -> Result<Vec<String>, String> {
+    Ok(patch_id(repo, reviewed_diff, cancel)?.into_iter().collect())
+}
+
 pub(crate) fn covered_ids(
     repo: &Path,
     base: &str,
