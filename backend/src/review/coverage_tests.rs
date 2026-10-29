@@ -63,8 +63,11 @@ fn legacy_fixture() -> (std::path::PathBuf, crate::db::Database, i64, i64, Strin
             status_reason: None,
         })
         .unwrap();
-    let run = db.start_review_skeleton_with(pr, Some("fixture")).unwrap();
     let conn = db.handle().open().unwrap();
+    // Run ids start apart from the repository id 1, so a check that mixes them up shows.
+    conn.execute("SELECT setval(pg_get_serial_sequence('review_runs', 'id'), 41)", [])
+        .unwrap();
+    let run = db.start_review_skeleton_with(pr, Some("fixture")).unwrap();
     conn.execute("UPDATE review_runs SET status='running',review_body='Reviewed',reviewed_head_sha=$2,reviewed_base_sha=$3,stacked_base_ref='main',finished_at=1 WHERE id=$1", crate::pg_params![run, head, base]).unwrap();
     let plan = serde_json::json!({"repoId":1,"baseRef":"main","reviewedBaseSha":base,"mergeBaseSha":merge_base,"headSha":head,"baseSha":head,"priorSha":null,"incremental":false,"range":format!("{base}...{head}"),"changedFiles":["code.rs"],"relatedFiles":[],"testFiles":[],"conventionFiles":[],"packages":[],"dependentPackages":[],"dependencyEdges":[],"omittedCount":0});
     db.save_review_context_snapshot(1, pr, Some(run), &head, Some(&head), None, &plan.to_string(), 1, 0)
@@ -1094,5 +1097,30 @@ fn changed_file_limit_counts_a_rename_once() {
     )
     .unwrap();
     assert_eq!(count, 1);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_scope_stored_with_its_run_id_as_repository_is_still_recovered() {
+    let (root, db, pr, run, head) = legacy_fixture();
+    let cancel = AtomicBool::new(false);
+    let conn = db.handle().open().unwrap();
+    let store = |repo_id: i64| {
+        conn.execute(
+            "UPDATE review_context_snapshots SET manifest_json = jsonb_set(manifest_json::jsonb, '{repoId}', to_jsonb($1::bigint))::text WHERE review_run_id = $2",
+            crate::pg_params![repo_id, run],
+        )
+        .unwrap();
+    };
+    // Scopes stored before the fix carry their run's temporary index id: the run id, which here
+    // differs from the repository id 1.
+    assert_ne!(run, 1);
+    store(run);
+    assert!(snapshot_for_reuse(&root, &db, 1, pr, &head, &cancel).unwrap().is_some());
+    // Another repository's scope is still never recovered.
+    store(run + 1000);
+    assert!(snapshot_for_reuse(&root, &db, 1, pr, &head, &cancel).unwrap().is_none());
+    drop(conn);
+    drop(db);
     std::fs::remove_dir_all(root).unwrap();
 }
