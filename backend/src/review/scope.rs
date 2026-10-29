@@ -117,15 +117,22 @@ pub(crate) fn focus_files(changed: &mut Vec<String>, diff: &str, cap: usize) -> 
     }
     let mut churn = std::collections::HashMap::<String, usize>::new();
     let mut current = None::<String>;
+    // File headers come before a file's first hunk; inside a hunk, a removed `-- comment` line
+    // reads `--- comment` and is a change like any other.
+    let mut in_hunk = false;
     for line in diff.lines() {
-        if let Some(raw) = line.strip_prefix("+++ ") {
+        if line.starts_with("diff --git ") {
+            in_hunk = false;
+        } else if line.starts_with("@@") {
+            in_hunk = true;
+        } else if let Some(raw) = line.strip_prefix("+++ ").filter(|_| !in_hunk) {
             current = crate::review_archive::decoded_git_path(raw)
                 .and_then(|path| path.strip_prefix("b/").map(str::to_string))
                 .or(current.take());
-        } else if let Some(raw) = line.strip_prefix("--- ") {
+        } else if let Some(raw) = line.strip_prefix("--- ").filter(|_| !in_hunk) {
             current = crate::review_archive::decoded_git_path(raw)
                 .and_then(|path| path.strip_prefix("a/").map(str::to_string));
-        } else if line.starts_with('+') || line.starts_with('-') {
+        } else if in_hunk && (line.starts_with('+') || line.starts_with('-')) {
             if let Some(path) = &current {
                 *churn.entry(path.clone()).or_default() += 1;
             }
