@@ -109,7 +109,7 @@
             "name": "Is OpenCodeReview really free?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "For individuals and companies under 100 people and $1M in yearly revenue, yes, including commercial use. Larger companies need a commercial license. Reviews run on your own Claude or ChatGPT account, so the only cost is what you already pay your AI provider."
+              "text": "For individuals and companies under 100 people and $1M in yearly revenue, yes, including commercial use. Larger companies need a commercial license: write to contato@bridglabs.com. Reviews run on your own Claude or ChatGPT account, so the only cost is what you already pay your AI provider."
             }
           },
           {
@@ -117,15 +117,7 @@
             "name": "Which plans work?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Claude Pro, Max or Team through Claude Code, and ChatGPT plans that include Codex. Local models are not supported. You can connect several accounts of each kind."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "What happens when my plan hits its limit?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "The review continues on your next account in order. The limited account rests and is used again after its window resets. Each account shows how much usage it has left."
+              "text": "Claude Pro, Max or Team through Claude Code, and ChatGPT plans that include Codex. Local models are not supported. You can connect several accounts; when one hits its usage limit, the review continues on the next."
             }
           },
           {
@@ -151,22 +143,6 @@
               "@type": "Answer",
               "text": "Reviews run while OpenCodeReview is running. For reviews around the clock, run it on any always-on machine with Docker, such as a small VPS or a home server."
             }
-          },
-          {
-            "@type": "Question",
-            "name": "What do I need to run it?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "Docker, a GitHub account with access to your repositories, and a Claude or ChatGPT account. The Claude Code and Codex CLIs ship inside the container."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "Does it work with GitHub Enterprise?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "Yes. Set OCR_GH_HOST to your GitHub host before starting it."
-            }
           }
         ]
       }
@@ -188,14 +164,8 @@
       <rect x="40" y="38" width="16" height="30" rx="8" fill="#0f1115" /><rect x="44" y="42" width="5" height="9" rx="2.5" fill="#fff" />
       <rect x="72" y="38" width="16" height="30" rx="8" fill="#0f1115" /><rect x="76" y="42" width="5" height="9" rx="2.5" fill="#fff" />
     </symbol>
-    <symbol id="eyes" viewBox="0 0 128 128">
-      <rect x="34" y="34" width="22" height="46" rx="11" fill="#0f1115" /><rect x="39" y="40" width="7" height="13" rx="3.5" fill="#fff" />
-      <rect x="72" y="34" width="22" height="46" rx="11" fill="#0f1115" /><rect x="77" y="40" width="7" height="13" rx="3.5" fill="#fff" />
-    </symbol>
     <symbol id="codex" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 4.2a4 4 0 0 1 6.9 2.6l-.1 5.4-4.6 2.7" /><path d="M12 4.2a4 4 0 0 1 6.9 2.6l-.1 5.4-4.6 2.7" transform="rotate(60 12 12)" /><path d="M12 4.2a4 4 0 0 1 6.9 2.6l-.1 5.4-4.6 2.7" transform="rotate(120 12 12)" /><path d="M12 4.2a4 4 0 0 1 6.9 2.6l-.1 5.4-4.6 2.7" transform="rotate(180 12 12)" /><path d="M12 4.2a4 4 0 0 1 6.9 2.6l-.1 5.4-4.6 2.7" transform="rotate(240 12 12)" /><path d="M12 4.2a4 4 0 0 1 6.9 2.6l-.1 5.4-4.6 2.7" transform="rotate(300 12 12)" /></g></symbol>
     <symbol id="claude" viewBox="0 0 24 24"><g stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" /></g></symbol>
-    <symbol id="github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.27 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z" /></symbol>
-    <symbol id="folder" viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2h9A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-11Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></symbol>
   </svg>
 
   <header class="nav" id="nav">
@@ -204,7 +174,6 @@
       <nav class="nav-links" aria-label="Sections">
         <a href="#how">How it works</a>
         <a href="#pricing">Pricing</a>
-        <a href="#teams">For teams</a>
         <a href="#faq">FAQ</a>
       </nav>
       <a class="btn btn-light btn-sm" href="https://github.com/BridgLabs/opencodereview">Run it free</a>
@@ -214,307 +183,148 @@
   <main id="top">
     <div class="hero">
       <div class="glow" aria-hidden="true"></div>
-      <div class="wrap">
-        <p class="eyebrow stagger-1">For indie hackers and solo SaaS builders</p>
+      <div class="wrap hero-copy">
+        <p class="eyebrow">For indie hackers and solo SaaS builders</p>
         <h1 class="headline">Nobody reviews your code.<span>Now something does.</span></h1>
-        <p class="lede">Every pull request reviewed by the Claude or ChatGPT account you already have.</p>
-        <div class="ctas"><a class="btn btn-light btn-lg" href="https://github.com/BridgLabs/opencodereview">Run it free<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg></a><span class="install"><code>git clone https://github.com/BridgLabs/opencodereview &amp;&amp; cd opencodereview &amp;&amp; docker compose up --build</code><button class="copy" type="button" data-copy="git clone https://github.com/BridgLabs/opencodereview &amp;&amp; cd opencodereview &amp;&amp; docker compose up --build" aria-label="Copy install command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg></button></span></div>
-        <p class="trigger">5 minutes with Docker · No account, no card · Free for individuals and small companies</p>
+        <p class="lede">Every pull request reviewed by the <strong><svg class="provider-mark" style="color:var(--claude)"><use href="#claude" /></svg>Claude</strong> or <strong><svg class="provider-mark"><use href="#codex" /></svg>ChatGPT</strong> account you already have.</p>
+        <div class="ctas"><a class="btn btn-light btn-lg" href="https://github.com/BridgLabs/opencodereview">Run it free<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg></a></div>
+        <p class="trigger">Free · 5 minutes with Docker · No card</p>
       </div>
-      <div class="wrap stage">
-        <svg class="peek" id="peek" viewBox="0 0 128 128" aria-hidden="true">
-          <path d="M42 12h44c18 0 30 12 30 30v22c0 18-12 30-30 30H62l-22 18c-4 3-8 1-7-4l3-14c-15-2-24-13-24-30V42c0-18 12-30 30-30Z" fill="#8fb3ff" />
-          <path d="M30 34c2-7 7-11 14-12" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".45" fill="none" />
-          <g id="peek-eyes" class="blink"><rect x="40" y="38" width="16" height="30" rx="8" fill="#0f1115" /><rect x="44" y="42" width="5" height="9" rx="2.5" fill="#fff" /><rect x="72" y="38" width="16" height="30" rx="8" fill="#0f1115" /><rect x="76" y="42" width="5" height="9" rx="2.5" fill="#fff" /></g>
-        </svg>
-        <figure class="frame" id="frame">
-          <div class="frame-bar"><span class="dots"><i></i><i></i><i></i></span><span class="url">localhost:1421/platform/reviews</span></div>
+
+      <div class="wrap showcase">
+        <figure class="app-frame">
           <picture><source srcset="app-reviews.webp" type="image/webp"><img src="app-reviews.png" alt="The OpenCodeReview Reviews page: pull requests grouped by status, and a finished review with two findings" width="1440" height="900"></picture>
         </figure>
-        <p class="caption">The real app, filled with demo data.</p>
+        <p class="on-github-label">The same review, on the pull request</p>
+        <div class="on-github">
+        <div class="gh">
+          <div class="gh-head"><span class="gh-av"></span><b>you</b><span class="subtle">reviewed 4 minutes after opening</span></div>
+          <div class="gh-body">
+            <h4>⚠️ OpenCodeReview found 2 issues</h4>
+            <p>Reviewed <code>9e1c2f7</code>. Each issue below has the details and a suggested fix.</p>
+            <table><thead><tr><th></th><th>Issue</th><th>Where</th></tr></thead><tbody>
+              <tr><td>⚠️</td><td>Reset token never expires</td><td><code>reset.ts:31</code></td></tr>
+              <tr><td>⚠️</td><td>Reset form reveals which emails have an account</td><td><code>reset.ts:48</code></td></tr>
+            </tbody></table>
+          </div>
+        </div>
+        <div class="gh inline">
+          <div class="diff-file">src/auth/reset.ts</div>
+          <pre class="diff"><span>  29  const token = randomBytes(32).toString("hex");</span><span>  30  await db.resetTokens.insert({ userId, token });</span><span class="hit">  31  return sendResetEmail(user.email, token);</span></pre>
+          <div class="gh-body">
+            <p class="sub">🤖 Automated review by OpenCodeReview</p>
+            <p><b>[Finding] Reset token never expires</b></p>
+            <p>The token is stored without an expiry, so a reset link from an old email still works months later. Store <code>expiresAt</code> and reject the token after it.</p>
+          </div>
+        </div>
+        </div>
       </div>
     </div>
-
-    <section class="wrap works reveal" aria-label="Works with">
-      <p class="works-label">Works with</p>
-      <ul class="works-list">
-        <li><svg class="provider-mark" style="color:var(--claude)"><use href="#claude" /></svg><span>Claude Code<small>Claude plan</small></span></li>
-        <li><svg class="provider-mark"><use href="#codex" /></svg><span>Codex<small>ChatGPT plan</small></span></li>
-      </ul>
-    </section>
-
-    <section id="queue" class="wrap">
-      <div class="reveal">
-        <p class="kicker">Shipping solo</p>
-        <h2 class="h2">When you're the only developer, nobody catches your mistakes.</h2>
-      </div>
-      <div class="pain">
-        <div class="pain-card reveal">
-          <h3>Reviewing your own code</h3>
-          <ul>
-            <li>You approve your own pull requests, or skip them and push to main.</li>
-            <li>You read code you wrote an hour ago and see what you meant, not what you wrote.</li>
-            <li>The bug reaches you as a support email from a paying customer.</li>
-          </ul>
-        </div>
-        <div class="pain-card reveal">
-          <h3>Paying for a review bot</h3>
-          <ul>
-            <li>Another monthly subscription, on a product that may not pay for itself yet.</li>
-            <li>Priced and built for teams of fifty, not for one person and a few repos.</li>
-            <li>You pay for AI again, on top of the AI plan you already have.</li>
-          </ul>
-        </div>
-      </div>
-    </section>
 
     <section class="wrap">
       <div class="foryou reveal">
         <h2 class="h2">It's for you if…</h2>
         <ol class="stagger">
-          <li><span>You <strong>build a SaaS, an app or a side project alone</strong>, or with one cofounder, and there is no one to review your code.</span></li>
-          <li><span>You <strong>already pay for Claude or ChatGPT</strong> and don't want a second AI bill just for reviews.</span></li>
-          <li><span>You've <strong>shipped a bug a second pair of eyes would have caught</strong>, and you'd rather hear it from a bot than from a customer.</span></li>
+          <li><span>You <strong>ship alone</strong>, and nobody reviews your code.</span></li>
+          <li><span>You <strong>already pay for Claude or ChatGPT</strong>.</span></li>
+          <li><span>You've <strong>shipped a bug</strong> a second pair of eyes would have caught.</span></li>
         </ol>
-        <div class="ctas left"><a class="btn btn-light btn-lg" href="https://github.com/BridgLabs/opencodereview">Run it free<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg></a></div>
       </div>
-    </section>
-
-    <section class="wrap">
-      <div class="results stagger reveal">
-        <div><b>Minutes</b><span>to a first review on every new pull request</span></div>
-        <div><b>$0</b><span>extra, on top of the AI plan you already have</span></div>
-        <div><b>No middleman</b><span>only you and your AI provider see the code</span></div>
-      </div>
-    </section>
-
-    <section class="wrap">
-      <div class="reveal">
-        <p class="kicker">Before and after</p>
-        <h2 class="h2">Same pull request. Different morning.</h2>
-      </div>
-      <div class="ba" id="ba">
-        <div class="ba-card before reveal">
-          <span class="ba-tag">Without</span>
-          <div class="pr-line"><span class="pr-ico open"></span><b>Add yearly plans to checkout</b><span class="subtle">#58</span></div>
-          <div class="timeline">
-            <div class="ev"><i></i>You opened this pull request<span>11:48 PM</span></div>
-            <div class="ev wait"><i></i>No reviewers · you merged it yourself<span>11:49 PM</span></div>
-            <div class="ev bad"><i></i>Stripe retries a webhook and charges a customer twice<span>3:10 AM</span></div>
-            <div class="ev bad"><i></i>Refund request in your inbox<span>8:02 AM</span></div>
-          </div>
-        </div>
-        <div class="ba-card after reveal">
-          <span class="ba-tag on">With OpenCodeReview</span>
-          <div class="pr-line"><span class="pr-ico open"></span><b>Add yearly plans to checkout</b><span class="subtle">#58</span></div>
-          <div class="timeline">
-            <div class="ev"><i></i>You opened this pull request<span>11:48 PM</span></div>
-            <div class="ev bot"><i></i>OpenCodeReview reviewed it with the whole repo as context<span>11:52 PM</span></div>
-          </div>
-          <div class="gh comment-gh">
-            <div class="gh-head"><span class="gh-av"></span><b>you</b><span class="subtle">commented via OpenCodeReview · 4 min after opening</span></div>
-            <div class="gh-body">
-              <h4>⚠️ OpenCodeReview found 2 issues</h4>
-              <p>Reviewed <code>9e1c2f7</code>. Each issue below has the details and a suggested fix.</p>
-              <table><thead><tr><th></th><th>Issue</th><th>Where</th></tr></thead><tbody>
-                <tr class="type"><td>⚠️</td><td>Webhook is not idempotent: a Stripe retry charges the customer twice</td><td><code>webhook.ts:42</code></td></tr>
-                <tr class="type"><td>⚠️</td><td>Yearly price id is read from <code>process.env</code> without a fallback</td><td><code>plans.ts:12</code></td></tr>
-              </tbody></table>
-              <p class="gh-foot">Reviewed by <u>OpenCodeReview</u>.</p>
-            </div>
-          </div>
-          <p class="type ok merged">Fixed in 1 commit · merged at 12:06 AM · you went to sleep</p>
-        </div>
-      </div>
-      <p class="caption left">Illustrated example.</p>
     </section>
 
     <section id="how" class="wrap">
       <div class="reveal">
-        <h2 class="h2">From clone to your first review.</h2>
-        <p class="section-lede">Four steps, about five minutes. You never write a config file.</p>
+        <h2 class="h2">Running in five minutes.</h2>
       </div>
-      <div class="how" id="how-steps">
-        <div class="how-line" aria-hidden="true"><i></i></div>
-        <div class="reveal">
-          <div class="how-art"><div class="mini term"><div><span class="p">$</span> git clone …/opencodereview</div><div><span class="p">$</span> docker compose up --build</div><div class="subtle">✓ open localhost:1421</div><div class="bar"><i></i></div></div></div>
-          <h3><span>1.</span> Plug it in</h3>
-          <p>One Docker command starts everything. Open <code>localhost:1421</code> and onboarding takes over.</p>
-        </div>
-        <div class="reveal">
-          <div class="how-art"><div class="mini"><div class="label">GitHub</div><div class="row on"><svg class="provider-mark"><use href="#github" /></svg>you<span class="ok">✓</span></div><div class="row">you/saas-app</div><div class="row">you/landing</div></div></div>
-          <h3><span>2.</span> Show it your repos</h3>
-          <p>Sign in with GitHub and pick the repositories. They're cloned and indexed in the background.</p>
-        </div>
-        <div class="reveal">
-          <div class="how-art"><div class="mini"><div class="label">Your AI plan</div><div class="row on"><svg class="provider-mark" style="color:var(--claude)"><use href="#claude" /></svg>Claude<span class="ok">✓</span></div><div class="row"><svg class="provider-mark"><use href="#codex" /></svg>ChatGPT</div></div></div>
-          <h3><span>3.</span> Bring your own brain</h3>
-          <p>Sign in to Claude or ChatGPT in the browser. Both CLIs ship inside the container.</p>
-        </div>
-        <div class="reveal">
-          <div class="how-art"><svg class="hop" style="width:84px;height:84px;color:var(--mascot)"><use href="#bubble" /></svg><span class="tag ok" style="position:absolute;top:34px;right:26px">#58 reviewed</span></div>
-          <h3><span>4.</span> Watch the first review</h3>
-          <p>Pick an open pull request. From then on, every new one is reviewed as soon as you open it.</p>
-        </div>
-      </div>
+      <ol class="steps stagger">
+        <li><h3>Start it</h3><p>One Docker command.</p></li>
+        <li><h3>Pick your repos</h3><p>Sign in with GitHub.</p></li>
+        <li><h3>Connect your AI</h3><p>Claude or ChatGPT, in the browser.</p></li>
+        <li><h3>Open a pull request</h3><p>The review lands in minutes.</p></li>
+      </ol>
       <div class="run reveal">
         <a class="btn btn-light btn-lg" href="https://github.com/BridgLabs/opencodereview">Run it free<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg></a>
-      
-      </div>
-    </section>
-
-    <section class="wrap reveal">
-      <div class="bigcard">
-        <div>
-          <h2 class="h2">A reviewer that read the whole repo</h2>
-          <p>Every review starts from an index of your codebase: who calls the changed code, which tests cover it, and the rules you've written down. Findings come with the file, the line and the fix, not a wall of nitpicks.</p>
-        </div>
-        <svg class="giant" viewBox="0 0 128 128" aria-hidden="true">
-          <path d="M42 12h44c18 0 30 12 30 30v22c0 18-12 30-30 30H62l-22 18c-4 3-8 1-7-4l3-14c-15-2-24-13-24-30V42c0-18 12-30 30-30Z" fill="#8fb3ff" />
-          <path d="M30 34c2-7 7-11 14-12" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".45" fill="none" />
-          <g class="eyes-scan"><rect x="40" y="38" width="16" height="30" rx="8" fill="#0f1115" /><rect x="44" y="42" width="5" height="9" rx="2.5" fill="#fff" /><rect x="72" y="38" width="16" height="30" rx="8" fill="#0f1115" /><rect x="76" y="42" width="5" height="9" rx="2.5" fill="#fff" /></g>
-        </svg>
+        <span class="install"><code>git clone https://github.com/BridgLabs/opencodereview &amp;&amp; cd opencodereview &amp;&amp; docker compose up --build</code><button class="copy" type="button" data-copy="git clone https://github.com/BridgLabs/opencodereview &amp;&amp; cd opencodereview &amp;&amp; docker compose up --build" aria-label="Copy install command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></svg></button></span>
       </div>
     </section>
 
     <section id="features" class="wrap">
-      <h2 class="h2 reveal">Everything a review needs. Nothing you rent.</h2>
-      <div class="grid">
-        <article class="card reveal">
-          <h3>Your AI, your call</h3>
-          <p>Review with Claude Code or Codex, whichever you have. Pick which account the next reviews use.</p>
-          <div class="shot">
-            <div class="shot-bar"><span class="dots"><i></i><i></i><i></i></span>Reviews run on</div>
-            <div class="opt on"><svg class="provider-mark" style="color:var(--claude)"><use href="#claude" /></svg>Claude Max<span class="sub">Anthropic</span><span class="check">✓</span></div>
-            <div class="opt"><svg class="provider-mark"><use href="#codex" /></svg>ChatGPT Plus<span class="sub">OpenAI</span></div>
-          </div>
-        </article>
-        <article class="card reveal">
-          <h3>Never stalls at a limit</h3>
-          <p>Building with Claude all day? Add a second account. When one reaches its usage limit, the review moves to the next and comes back after the reset.</p>
-          <div class="shot real"><picture><source srcset="app-accounts.webp" type="image/webp"><img src="app-accounts.png" alt="Settings, Accounts: Claude Max marked Next review with usage meters, and a ChatGPT Pro account" width="1370" height="610" loading="lazy"></picture></div>
-        </article>
-        <article class="card reveal">
+      <div class="center reveal">
+        <h2 class="h2">Nothing you rent.</h2>
+        <p class="section-lede">It runs on your machine, on your AI plan, with your rules.</p>
+      </div>
+      <div class="cards stagger">
+        <article class="card">
           <h3>Knows your codebase</h3>
-          <p>A local index of symbols and imports. Each review gets the callers and tests of the change, and nothing else.</p>
-          <div class="shot graph">
-            <svg class="lines" viewBox="0 0 300 230" preserveAspectRatio="none" aria-hidden="true"><g stroke="#3a3a3a" stroke-dasharray="3 5" fill="none"><path d="M150 115 60 50M150 115 245 55M150 115 70 185M150 115 235 180" /></g></svg>
-            <span class="node hot" style="left:50%;top:50%">webhook.ts</span>
-            <span class="node" style="left:22%;top:22%">checkout.ts</span>
-            <span class="node" style="left:80%;top:24%">plans.ts</span>
-            <span class="node" style="left:24%;top:80%">webhook.test.ts</span>
-            <span class="node" style="left:77%;top:78%">emails.ts</span>
+          <p>Each review gets the callers and tests of the change.</p>
+          <div class="stage">
+            <svg class="graph" viewBox="0 0 420 190" aria-hidden="true">
+              <g fill="none" stroke="var(--line-strong)" stroke-width="1.5">
+                <path d="M122 50C160 50 160 95 158 95" /><path d="M122 140C160 140 160 95 158 95" />
+                <path d="M262 95C300 95 300 50 298 50" /><path d="M262 95C300 95 300 140 298 140" stroke="rgba(74,222,128,.5)" />
+              </g>
+              <g font-family="ui-monospace, Menlo, monospace" font-size="12" text-anchor="middle">
+                <text x="70" y="22" fill="var(--fg-subtle)" font-size="10" letter-spacing="1">CALLERS</text>
+                <rect x="18" y="35" width="104" height="30" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)" /><text x="70" y="54" fill="var(--fg-muted)">login.ts</text>
+                <rect x="18" y="125" width="104" height="30" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)" /><text x="70" y="144" fill="var(--fg-muted)">routes.ts</text>
+                <rect x="158" y="78" width="104" height="34" rx="9" fill="rgba(143,179,255,.16)" stroke="var(--mascot)" /><text x="210" y="99" fill="var(--fg)">reset.ts</text>
+                <text x="210" y="134" fill="var(--mascot)" font-size="10" letter-spacing="1">CHANGED</text>
+                <text x="350" y="22" fill="var(--fg-subtle)" font-size="10" letter-spacing="1">USES · TESTS</text>
+                <rect x="298" y="35" width="104" height="30" rx="8" fill="var(--surface-2)" stroke="var(--line-strong)" /><text x="350" y="54" fill="var(--fg-muted)">mailer.ts</text>
+                <rect x="298" y="125" width="104" height="30" rx="8" fill="rgba(74,222,128,.1)" stroke="rgba(74,222,128,.45)" /><text x="350" y="144" fill="var(--success)">reset.test.ts</text>
+              </g>
+            </svg>
           </div>
         </article>
-        <article class="card reveal">
+        <article class="card">
           <h3>Your rules, as skills</h3>
-          <p>Tell reviews what matters to you in plain Markdown, like "every Stripe handler must be idempotent". Each repository can have its own skill, and every edit is versioned.</p>
-          <div class="shot">
-            <div class="skill"><code>you/saas-app</code><span class="sub">custom skill · v4</span></div>
-            <div class="skill"><code>you/mobile</code><span class="sub">custom skill · v2</span></div>
-            <div class="skill"><code>you/landing</code><span class="sub">default skill</span></div>
+          <p>Write what matters in plain Markdown. Every review follows it.</p>
+          <div class="stage">
+            <div class="window">
+              <div class="window-bar"><span class="dots"><i></i><i></i><i></i></span>you/saas-app · skill.md</div>
+              <div class="md"><span class="md-h">## Payments</span><span>- Every Stripe handler must be idempotent.</span><span class="md-h">## Privacy</span><span>- Never log an email address.</span></div>
+            </div>
           </div>
         </article>
-        <article class="card reveal">
-          <h3>Lands where you review</h3>
-          <p>A summary on the pull request, and each issue inline on the line it is about.</p>
-          <div class="shot"><div class="gh">
-            <div class="gh-head"><span class="gh-av"></span><b>you</b><span class="subtle">commented via OpenCodeReview · 4 min after opening</span></div>
-            <div class="gh-body">
-              <h4>⚠️ OpenCodeReview found 2 issues</h4>
-                            <table><thead><tr><th></th><th>Issue</th><th>Where</th></tr></thead><tbody>
-                <tr class="type"><td>⚠️</td><td>Webhook is not idempotent: a Stripe retry charges the customer twice</td><td><code>webhook.ts:42</code></td></tr>
-                <tr class="type"><td>⚠️</td><td>Yearly price id is read from <code>process.env</code> without a fallback</td><td><code>plans.ts:12</code></td></tr>
-              </tbody></table>
-              <p class="gh-foot">Reviewed by <u>OpenCodeReview</u>.</p>
+        <article class="card">
+          <h3>Never stalls at a limit</h3>
+          <p>One account runs out, the next one takes over.</p>
+          <div class="stage">
+            <div class="window accounts">
+              <div class="acct off"><span class="ring"><svg class="provider-mark" style="color:var(--claude)"><use href="#claude" /></svg></span><div><b>Claude Max</b><small>At its limit · back at 3:00 PM</small><i style="--u:100%"></i></div></div>
+              <div class="acct"><span class="ring"><svg class="provider-mark" style="color:var(--claude)"><use href="#claude" /></svg></span><div><b>Claude Pro <em>Next review</em></b><small>Ready · 66% left</small><i style="--u:66%"></i></div></div>
             </div>
-          </div></div>
+          </div>
         </article>
-        <article class="card lilac reveal">
+        <article class="card">
           <h3>Stays on your machine</h3>
-          <p>Your repositories, index, sign-ins and review history live on your laptop or your own server. We have no servers to send them to.</p>
-          <div class="local">
-            <div class="local-head">On this machine<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg></div>
-            <div class="local-row"><svg><use href="#folder" /></svg>Repositories and index</div>
-            <div class="local-row"><svg><use href="#folder" /></svg>AI sign-ins</div>
-            <div class="local-row"><svg><use href="#folder" /></svg>Review history</div>
+          <p>We have no servers to send your code to.</p>
+          <div class="stage">
+            <div class="machine">
+              <div class="window box">
+                <div class="window-bar"><span class="dots"><i></i><i></i><i></i></span>your machine</div>
+                <ul><li>Repositories and index</li><li>AI sign-ins</li><li>Review history</li></ul>
+              </div>
+              <div class="wire"><span>review calls</span></div>
+              <div class="provider"><span class="marks"><svg class="provider-mark" style="color:var(--claude)"><use href="#claude" /></svg><svg class="provider-mark"><use href="#codex" /></svg></span><small>Your AI provider</small></div>
+            </div>
           </div>
         </article>
       </div>
     </section>
 
     <section id="pricing" class="wrap">
-      <div class="price-grid">
-        <div class="reveal">
+      <div class="price reveal">
+        <div>
           <p class="kicker">What it costs</p>
           <h2 class="h2">The bill for code review: nothing.</h2>
-          <p class="section-lede">No seats, no tiers, no locked features. Put in your numbers and see what a hosted reviewer would add to your monthly bills.</p>
-          <form class="calc" id="calc" onsubmit="return false">
-            <label><span>People writing code <output id="devs-out">1</output></span><input id="devs" type="range" min="1" max="20" value="1"></label>
-            <label><span>Price per developer, per month, on your current tool</span><span class="money"><span>$</span><input id="seat" type="number" min="0" step="1" value="24" inputmode="decimal"></span></label>
-            <div class="calc-out"><div><small>Per-seat tool, per year</small><b id="calc-them">$288</b></div><div class="us"><small>OpenCodeReview, per year</small><b>$0</b></div></div>
-          </form>
+          <p class="section-lede">No seats, no tiers. You use the AI plan you already pay for.</p>
+          <p class="price-note">100+ people or $1M+ in revenue? <a href="mailto:contato@bridglabs.com?subject=OpenCodeReview%20commercial%20license">Get a commercial license</a>.</p>
         </div>
-        <div class="receipt" role="img" aria-label="Receipt totalling zero dollars">
-          <div class="receipt-head"><svg style="color:var(--mascot)"><use href="#bubble" /></svg><span>OPENCODEREVIEW<small>Monthly statement</small></span></div>
-          <dl>
-            <div><dt>Developers × 1</dt><dd>$0.00</dd></div>
-            <div><dt>Side projects × 6</dt><dd>$0.00</dd></div>
-            <div><dt>Pull request reviews</dt><dd>$0.00</dd></div>
-            <div><dt>Codebase index</dt><dd>$0.00</dd></div>
-            <div class="dim"><dt>Your AI account</dt><dd>already yours</dd></div>
-          </dl>
-          <div class="receipt-total"><span>TOTAL</span><span>$0.00</span></div>
-          <div class="stamp">FREE</div>
-        </div>
-      </div>
-    </section>
-
-    <section id="compare" class="wrap reveal">
-      <h2 class="h2">Same reviews. Different deal.</h2>
-      <p class="section-lede">Hosted review tools are built for engineering teams: billed per developer, running your code through their cloud. OpenCodeReview runs on the AI plan you already have.</p>
-      <div class="compare-wrap">
-        <table class="compare">
-          <colgroup><col class="c-label"><col><col><col></colgroup>
-          <thead><tr><th></th><th class="us"><span class="vendor"><svg style="color:var(--mascot)"><use href="#bubble" /></svg><span>OpenCodeReview<small>Self-hosted · code on GitHub</small></span></span></th><th><span class="vendor"><span>CodeRabbit<small>Hosted service</small></span></span></th><th><span class="vendor"><span>Greptile<small>Hosted service</small></span></span></th></tr></thead>
-          <tbody>
-            <tr><th scope="row">Price</th><td class="us"><span class="cell"><span class="mark yes" aria-label="Yes">✓</span>Free for individuals and small companies, on your AI plan</span></td><td><span class="cell"><span class="mark no" aria-label="No">✕</span>Per developer, monthly</span></td><td><span class="cell"><span class="mark no" aria-label="No">✕</span>Per developer, monthly</span></td></tr>
-            <tr><th scope="row">Where your code runs</th><td class="us"><span class="cell"><span class="mark yes" aria-label="Yes">✓</span>Your machine; only your AI provider sees the diff</span></td><td><span class="cell"><span class="mark no" aria-label="No">✕</span>Their cloud</span></td><td><span class="cell"><span class="mark part" aria-label="Partly">~</span>Their cloud, or self-hosted on enterprise</span></td></tr>
-            <tr><th scope="row">Models</th><td class="us"><span class="cell"><span class="mark yes" aria-label="Yes">✓</span>Claude Code or Codex</span></td><td><span class="cell"><span class="mark part" aria-label="Partly">~</span>Vendor's choice</span></td><td><span class="cell"><span class="mark part" aria-label="Partly">~</span>Vendor's choice</span></td></tr>
-            <tr><th scope="row">Usage limits</th><td class="us"><span class="cell"><span class="mark yes" aria-label="Yes">✓</span>Fails over across your accounts</span></td><td><span class="cell"><span class="mark part" aria-label="Partly">~</span>Your plan's limits</span></td><td><span class="cell"><span class="mark part" aria-label="Partly">~</span>Your plan's limits</span></td></tr>
-            <tr><th scope="row">Whole-repo context</th><td class="us"><span class="cell"><span class="mark yes" aria-label="Yes">✓</span>Local index</span></td><td><span class="cell"><span class="mark yes" aria-label="Yes">✓</span>Yes</span></td><td><span class="cell"><span class="mark yes" aria-label="Yes">✓</span>Yes</span></td></tr>
-            <tr><th scope="row">Source code available</th><td class="us"><span class="cell"><span class="mark yes" aria-label="Yes">✓</span>Yes</span></td><td><span class="cell"><span class="mark no" aria-label="No">✕</span>No</span></td><td><span class="cell"><span class="mark no" aria-label="No">✕</span>No</span></td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="compare-note">Based on each product's public website. Plans change, so check their pricing pages for current details.</p>
-    </section>
-
-    <section id="teams" class="wrap">
-      <div class="teams">
-        <div class="reveal">
-          <p class="kicker">For teams</p>
-          <h2 class="h2">Your side project became a company?</h2>
-          <p class="section-lede">OpenCodeReview is free for individuals and companies under 100 people and $1M in revenue. Past that, your company needs a commercial license, so talk to us.</p>
-          <ul class="team-list stagger">
-            <li><b>Setup with you</b><span>We install it on your infrastructure, connect your repositories and tune the review skills to your codebase.</span></li>
-            <li><b>Commercial license</b><span>For companies with 100 or more people or $1M or more in revenue.</span></li>
-            <li><b>Support</b><span>A direct line to the maintainer, with priority fixes.</span></li>
-            <li><b>Shape the roadmap</b><span>Tell us what your team needs next, such as SSO, organization-wide skills or review reports.</span></li>
-          </ul>
-        </div>
-        <form class="contact reveal" id="contact" novalidate>
-          <div class="row2">
-            <label>Name <span class="opt">Optional</span><input name="name" autocomplete="name"></label>
-            <label>Work email<input name="email" type="email" required autocomplete="email"></label>
-          </div>
-          <div class="row2">
-            <label>Company <span class="opt">Optional</span><input name="company" autocomplete="organization"></label>
-            <label>Developers<select name="size"><option>1–10</option><option selected>11–50</option><option>51–200</option><option>200+</option></select></label>
-          </div>
-          <label>Topic<select name="topic"><option>Setup with you</option><option>Commercial license</option><option>Support</option><option>Something else</option></select></label>
-          <label>Message<textarea name="message" rows="4" maxlength="2000" placeholder="What does your team need?"></textarea></label>
-          <div class="contact-foot"><button class="btn btn-light" type="submit">Send message<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg></button><span class="subtle" id="contact-note">Opens your email app with the message ready to send.</span></div>
+        <form class="calc" id="calc" onsubmit="return false">
+          <label><span>People writing code <output id="devs-out">1</output></span><input id="devs" type="range" min="1" max="20" value="1"></label>
+          <label><span>Your tool, per developer per month</span><span class="money"><span>$</span><input id="seat" type="number" min="0" step="1" value="24" inputmode="decimal"></span></label>
+          <div class="calc-out"><div><small>Per-seat tool, per year</small><b id="calc-them">$288</b></div><div class="us"><small>OpenCodeReview, per year</small><b>$0</b></div></div>
         </form>
       </div>
     </section>
@@ -523,31 +333,25 @@
       <div class="faq">
         <aside>
           <h2 class="h2">Questions</h2>
-          <p>Short answers about price, setup, providers and your code.</p>
           <a href="https://github.com/BridgLabs/opencodereview/issues">Ask something else →</a>
         </aside>
         <div>
           <details><summary>I work alone. Isn't code review for teams?</summary><p>That is exactly why you need it. On a team, someone else reads your diff before it ships. Alone, nobody does. OpenCodeReview is that someone, for every pull request, in a few minutes.</p></details>
           <details><summary>I push straight to main. Does it still work?</summary><p>It reviews pull requests. Open a branch and a pull request for each change, even if you merge it yourself ten minutes later. The review lands before you merge.</p></details>
-          <details><summary>Is OpenCodeReview really free?</summary><p>For individuals and companies under 100 people and $1M in yearly revenue, yes, including commercial use. Larger companies need a commercial license. Reviews run on your own Claude or ChatGPT account, so the only cost is what you already pay your AI provider.</p></details>
-          <details><summary>Which plans work?</summary><p>Claude Pro, Max or Team through Claude Code, and ChatGPT plans that include Codex. Local models are not supported. You can connect several accounts of each kind.</p></details>
-          <details><summary>What happens when my plan hits its limit?</summary><p>The review continues on your next account in order. The limited account rests and is used again after its window resets. Each account shows how much usage it has left.</p></details>
+          <details><summary>Is OpenCodeReview really free?</summary><p>For individuals and companies under 100 people and $1M in yearly revenue, yes, including commercial use. Larger companies need a commercial license: write to <a href="mailto:contato@bridglabs.com">contato@bridglabs.com</a>. Reviews run on your own Claude or ChatGPT account, so the only cost is what you already pay your AI provider.</p></details>
+          <details><summary>Which plans work?</summary><p>Claude Pro, Max or Team through Claude Code, and ChatGPT plans that include Codex. Local models are not supported. You can connect several accounts; when one hits its usage limit, the review continues on the next.</p></details>
           <details><summary>Where does my code go?</summary><p>It stays on the machine that runs OpenCodeReview. Reviews call your AI provider with your own sign-in, the same way its CLI does when you use it yourself.</p></details>
           <details><summary>How is it different from CodeRabbit or Greptile?</summary><p>They are hosted services billed per developer. OpenCodeReview runs on your own machine, its code is on GitHub, and it reviews with the AI plan you already pay for.</p></details>
           <details><summary>Does my laptop need to stay on?</summary><p>Reviews run while OpenCodeReview is running. For reviews around the clock, run it on any always-on machine with Docker, such as a small VPS or a home server.</p></details>
-          <details><summary>What do I need to run it?</summary><p>Docker, a GitHub account with access to your repositories, and a Claude or ChatGPT account. The Claude Code and Codex CLIs ship inside the container.</p></details>
-          <details><summary>Does it work with GitHub Enterprise?</summary><p>Yes. Set <code>OCR_GH_HOST</code> to your GitHub host before starting it.</p></details>
         </div>
       </div>
     </section>
 
     <section class="wrap reveal">
       <div class="final">
-        <svg class="mascot-lg hop" style="color:var(--mascot)"><use href="#bubble" /></svg>
-        <h2 class="h2">Stop being your own only reviewer.</h2>
-        <p class="section-lede" style="margin-inline:auto">Clone it, connect GitHub and your AI account, and get your next pull request reviewed in five minutes.</p>
+        <h2 class="h2">Catch it before it ships. Then go to sleep.</h2>
         <div class="ctas"><a class="btn btn-light btn-lg" href="https://github.com/BridgLabs/opencodereview">Run it free<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg></a></div>
-        <p class="trigger">5 minutes with Docker · No account, no card · Free for individuals and small companies</p>
+        <p class="trigger">Free · 5 minutes with Docker · No card</p>
       </div>
     </section>
   </main>
@@ -555,7 +359,7 @@
   <footer>
     <div class="wrap">
       <span>© 2026 BRIDG LABS LTDA</span>
-      <nav aria-label="Footer"><a href="#how">How it works</a><a href="#teams">For teams</a><a href="https://github.com/BridgLabs/opencodereview#readme">Docs</a><a href="https://github.com/BridgLabs/opencodereview/blob/main/CONTRIBUTING.md">Contributing</a><a href="https://github.com/BridgLabs/opencodereview">GitHub</a></nav>
+      <nav aria-label="Footer"><a href="#how">How it works</a><a href="#pricing">Pricing</a><a href="https://github.com/BridgLabs/opencodereview#readme">Docs</a><a href="https://github.com/BridgLabs/opencodereview/blob/main/CONTRIBUTING.md">Contributing</a><a href="https://github.com/BridgLabs/opencodereview">GitHub</a></nav>
     </div>
   </footer>
 
