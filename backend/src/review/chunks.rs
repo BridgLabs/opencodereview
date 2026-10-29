@@ -1014,8 +1014,8 @@ pub(crate) fn prepare_review_chunk(
             "--",
         ];
         args.extend(chunk.files.iter().map(String::as_str));
-        String::from_utf8(indexer::git_frozen_with_input(&inputs.repo_path, &args, cancel, &[])?)
-            .map_err(|error| error.to_string())?
+        // A file in another encoding, such as Latin-1, never fails the review, as in diff_local_paths.
+        String::from_utf8_lossy(&indexer::git_frozen_with_input(&inputs.repo_path, &args, cancel, &[])?).into_owned()
     } else {
         diff_local_paths(
             &inputs.repo_path,
