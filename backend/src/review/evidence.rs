@@ -28,9 +28,10 @@ struct Point {
     side: String,
     evidence: Vec<Reference>,
     counter_evidence: Vec<Reference>,
-    /// high, medium or low; anything else reads as medium (`severity`).
+    /// high, medium or low; anything else, a number or a list included, reads as medium
+    /// (`severity`): an ordering hint never fails a review.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    severity: Option<String>,
+    severity: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -538,7 +539,8 @@ pub(crate) fn publication_diff(context: &Path, assigned: &str) -> Result<String,
 fn severity(point: &Point) -> &'static str {
     match point
         .severity
-        .as_deref()
+        .as_ref()
+        .and_then(serde_json::Value::as_str)
         .map(|value| value.trim().to_ascii_lowercase())
         .as_deref()
     {
@@ -551,9 +553,11 @@ fn severity(point: &Point) -> &'static str {
 /// Hidden marker carrying a finding's severity in its comment, read by `comment_severity`.
 pub(crate) const SEVERITY_MARKER: &str = "<!-- ocr:severity=";
 
-/// The severity a rendered finding carries, or None for a question or a comment without one.
+/// The severity a rendered finding carries, or None for a question or a comment without one. The
+/// marker is the body's last line, so the last one counts: an action quoted earlier, in the prompt
+/// for AI agents, may contain the marker's text.
 pub(crate) fn comment_severity(body: &str) -> Option<&str> {
-    let start = body.find(SEVERITY_MARKER)? + SEVERITY_MARKER.len();
+    let start = body.rfind(SEVERITY_MARKER)? + SEVERITY_MARKER.len();
     let value = &body[start..start + body[start..].find(" -->")?];
     matches!(value, "high" | "medium" | "low").then_some(value)
 }
@@ -701,6 +705,8 @@ fn read_report(path: &Path) -> Result<Report, String> {
 
 #[derive(Clone, Copy)]
 enum Shape {
+    /// Accepted whatever it holds.
+    Any,
     Text,
     OptionalText,
     Line,
@@ -739,7 +745,7 @@ const POINT_FIELDS: Fields = &[
     ("evidence", Shape::References, true),
     ("counterEvidence", Shape::References, true),
     ("ruleIds", Shape::Values, false),
-    ("severity", Shape::OptionalText, false),
+    ("severity", Shape::Any, false),
 ];
 const SUGGESTION_FIELDS: Fields = &[
     ("title", Shape::Text, true),
@@ -824,6 +830,7 @@ fn shape_error(value: &serde_json::Value, shape: Shape, path: &str) -> Option<St
         None => expected("array"),
     };
     match shape {
+        Shape::Any => None,
         Shape::Text => (!value.is_string()).then(|| expected("string")).flatten(),
         Shape::OptionalText => (!value.is_string() && !value.is_null())
             .then(|| expected("string or null"))
