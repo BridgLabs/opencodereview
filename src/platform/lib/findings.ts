@@ -172,7 +172,7 @@ export function reviewBodyHasPostableFinding(body: string | null) {
 }
 
 /** Heading of the review summary section that lists lower-priority suggestions (backend `SUGGESTIONS_HEADING`). */
-export const SUGGESTIONS_HEADING = "### 💡 Suggestions";
+const SUGGESTIONS_HEADING = "### 💡 Suggestions";
 
 /** The suggestions section of a review body, or "" when it has none. */
 export function reviewBodySuggestions(body: string | null) {
