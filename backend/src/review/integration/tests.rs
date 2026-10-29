@@ -1815,7 +1815,7 @@ fn chunk_suggestions_go_to_the_final_summary_not_to_the_final_pass() {
     };
     let results = vec![result.clone()];
     let payload = Payload::from_results(&results, merge_chunk_findings(&results, HEAD)).unwrap();
-    assert_eq!(payload.suggestions, [suggestion.clone()]);
+    assert_eq!(payload.suggestions, std::slice::from_ref(&suggestion));
     assert!(payload
         .notes
         .iter()
