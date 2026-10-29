@@ -900,3 +900,34 @@ fn focus_keeps_the_most_changed_source_files_in_order() {
     assert_eq!(super::focus_files(&mut changed, sql, 1), ["db/other.sql"]);
     assert_eq!(changed, ["db/up.sql"]);
 }
+
+#[test]
+fn a_stored_plan_belongs_to_its_repository_even_with_a_legacy_index_id() {
+    let plan = |repo_id| crate::db::ReviewContextPlan {
+        repo_id,
+        base_ref: None,
+        base_sha: None,
+        changed_files: vec!["a.rs".into()],
+        reviewed_base_sha: None,
+        merge_base_sha: None,
+        scope_reason: None,
+        scope_selection: None,
+        dependency_edges: vec![],
+        packages: vec![],
+        dependent_packages: vec![],
+        related_files: vec![],
+        test_files: vec![],
+        convention_files: vec![],
+        omitted_count: 0,
+        incremental: false,
+        range: String::new(),
+        head_sha: None,
+        prior_sha: None,
+    };
+    // Repository 7, reviewed in run 228.
+    assert!(super::plan_belongs_to(&plan(7), 7, 228));
+    // Plans stored before the fix carry the run's temporary index id, the run id itself.
+    assert!(super::plan_belongs_to(&plan(228), 7, 228));
+    // Any other repository is still refused.
+    assert!(!super::plan_belongs_to(&plan(8), 7, 228));
+}

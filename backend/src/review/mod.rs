@@ -441,6 +441,8 @@ fn build_snapshot_context_plan(
         file.source = "head".into();
     }
     plan.convention_files = git::convention_files_at(&inputs.repo_path, base, cancel)?;
+    // The plan comes from this run's temporary index; it belongs to the pull request's repository.
+    plan.repo_id = inputs.repo_id;
     Ok((plan, Some(head.to_string())))
 }
 

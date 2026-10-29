@@ -347,7 +347,7 @@ pub(crate) fn run_inner(
             .reprocess_context_plan(inputs.pr_id, inputs.run_id)
             .map_err(&scope_error)?
             .ok_or_else(|| scope_error("previous nonempty analysis scope is unavailable".into()))?;
-        if previous.repo_id != inputs.repo_id {
+        if !crate::review::scope::plan_belongs_to(&previous, inputs.repo_id, source_run) {
             return Err(scope_error("previous scope belongs to another repository".into()));
         }
         (changed, selection) =

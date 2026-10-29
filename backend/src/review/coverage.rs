@@ -182,7 +182,7 @@ fn recover_full_coverage(
     let range = format!("{}...{}", candidate.base_sha, candidate.head_sha);
     if plan.incremental
         || plan.changed_files.is_empty()
-        || plan.repo_id != repo_id
+        || !crate::review::scope::plan_belongs_to(&plan, repo_id, candidate.run_id)
         || plan.range != range
         || plan.head_sha.as_deref() != Some(candidate.head_sha.as_str())
         || plan.reviewed_base_sha.as_deref() != Some(candidate.base_sha.as_str())
