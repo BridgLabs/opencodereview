@@ -14,3 +14,5 @@
   failing before the review: the benchmark reads the diff as the product does.
 - A benchmark repository cached with only the commits it needs (a shallow cache) checks out its
   pull requests instead of failing to read their files.
+- The Markdown parser is updated to 0.13.5 for RUSTSEC-2026-0414. OpenCodeReview never enables the
+  affected wikilinks option, so reviews were not exposed.
