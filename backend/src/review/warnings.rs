@@ -58,6 +58,7 @@ pub(crate) fn append(body: &str, warnings: &[EvidenceWarning]) -> String {
             "unconfirmed_candidate" => {
                 "has a finding kept as validated in its chunk; the final pass gave it no decision"
             }
+            "dropped_finding" => "had a point dropped because its evidence did not validate",
             _ => "reported an evidence limitation",
         };
         result.push_str(&format!("\n> - {affected}: {reason}. "));

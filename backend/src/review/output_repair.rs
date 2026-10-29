@@ -366,10 +366,39 @@ fn invalid_point(error: &str) -> Option<(&'static str, usize)> {
 /// `dropped-findings.json`, which materialization reports as a warning, so one invalid point never
 /// fails the points that passed. A report left with no point keeps its error: dropping never turns
 /// a review clean.
-fn drop_invalid<T>(
+fn drop_invalid<T>(directory: &Path, error: String, validate: impl FnMut() -> Result<T, String>) -> Result<T, String> {
+    drop_points(directory, error, validate, true)
+}
+
+/// A chunk review that fails on its points after the output repair: drops them all, the last one
+/// too, so one chunk never fails the other chunks' findings. Every dropped point stays listed as a
+/// warning, and a review with a warning is never treated as clean.
+pub(super) fn validate_chunk<T>(
+    inputs: &ReviewInputs,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(&str, &str),
+    paths: &SpawnPaths,
+    context: &Path,
+    mut validate: impl FnMut() -> Result<T, String>,
+) -> Result<T, String> {
+    match self::validate(inputs, cancel, progress, paths, context, &mut validate) {
+        Err(error) if inputs.frozen.is_some() && error != "cancelled" && invalid_point(&error).is_some() => {
+            drop_points(
+                paths.prompt.parent().ok_or("Missing review stage")?,
+                error,
+                validate,
+                false,
+            )
+        }
+        result => result,
+    }
+}
+
+fn drop_points<T>(
     directory: &Path,
     mut error: String,
     mut validate: impl FnMut() -> Result<T, String>,
+    keep_last: bool,
 ) -> Result<T, String> {
     let report_path = directory.join("report.json");
     let decisions_path = directory.join("finding_decisions.json");
@@ -388,7 +417,7 @@ fn drop_invalid<T>(
         let Some(items) = report[field].as_array_mut() else {
             return Err(error);
         };
-        if index >= items.len() || points <= 1 {
+        if index >= items.len() || keep_last && points <= 1 {
             return Err(first);
         }
         let dropped = items.remove(index);

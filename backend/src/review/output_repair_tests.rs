@@ -647,6 +647,17 @@ fn findings_that_stay_invalid_are_dropped_but_never_all_of_them() {
         .unwrap_err();
     assert!(error.contains("absent"), "{error}");
     assert_eq!(read_json(&fixture.directory.join("report.json")).unwrap(), only);
+    // A chunk drops that last point too, so the other chunks' findings stand; it stays a warning.
+    fs::remove_file(fixture.directory.join(DROPPED)).unwrap();
+    drop_points(&fixture.directory, error, || fixture.validate(), false).unwrap();
+    assert_eq!(
+        read_json(&fixture.directory.join("report.json")).unwrap()["findings"],
+        json!([])
+    );
+    assert_eq!(
+        read_json(&fixture.directory.join(DROPPED)).unwrap(),
+        json!([{"path":"code.rs","title":"Cites a file the snapshot lacks"}])
+    );
 
     // A general question that stays invalid is dropped the same way, beside a valid finding.
     let question = json!({

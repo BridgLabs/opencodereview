@@ -1279,7 +1279,7 @@ pub(crate) fn run_review_chunk(
         if context_fingerprint(&chunk_context)? != context_hash {
             return Err("Incomplete review: reviewer modified the evidence snapshot.".into());
         }
-        let evidence_warnings = output_repair::validate(
+        let evidence_warnings = output_repair::validate_chunk(
             inputs,
             cancel,
             &mut chunk_progress,
