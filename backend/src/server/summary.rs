@@ -233,26 +233,20 @@ pub(crate) fn summary_flowchart(files: &[SummaryFile]) -> Option<String> {
 
 pub(crate) fn fetch_summary_refs(repo_path: &Path, number: i64, base_ref: &str) -> Result<(), String> {
     let branch = base_ref.strip_prefix("origin/").unwrap_or(base_ref);
-    let _ = Command::new("git")
-        .current_dir(repo_path)
-        .args([
-            "fetch",
-            "origin",
-            &format!("+refs/heads/{branch}:refs/remotes/origin/{branch}"),
-            "--no-tags",
-            "--quiet",
-        ])
-        .output();
-    let status = Command::new("git")
-        .current_dir(repo_path)
-        .args([
-            "fetch",
-            "origin",
-            &format!("refs/pull/{number}/head:refs/ocr/summary-{number}"),
-            "--no-tags",
-            "--force",
-            "--quiet",
-        ])
+    // With the gh token, as every other fetch: a private repository has no other credentials here.
+    let fetch = |refspec: &str, force: bool| {
+        let mut command = Command::new("git");
+        command
+            .current_dir(repo_path)
+            .args(["fetch", "origin", refspec, "--no-tags", "--quiet"]);
+        if force {
+            command.arg("--force");
+        }
+        crate::github::apply_git_https_auth(&mut command);
+        command
+    };
+    let _ = fetch(&format!("+refs/heads/{branch}:refs/remotes/origin/{branch}"), false).output();
+    let status = fetch(&format!("refs/pull/{number}/head:refs/ocr/summary-{number}"), true)
         .status()
         .map_err(|error| error.to_string())?;
     if status.success() {
@@ -263,11 +257,11 @@ pub(crate) fn fetch_summary_refs(repo_path: &Path, number: i64, base_ref: &str) 
 }
 
 pub(crate) fn git_lines(repo_path: &Path, args: &[&str]) -> Result<Vec<String>, String> {
-    let output = Command::new("git")
-        .current_dir(repo_path)
-        .args(args)
-        .output()
-        .map_err(|error| error.to_string())?;
+    let mut command = Command::new("git");
+    command.current_dir(repo_path).args(args);
+    // A partial clone fetches missing objects on demand, which needs the token too.
+    crate::github::apply_git_https_auth(&mut command);
+    let output = command.output().map_err(|error| error.to_string())?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
