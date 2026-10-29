@@ -763,8 +763,12 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
     }
     // Only the final answer counts, never earlier steps or tool output. Claude may wrap the
     // object in a fence or put a short sentence before it, on its own line or right before the
-    // object; exactly one object is read.
-    let fence = text.find("```");
+    // object; exactly one object is read. A fence counts only before the object: a finding's text
+    // can itself mention one.
+    let object = text.find("\n{").map(|line| line + 1).or_else(|| report_object(text));
+    let fence = text
+        .find("```")
+        .filter(|&open| !text.starts_with('{') && object.is_none_or(|object| open < object));
     let start = match fence {
         _ if text.starts_with('{') => 0,
         Some(open) => {
@@ -773,16 +777,12 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
                 .ok_or("Review final response has an unclosed JSON fence")?
                 + 1
         }
-        None => text
-            .find("\n{")
-            .map(|line| line + 1)
-            .or_else(|| report_object(text))
-            .ok_or_else(|| {
-                format!(
-                    "Review final response has no JSON object ({} characters of text)",
-                    text.chars().count()
-                )
-            })?,
+        None => object.ok_or_else(|| {
+            format!(
+                "Review final response has no JSON object ({} characters of text)",
+                text.chars().count()
+            )
+        })?,
     };
     let parse = |body: &str| {
         let mut objects = serde_json::Deserializer::from_str(body).into_iter::<FinalResponse>();

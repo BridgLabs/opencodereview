@@ -606,3 +606,14 @@ fn final_response_reads_an_object_written_right_after_a_sentence() {
     assert_eq!(serde_json::from_str::<serde_json::Value>(&actual).unwrap(), report);
     assert!(parse_final_response("I found {two} issues but wrote no object.", false).is_err());
 }
+
+#[test]
+fn a_fence_mentioned_inside_the_report_is_not_read_as_one() {
+    let report = json!({"reviewedFiles":["a.md"],"missingEvidence":[],"findings":[{"detail":"A plain ``` fence has no language."}]});
+    let output = format!("I reviewed the file.\n{}", json!({"report":report}));
+    let (actual, _) = parse_final_response(&output, false).unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&actual).unwrap(), report);
+    let fenced = format!("Here it is:\n```json\n{}\n```", json!({"report":report}));
+    assert!(parse_final_response(&fenced, false).is_ok());
+    assert!(parse_final_response(&format!("```json\n{}", json!({"report":report})), false).is_err());
+}

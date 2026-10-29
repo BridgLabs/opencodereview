@@ -2,3 +2,5 @@
 
 - A pull request that changes a file in another encoding, such as Latin-1, no longer fails before
   the review starts; the file's diff is read with the unreadable bytes replaced.
+- A finding whose text mentions a code fence (```` ``` ````) no longer makes the final answer read
+  as an unclosed fence and fail the review; only a fence before the report object counts.
