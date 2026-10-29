@@ -2312,7 +2312,8 @@ fn an_auto_post_failure_reaches_the_board_and_a_new_result_clears_it() {
         .unwrap();
     assert!(card(&db).suggestions_only);
     // The next review's result clears the failure, and its findings clear the suggestions-only mark.
-    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,created_at,updated_at) VALUES ($1,'head','preview','**[Finding] Bug**',2,2)", [pr]).unwrap();
+    // It keeps its suggestions, so only its finding can clear the mark.
+    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,created_at,updated_at) VALUES ($1,'head','preview',$2,2,2)", params![pr, format!("**[Finding] Bug**\n\n{section}")]).unwrap();
     let next = db.conn.last_insert_rowid();
     db.reserve_review_result(&ReviewResultInput {
         run_id: next,
