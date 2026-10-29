@@ -2252,7 +2252,7 @@ fn a_repository_leaving_the_workspace_keeps_its_review_history() {
 }
 
 #[test]
-fn an_auto_post_failure_reaches_the_board_and_a_new_result_clears_it() {
+fn the_board_carries_an_auto_post_failure_and_a_suggestions_only_mark_until_the_next_review() {
     let db = Db::for_test().open().unwrap();
     db.conn.execute("INSERT INTO repos (owner,name,full_name,is_private,created_at,updated_at) VALUES ('acme','api','acme/api',1,1,1)", []).unwrap();
     let repo = db.conn.last_insert_rowid();
@@ -2279,8 +2279,6 @@ fn an_auto_post_failure_reaches_the_board_and_a_new_result_clears_it() {
         skill_version: "fixture",
     };
     db.reserve_review_result(&input).unwrap();
-    db.note_auto_post_failure(run, "Auto-post failed: PR base/diff scope changed")
-        .unwrap();
     let card = |db: &Database| {
         db.list_review_board()
             .unwrap()
@@ -2289,6 +2287,27 @@ fn an_auto_post_failure_reaches_the_board_and_a_new_result_clears_it() {
             .find(|card| card.id == pr)
             .unwrap()
     };
+    // Only the run's own result left awaiting a decision takes the reason.
+    db.note_auto_post_failure(run + 1000, "Auto-post failed: another run")
+        .unwrap();
+    assert_eq!(card(&db).result_error, None);
+    db.conn
+        .execute(
+            "UPDATE review_results SET effective_state = 'findings_posted' WHERE run_id = $1",
+            [run],
+        )
+        .unwrap();
+    db.note_auto_post_failure(run, "Auto-post failed: already posted")
+        .unwrap();
+    assert_eq!(card(&db).result_error, None);
+    db.conn
+        .execute(
+            "UPDATE review_results SET effective_state = 'awaiting_action' WHERE run_id = $1",
+            [run],
+        )
+        .unwrap();
+    db.note_auto_post_failure(run, "Auto-post failed: PR base/diff scope changed")
+        .unwrap();
     // The board shows its own text in status_reason for a run awaiting a decision; the failure
     // travels on the result instead.
     assert_eq!(
