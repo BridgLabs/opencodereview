@@ -933,7 +933,9 @@ fn suggestions_post_with_the_review_but_never_on_their_own_after_duplicates() {
     ));
     for event in ["COMMENT", "APPROVE"] {
         let draft = finish_review_post(&only, event, false, dedupe(serde_json::json!([]), 0), "");
-        assert!(draft.body.contains("**Stale test name**"), "{event}");
+        // The collapsed block arrives whole, closed, as the review wrote it.
+        assert!(draft.body.contains(suggestions.trim()), "{event}: {}", draft.body);
+        assert!(draft.body.contains("</details>"), "{event}");
         assert!(!draft.body.contains("No findings."), "{event}");
     }
     let inline = review_run(
@@ -952,7 +954,7 @@ fn suggestions_post_with_the_review_but_never_on_their_own_after_duplicates() {
         ),
         "",
     );
-    assert!(draft.body.contains("**Stale test name**"));
+    assert!(draft.body.contains(suggestions.trim()), "{}", draft.body);
     let draft = finish_review_post(&inline, "COMMENT", false, dedupe(serde_json::json!([]), 1), "");
     assert!(draft.body.is_empty());
 }
