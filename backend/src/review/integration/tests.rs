@@ -1806,17 +1806,29 @@ fn chunk_suggestions_go_to_the_final_summary_not_to_the_final_pass() {
             risk_triggers: vec![],
             cross_chunk_group_ids: vec![],
         },
-        summary: json!({"reviewedFiles":["src/a.rs"],"missingEvidence":[],"findings":[],"suggestions":[suggestion]})
-            .to_string(),
+        summary:
+            json!({"reviewedFiles":["src/a.rs"],"missingEvidence":[],"findings":[],"suggestions":[suggestion.clone()]})
+                .to_string(),
         comments_json: Some(json!({"commit_id":HEAD,"comments":[]}).to_string()),
         evidence_warnings: vec![],
         usage: RunUsage::default(),
     };
-    let results = vec![result];
+    let results = vec![result.clone()];
     let payload = Payload::from_results(&results, merge_chunk_findings(&results, HEAD)).unwrap();
-    assert_eq!(payload.suggestions, [suggestion]);
+    assert_eq!(payload.suggestions, std::slice::from_ref(&suggestion));
     assert!(payload
         .notes
         .iter()
         .all(|(_, note)| note["report"].get("suggestions").is_none()));
+    // A report whose findings do not line up with its candidates goes as text, without them too.
+    let mut unstructured = result;
+    unstructured.summary = json!({"reviewedFiles":["src/a.rs"],"missingEvidence":[],
+        "findings":[{"path":"src/a.rs","line":9}],"suggestions":[suggestion.clone()]})
+    .to_string();
+    let results = vec![unstructured];
+    let payload = Payload::from_results(&results, merge_chunk_findings(&results, HEAD)).unwrap();
+    assert_eq!(payload.suggestions, [suggestion]);
+    let (_, note) = &payload.notes[0];
+    assert!(note["report"].is_null());
+    assert!(!note["summary"].as_str().unwrap().contains("Stale test name"), "{note}");
 }
