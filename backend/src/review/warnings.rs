@@ -96,4 +96,20 @@ mod tests {
         assert!(!rendered.contains("<script>"));
         assert_eq!(append("Result", &[]), "Result");
     }
+
+    #[test]
+    fn a_dropped_finding_says_why_it_was_dropped() {
+        let rendered = append(
+            "Result",
+            &[EvidenceWarning {
+                reason: "dropped_finding".into(),
+                path: Some("src/a.rs".into()),
+                reference: None,
+            }],
+        );
+        assert!(
+            rendered.contains("src/a.rs: had a point dropped because its evidence did not validate."),
+            "{rendered}"
+        );
+    }
 }

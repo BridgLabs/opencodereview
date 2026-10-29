@@ -370,21 +370,25 @@ pub(crate) fn run_inner(
     if !deferred.is_empty() {
         diff = integration::scoped_diff(&diff, &changed, &full_pr_changed);
     }
-    // Files left out are not covered, so the next review picks them up.
-    let covered_diff = if deferred.is_empty() {
-        full_pr_diff.clone()
+    // Files left out are not covered, so the next review picks them up: the coverage lists only
+    // the files reviewed, their diff, and no per-commit patch ids (`coverage::partial_ids`).
+    let (covered_files, covered_diff) = if deferred.is_empty() {
+        (full_pr_changed.clone(), full_pr_diff.clone())
     } else {
         let covered = full_pr_changed
             .iter()
             .filter(|path| !deferred.contains(path))
             .cloned()
             .collect::<Vec<_>>();
-        integration::scoped_diff(&full_pr_diff, &covered, &full_pr_changed)
+        let diff = integration::scoped_diff(&full_pr_diff, &covered, &full_pr_changed);
+        (covered, diff)
     };
     let coverage_ids = if changed.is_empty() && !selection.excluded_files.is_empty() {
         Vec::new()
-    } else {
+    } else if deferred.is_empty() {
         crate::review::coverage::covered_ids(&inputs.repo_path, &base_rev, &head_sha, &covered_diff, cancel)?
+    } else {
+        crate::review::coverage::partial_ids(&inputs.repo_path, &covered_diff, cancel)?
     };
     let deferred_note = deferred_files_note(&deferred);
     if scope_reuse.is_some() && reprocessed_source.is_none() {
@@ -416,10 +420,10 @@ pub(crate) fn run_inner(
         base_sha: &base_rev,
         merge_base_sha: &merge_base_sha,
         head_sha: &head_sha,
-        changed_files: &full_pr_changed,
+        changed_files: &covered_files,
         covered_patch_ids: &coverage_ids,
-        diff_hash: &crate::review::coverage::diff_hash(&full_pr_diff),
-        diff_text: &full_pr_diff,
+        diff_hash: &crate::review::coverage::diff_hash(&covered_diff),
+        diff_text: &covered_diff,
         source_json: coverage_source.as_deref(),
     })?;
     progress(

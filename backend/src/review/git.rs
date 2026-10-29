@@ -144,7 +144,6 @@ pub(crate) fn changed_files_local(repo_path: &Path, range: &str, cancel: &Atomic
         .map_err(|error| format!("Git changed-file paths are not UTF-8: {error}"))
 }
 
-/// Blobs a diff of `range` reads. Reading trees only, so it never triggers a lazy fetch.
 /// The paths in a `git diff --raw -z --no-renames` listing.
 fn diff_paths(raw: &[u8]) -> Vec<String> {
     let fields = raw.split(|byte| *byte == 0).collect::<Vec<_>>();
@@ -155,6 +154,7 @@ fn diff_paths(raw: &[u8]) -> Vec<String> {
         .collect()
 }
 
+/// Blobs a diff of `range` reads. Reading trees only, so it never triggers a lazy fetch.
 pub(crate) fn diff_blob_ids(raw: &[u8]) -> Vec<String> {
     let mut ids = raw
         .split(|byte| *byte == 0)
