@@ -707,3 +707,26 @@ fn the_only_finding_is_never_dropped_for_a_suggestion_left_alone() {
         1
     );
 }
+
+#[test]
+fn a_repair_that_changes_the_frozen_context_fails_without_a_fallback() {
+    let fixture = Fixture::new();
+    let mut invalid = fixture.report["findings"][0].clone();
+    invalid["title"] = json!("Anchored outside the diff");
+    invalid["line"] = json!(99);
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([fixture.report["findings"][0].clone(), invalid]);
+    fixture.write(&report);
+    let error = fixture
+        .run(&AtomicBool::new(false), |_| {
+            fixture.write(&fixture.report);
+            fs::write(fixture.context.join("PR.md"), "Changed").unwrap();
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(
+        error.contains("frozen evidence changed during output repair"),
+        "{error}"
+    );
+    assert!(!fixture.directory.join(DROPPED).exists());
+}

@@ -334,6 +334,10 @@ pub(super) fn run<T>(
         Err(failure) if failure == "cancelled" => return Err(failure),
         Err(failure) => failure,
     };
+    // Every fallback validates against the stage's context: if the repair changed it, nothing is.
+    if context_fingerprint(context)? != fingerprint {
+        return Err(format!("{diagnostic} Repair unsuccessful: {failure}"));
+    }
     // A repaired report that still has invalid findings drops them; any other failure goes back to
     // the report as first written and drops its invalid findings instead. When nothing can be
     // dropped, the repair's own failure is reported.

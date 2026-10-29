@@ -160,6 +160,13 @@ fn manifests_in_one_directory_make_one_package() {
             .map(|package| &package.package_path)
             .collect::<Vec<_>>()
     );
+    // setup.py's declared name wins over the one requirements.txt makes up.
+    let root = write
+        .packages
+        .iter()
+        .find(|package| package.package_path.is_empty())
+        .unwrap();
+    assert_eq!(root.name, "tool");
     fs::remove_dir_all(dir).unwrap();
 }
 

@@ -211,6 +211,17 @@ pub(crate) fn quoted_line(content: &str, line: usize, quote: &str) -> Option<usi
     None
 }
 
+/// Whether `line` of `content` itself holds `quote`. References that `rebind_quote_lines` does not
+/// move (conventions, linked repositories, PR.md, an unfrozen review) are published with the line
+/// they name, so it has to be right.
+fn on_line(content: &str, line: usize, quote: &str) -> bool {
+    line >= 1
+        && content
+            .lines()
+            .nth(line - 1)
+            .is_some_and(|text| text.contains(quote.trim()))
+}
+
 fn verify_reference(reference: &Reference, context: &Path) -> Result<(), String> {
     if reference.revision.is_some() || reference.source.is_some() {
         return Err("Versioned evidence requires its frozen archive".into());
@@ -228,13 +239,13 @@ fn verify_reference(reference: &Reference, context: &Path) -> Result<(), String>
     if reference.path == "PR.md" {
         return fs::read_to_string(context.join(path))
             .ok()
-            .filter(|content| quoted_line(content, reference.line, &reference.quote).is_some())
+            .filter(|content| on_line(content, reference.line, &reference.quote))
             .map(|_| ())
             .ok_or_else(|| external_mismatch(reference));
     }
     for area in ["changed", "related", "global", "conventions"] {
         if let Ok(content) = fs::read_to_string(context.join(area).join(path)) {
-            if quoted_line(&content, reference.line, &reference.quote).is_some() {
+            if on_line(&content, reference.line, &reference.quote) {
                 return Ok(());
             }
         }
@@ -294,7 +305,7 @@ impl<'a> EvidenceResolver<'a> {
                     .unwrap_or(&reference.path);
                 let content = crate::review_archive::read_prepared_text(self.context, &format!("conventions/{path}"))
                     .map_err(|e| format!("Convention evidence unavailable at {path}: {e}"))?;
-                if quoted_line(&content, reference.line, &reference.quote).is_none() {
+                if !on_line(&content, reference.line, &reference.quote) {
                     return Err("Convention quote does not match snapshot".into());
                 }
                 return Ok(false);
@@ -311,7 +322,7 @@ impl<'a> EvidenceResolver<'a> {
                 let content = archive
                     .resolve_dependency(repository, revision, &reference.path)
                     .map_err(|error| format!("Supporting repository evidence unavailable: {error}"))?;
-                if quoted_line(content, reference.line, &reference.quote).is_none() {
+                if !on_line(content, reference.line, &reference.quote) {
                     return Err("Supporting repository quote does not match snapshot".into());
                 }
                 return Ok(false);
@@ -344,7 +355,7 @@ impl<'a> EvidenceResolver<'a> {
             }
             let content = crate::review_archive::read_prepared_text(self.context, &reference.path)
                 .map_err(|e| format!("Optional evidence unavailable at {}: {e}", reference.path))?;
-            if quoted_line(&content, reference.line, &reference.quote).is_none() {
+            if !on_line(&content, reference.line, &reference.quote) {
                 return Err(external_mismatch(reference));
             }
             return Ok(false);

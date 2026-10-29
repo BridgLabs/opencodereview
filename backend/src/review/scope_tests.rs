@@ -893,4 +893,10 @@ fn focus_keeps_the_most_changed_source_files_in_order() {
     assert!(super::focus_files(&mut unlimited, &diff, 0).is_empty());
     assert!(super::focus_files(&mut unlimited, &diff, 5).is_empty());
     assert_eq!(unlimited, all);
+    // A removed `-- comment` line inside a hunk still counts for its file.
+    let sql = "diff --git a/db/up.sql b/db/up.sql\n--- a/db/up.sql\n+++ b/db/up.sql\n@@ -1,4 +1 @@\n--- note\n-drop a;\n-drop b;\n-drop c;\n+ok;\n\
+        diff --git a/db/other.sql b/db/other.sql\n--- a/db/other.sql\n+++ b/db/other.sql\n@@ -1 +1 @@\n-x;\n+y;\n";
+    let mut changed = vec!["db/other.sql".to_string(), "db/up.sql".to_string()];
+    assert_eq!(super::focus_files(&mut changed, sql, 1), ["db/other.sql"]);
+    assert_eq!(changed, ["db/up.sql"]);
 }

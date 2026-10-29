@@ -1094,3 +1094,36 @@ fn changed_file_limit_counts_a_rename_once() {
     assert_eq!(count, 1);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn a_review_that_deferred_files_never_covers_their_commits() {
+    let (root, git) = fixture_repo();
+    git(&["init", "-q"]);
+    std::fs::write(root.join("a.rs"), "a\n").unwrap();
+    std::fs::write(root.join("b.rs"), "b\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "base"]);
+    let base = git(&["rev-parse", "HEAD"]);
+    std::fs::write(root.join("a.rs"), "a2\n").unwrap();
+    git(&["commit", "-qam", "reviewed"]);
+    std::fs::write(root.join("b.rs"), "b2\n").unwrap();
+    git(&["commit", "-qam", "deferred"]);
+    let head = git(&["rev-parse", "HEAD"]);
+    let cancel = AtomicBool::new(false);
+    let full = git(&["diff", &format!("{base}..{head}")]);
+    let reviewed = git(&["diff", &format!("{base}..{head}"), "--", "a.rs"]);
+    let commits = commit_patches(&root, &format!("{base}..{head}"), &cancel).unwrap();
+    assert_eq!(commits.len(), 2);
+    // A full review covers every commit; one that deferred b.rs never covers the commit that
+    // changes it, so the next review starts there.
+    let full_ids = covered_ids(&root, &base, &head, &full, &cancel).unwrap();
+    assert!(commits.iter().all(|commit| full_ids.contains(&commit.patch_id)));
+    let partial = partial_ids(&root, &reviewed, &cancel).unwrap();
+    assert_eq!(partial.len(), 1);
+    let deferred = commits
+        .iter()
+        .find(|commit| commit.parent.as_deref() != Some(base.as_str()))
+        .unwrap();
+    assert!(!partial.contains(&deferred.patch_id));
+    std::fs::remove_dir_all(root).unwrap();
+}
