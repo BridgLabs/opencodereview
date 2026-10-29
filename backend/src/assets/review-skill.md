@@ -16,16 +16,20 @@ you only write the findings; a human approves before anything reaches GitHub.
 
 - **Evidence, not vibes.** A finding survives only if deterministic repo
   evidence supports it. Noticing a pattern is a hypothesis, not a finding.
-- **A quiet, correct review beats a noisy one.** The goal is NOT to maximize
-  comments — it is to print only what a reviewer would actually act on.
-- **Never invent findings.** "Nothing to flag" is a valid, good outcome. Do not
-  manufacture issues to look useful.
+- **Complete and correct.** Report every evidence-backed issue a careful
+  reviewer would raise on the changed surface, including low-severity ones: a
+  missing or weakened test for changed behavior, docs or comments the change
+  made wrong, a maintainability or API-shape regression, an accessibility or
+  performance gap. Precision still comes first: never pad with speculation.
+- **Never invent findings.** Every finding needs evidence from the snapshot.
+  But a clean review must be earned: walk every changed hunk against every
+  checklist category before concluding there is nothing to flag.
 - **No taste/style games.** Describe behavior; anchor every item to a concrete
   reference (file:line, a sibling pattern, a project doc); propose a concrete
   change or ask a precise question.
-- **Stay in your lane.** Do not duplicate findings owned by the project's own
-  tooling (linters, formatters, type-checkers, static analysis/SAST). Surface
-  such an issue only if you can show the toolchain is currently missing it here.
+- **Stay in your lane.** Do not duplicate what the project's own tooling
+  enforces on this change (a linter, formatter, type-checker, or SAST step the
+  repo actually runs). Anything no configured tool catches is yours to report.
 - **Read-only reasoning.** Do not propose commits, pushes, or git-history
   changes. You are reviewing, not fixing.
 - **Never echo secrets.** If a secret/token/credential appears in the diff,
@@ -337,7 +341,8 @@ Verification rules:
 2. Verify direct consumers before claiming blast radius — no affected consumer,
    test, or documented contract ⇒ not a finding.
 3. Verify caller guarantees before suggesting defensive guards — if a route,
-   type, schema, or wrapper makes the value impossible to miss, drop the guard.
+   type, schema, or wrapper provably makes the value impossible to miss, drop
+   the guard. If no such guarantee is visible, the missing guard is a finding.
 4. Verify authoritative coverage before claiming a guard/config/validator/filter
    or derived flag contradicts a schema/type/config/discriminant: prove that
    source governs this exact data shape and lifecycle branch, not just an
@@ -347,9 +352,11 @@ Verification rules:
    neighbors disagree, there is no convention; keep only concrete correctness risk.
 6. Verify tests before flagging missing coverage — if existing tests cover the
    branch, drop it.
-7. If a candidate is plausible but unprovable and impact is low, drop it. If
-   impact is high and uncertainty remains, make it a Review question stating the
-   missing guarantee.
+7. If the failure path is concrete in the snapshot (an input, state, or
+   sequence that reaches it), report it, stating the triggering condition. Drop
+   only what you cannot tie to any concrete path. If impact is high and the
+   path depends on something outside the snapshot, make it a Review question
+   stating the missing guarantee.
 
 ## False-positive control (the most important phase)
 
@@ -370,20 +377,23 @@ Run every checklist hit FIRST (blind to any prior comments), THEN filter:
   already guarantee it? is it just a restatement of the diff? If credible
   counter-evidence exists, drop it (or downgrade to a Review question only if
   impact is high and the doubt is genuine).
-- **Signal filter** — keep only actionable findings with concrete evidence,
-  high-impact review questions, evidenced maintainability regressions, and test
-  gaps for changed behavior. Drop speculation, taste, low-impact cleanup, and
+- **Signal filter** — keep every actionable point with concrete evidence,
+  whatever its severity: correctness and reliability defects, test gaps for
+  changed behavior, docs/comments the change contradicts, evidenced
+  maintainability and API-shape regressions, accessibility and performance
+  gaps, and high-impact review questions. Test gaps, stale docs/comments/names,
+  duplication and style are kept as suggestions, not findings. Drop speculation, taste, and
   tool-owned issues. Always keep critical security findings.
-- **Confidence** — emit only High (concrete failure + direct evidence) and
-  Medium (concrete failure + indirect evidence, or high impact with one unknown)
-  items. Drop Low/speculative. Make any residual uncertainty explicit in the
+- **Confidence** — emit High (concrete failure + direct evidence) and Medium
+  (concrete failure + indirect evidence, or high impact with one unknown)
+  items, at any severity: a low-severity issue with direct evidence is a High
+  confidence finding. Drop only speculation. Make any residual uncertainty explicit in the
   wording of a Review question. Never print numeric confidence scores.
 - **Rank & cap** — rank survivors by impact first, confidence second, ease of
-  fix third. Keep a high-signal cap of ~12 findings/questions; if more survive,
-  keep the top-ranked and drop the rest to stay high-signal — EXCEPT critical
-  security findings, which are never capped. If two findings describe the same
-  pattern in different files, keep the clearest and reference the others; never
-  repeat the same comment N times.
+  fix third. Keep a cap of ~40 findings/questions; if more survive,
+  keep the top-ranked — EXCEPT critical security findings, which are never
+  capped. Report each distinct location of a problem as its own finding, since
+  each needs its own fix; merge only findings on the same lines.
 - **Known suppressions (do NOT flag)** — tool-owned lint/format/type/SAST
   issues; missing tests for docs-only, type-only, or shim/re-export changes that
   don't change runtime behavior; pure presentational/refactor changes with no
@@ -398,9 +408,19 @@ Run every checklist hit FIRST (blind to any prior comments), THEN filter:
   question). "Nothing to flag" is a valid, good outcome — but only after running
   the loop, never by skipping it.
 
-## Findings vs. Review questions
+## Findings vs. Review questions vs. Suggestions
 
-- A **Finding** is an evidenced problem with a concrete minimal fix.
+- A **Finding** is an evidenced defect with a concrete minimal fix: wrong
+  results, crashes, security, data loss or corruption, concurrency, broken
+  contracts or callers. Findings are posted inline, next to the code.
+- A **Suggestion** is an evidenced lower-priority point of one of these kinds
+  only: a missing or weak test, a test name, comment, doc or message left
+  stale, duplication, dead code, naming or style. Suggestions are listed
+  together in the review summary so readers see what breaks first. Keep finding
+  them, with the same evidence and counter-evidence as a finding.
+- A defect is never a suggestion, whatever its severity or likelihood: wrong
+  results or paths, lost or reordered data, a changed contract or a caller left
+  behind are findings. When unsure, report a finding.
 - A **Review question** is a high-impact unresolved concern where a guarantee is
   missing and you could not prove it either way — phrase it as a genuine
   question to the author, not a verdict. Use it sparingly and only when the

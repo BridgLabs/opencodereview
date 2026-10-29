@@ -193,7 +193,7 @@ pub(crate) fn toml_array_strings_in_section(text: &str, section: &str, key: &str
     let mut collecting = false;
     let mut buffer = String::new();
     for raw in text.lines() {
-        let line = raw.trim();
+        let line = without_toml_comment(raw).trim();
         if line.starts_with('[') && line.ends_with(']') && !collecting {
             active = line.trim_matches(&['[', ']'][..]) == section;
             continue;
@@ -215,9 +215,27 @@ pub(crate) fn toml_array_strings_in_section(text: &str, section: &str, key: &str
     items
 }
 
+/// `line` up to a `#` that is outside a quoted string.
+fn without_toml_comment(line: &str) -> &str {
+    let mut quote = None;
+    for (index, character) in line.char_indices() {
+        match (quote, character) {
+            (None, '"' | '\'') => quote = Some(character),
+            (Some(open), _) if character == open => quote = None,
+            (None, '#') => return &line[..index],
+            _ => {}
+        }
+    }
+    line
+}
+
 pub(crate) fn unquote(value: &str) -> Option<String> {
     let trimmed = value.trim().trim_end_matches(',').trim();
-    if (trimmed.starts_with('"') && trimmed.ends_with('"')) || (trimmed.starts_with('\'') && trimmed.ends_with('\'')) {
+    // A lone quote both starts and ends with one, but quotes nothing.
+    if trimmed.len() >= 2
+        && ((trimmed.starts_with('"') && trimmed.ends_with('"'))
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\'')))
+    {
         Some(trimmed[1..trimmed.len().saturating_sub(1)].to_string())
     } else {
         None

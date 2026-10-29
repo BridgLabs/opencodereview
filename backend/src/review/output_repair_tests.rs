@@ -87,6 +87,7 @@ impl Fixture {
             &self.directory.join("transcript.json"),
             cancel,
             false,
+            true,
             || self.validate(),
             launch,
         )
@@ -254,46 +255,50 @@ fn repair_cannot_drop_findings_change_coverage_or_replace_evidence_identity() {
         let mut invalid = fixture.report.clone();
         invalid["findings"][0]["line"] = json!(99);
         fixture.write(&invalid);
-        let error = fixture
-            .run(&AtomicBool::new(false), |_| {
-                let mut repaired = fixture.report.clone();
-                match mutation {
-                    "drop" => repaired["findings"] = json!([]),
-                    "coverage" => repaired["reviewedFiles"] = json!([]),
-                    "revision" => repaired["findings"][0]["evidence"][0]["revision"] = json!("b".repeat(40)),
-                    "path" => repaired["findings"][0]["path"] = json!("other.rs"),
-                    "detail" => repaired["findings"][0]["detail"] = json!("Changed conclusion"),
-                    "evidence" => repaired["findings"][0]["evidence"] = json!([]),
-                    "malformed-report" => repaired = json!([]),
-                    "malformed-point" => repaired["findings"] = json!([42]),
-                    "existing-counter" => {
-                        repaired["findings"][0]["counterEvidence"] = json!([
-                            repaired["findings"][0]["counterEvidence"][0],
-                            repaired["findings"][0]["counterEvidence"][0]
-                        ])
-                    }
-                    _ => repaired["snapshotId"] = json!("changed"),
+        let result = fixture.run(&AtomicBool::new(false), |_| {
+            let mut repaired = fixture.report.clone();
+            match mutation {
+                "drop" => repaired["findings"] = json!([]),
+                "coverage" => repaired["reviewedFiles"] = json!([]),
+                "revision" => repaired["findings"][0]["evidence"][0]["revision"] = json!("b".repeat(40)),
+                "path" => repaired["findings"][0]["path"] = json!("other.rs"),
+                "detail" => repaired["findings"][0]["detail"] = json!("Changed conclusion"),
+                "evidence" => repaired["findings"][0]["evidence"] = json!([]),
+                "malformed-report" => repaired = json!([]),
+                "malformed-point" => repaired["findings"] = json!([42]),
+                "existing-counter" => {
+                    repaired["findings"][0]["counterEvidence"] = json!([
+                        repaired["findings"][0]["counterEvidence"][0],
+                        repaired["findings"][0]["counterEvidence"][0]
+                    ])
                 }
-                fixture.write(&repaired);
-                Ok(())
-            })
-            .unwrap_err();
-        assert!(
-            error.contains("changed findings, coverage or evidence identities"),
-            "{error}"
-        );
+                _ => repaired["snapshotId"] = json!("changed"),
+            }
+            fixture.write(&repaired);
+            Ok(())
+        });
+        if matches!(mutation, "coverage" | "revision" | "path" | "detail" | "snapshot") {
+            // Anything beyond the mechanical corrections is put back as the model first reported it.
+            result.unwrap();
+            let kept = read_json(&fixture.directory.join("report.json")).unwrap();
+            assert_eq!(
+                crate::review::evidence::schema_report_fields(kept),
+                crate::review::evidence::schema_report_fields(fixture.report.clone()),
+                "{mutation}"
+            );
+        } else {
+            let error = result.unwrap_err();
+            assert!(
+                error.contains("changed findings, coverage or evidence identities"),
+                "{mutation}: {error}"
+            );
+        }
     }
 }
 
 #[test]
 fn incomplete_or_stale_reports_never_trigger_output_repair() {
-    for field in [
-        "requestedFiles",
-        "missingEvidence",
-        "snapshotId",
-        "contractVersion",
-        "reviewedFiles",
-    ] {
+    for field in ["requestedFiles", "snapshotId", "contractVersion", "reviewedFiles"] {
         let fixture = Fixture::new();
         let mut invalid = fixture.report.clone();
         invalid["findings"][0]["line"] = json!(99);
@@ -308,6 +313,61 @@ fn incomplete_or_stale_reports_never_trigger_output_repair() {
                 "Incomplete reports must not trigger repair"
             ))
             .is_err());
+    }
+}
+
+#[test]
+fn repair_runs_beside_missing_evidence_but_never_changes_it() {
+    let missing = json!([{"reason":"evidence_excluded","path":"code.rs"}]);
+    for changed in [false, true] {
+        let fixture = Fixture::new();
+        let mut invalid = fixture.report.clone();
+        invalid["missingEvidence"] = missing.clone();
+        invalid["findings"][0]["line"] = json!(99);
+        fixture.write(&invalid);
+        let mut launched = false;
+        // Reviews keep missing evidence as warnings, as the product validates them.
+        let validate = || {
+            crate::review::evidence::EvidenceResolver::frozen(&fixture.context, &fixture.archive)
+                .materialize_with_warnings(
+                    &fixture.directory.join("report.json"),
+                    &["code.rs".into()],
+                    &fixture.archive.scope().head_sha,
+                    &fixture.diff,
+                    &fixture.directory.join("summary.md"),
+                    &fixture.directory.join("comments.json"),
+                )
+                .map(|_| ())
+        };
+        let error = run(
+            &fixture.directory,
+            &fixture.context,
+            &fixture.directory.join("prompt.md"),
+            &fixture.directory.join("transcript.json"),
+            &AtomicBool::new(false),
+            false,
+            true,
+            validate,
+            |_| {
+                launched = true;
+                let mut repaired = invalid.clone();
+                repaired["findings"][0]["line"] = json!(1);
+                if changed {
+                    repaired["missingEvidence"] = json!([]);
+                }
+                fixture.write(&repaired);
+                Ok(())
+            },
+        )
+        .err()
+        .unwrap_or_default();
+        assert!(launched, "{error}");
+        assert!(error.is_empty(), "{error}");
+        assert_eq!(
+            read_json(&fixture.directory.join("report.json")).unwrap()["missingEvidence"],
+            missing,
+            "changed: {changed}"
+        );
     }
 }
 
@@ -460,13 +520,16 @@ fn schema_repair_cannot_change_reported_content() {
     fixture.write(&invalid);
     let mut changed = fixture.report.clone();
     changed["findings"][0]["title"] = json!("Another conclusion");
-    let error = fixture
+    fixture
         .run(&AtomicBool::new(false), |_| {
             fixture.write(&changed);
             Ok(())
         })
-        .unwrap_err();
-    assert!(error.contains("output repair changed findings"), "{error}");
+        .unwrap();
+    assert_eq!(
+        read_json(&fixture.directory.join("report.json")).unwrap()["findings"][0]["title"],
+        fixture.report["findings"][0]["title"]
+    );
     let fixture = Fixture::new();
     let mut missing = fixture.report.clone();
     missing["findings"][0].as_object_mut().unwrap().remove("title");
@@ -477,4 +540,293 @@ fn schema_repair_cannot_change_reported_content() {
         })
         .unwrap_err();
     assert!(error.contains("report.findings[0].title: missing"), "{error}");
+}
+
+#[test]
+fn context_questions_written_as_objects_become_their_text() {
+    let fixture = Fixture::new();
+    let mut report = fixture.report.clone();
+    report["contextQuestions"] = json!([{"title":"Confirm the boundary.","detail":"Check the caller."}]);
+    fixture.write(&report);
+    let error = fixture.validate().err().unwrap_or_default();
+    assert!(!error.contains("invalid structured report"), "{error}");
+    assert_eq!(
+        read_json(&fixture.directory.join("report.json")).unwrap()["contextQuestions"],
+        json!(["Confirm the boundary. Check the caller."])
+    );
+}
+
+#[test]
+fn evidence_cited_without_its_directory_is_completed_only_when_unique() {
+    for ambiguous in [false, true] {
+        let directory = std::env::temp_dir().join(format!("ocr-path-rebind-{}", crate::sandbox::secret().unwrap()));
+        let context = directory.join("context");
+        fs::create_dir_all(context.join("skill")).unwrap();
+        fs::write(context.join("PR.md"), "Fixture intent").unwrap();
+        fs::write(context.join("skill/SKILL.md"), "Verify evidence").unwrap();
+        let head = "a".repeat(40);
+        let content = "call();\n";
+        let scope = Scope {
+            host: "github.com".into(),
+            repository: "fixture/repo".into(),
+            head_sha: head.clone(),
+            base_sha: "b".repeat(40),
+            merge_base_sha: "c".repeat(40),
+            prior_sha: None,
+        };
+        let mut paths = vec!["app/code.rs"];
+        if ambiguous {
+            paths.push("lib/code.rs");
+        }
+        let entries = paths
+            .iter()
+            .map(|path| SourceEntry {
+                path: (*path).into(),
+                revision: head.clone(),
+                mode: "100644".into(),
+                git_blob_id: "d".repeat(40),
+                bytes: content.len() as u64,
+            })
+            .collect();
+        let archive = Archive::build(scope, entries, &AtomicBool::new(false), |_| {
+            Ok(content.as_bytes().to_vec())
+        })
+        .unwrap();
+        let diff =
+            "diff --git a/app/code.rs b/app/code.rs\n--- /dev/null\n+++ b/app/code.rs\n@@ -0,0 +1 @@\n+call();\n";
+        archive
+            .prepare_stage(&context, &["app/code.rs".into()], diff, &archive.scope().merge_base_sha)
+            .unwrap();
+        let short = json!({"path":"code.rs","revision":head,"line":1,"quote":"call();"});
+        let report = json!({"contractVersion":2,"snapshotId":archive.descriptor().id,"reviewedFiles":["app/code.rs"],"missingEvidence":[],"findings":[{"kind":"finding","title":"Fixture boundary","detail":"Fixture defect detail","action":"Restore the guard","path":"app/code.rs","line":1,"side":"RIGHT","evidence":[short],"counterEvidence":[short]}]});
+        let report_path = directory.join("report.json");
+        fs::write(&report_path, report.to_string()).unwrap();
+        let result = crate::review::evidence::EvidenceResolver::frozen(&context, &archive).materialize(
+            &report_path,
+            &["app/code.rs".into()],
+            &head,
+            diff,
+            &directory.join("summary.md"),
+            &directory.join("comments.json"),
+        );
+        if ambiguous {
+            assert!(result.unwrap_err().contains("absent"));
+        } else {
+            result.unwrap();
+            let rebound = read_json(&report_path).unwrap();
+            assert_eq!(rebound["findings"][0]["evidence"][0]["path"], json!("app/code.rs"));
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[test]
+fn findings_that_stay_invalid_are_dropped_but_never_all_of_them() {
+    let fixture = Fixture::new();
+    let mut invalid = fixture.report["findings"][0].clone();
+    invalid["title"] = json!("Cites a file the snapshot lacks");
+    invalid["evidence"][0]["path"] = json!("absent/elsewhere.rs");
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([fixture.report["findings"][0].clone(), invalid.clone()]);
+    fixture.write(&report);
+    fixture
+        .run(&AtomicBool::new(false), |_| panic!("an absent path is not repairable"))
+        .unwrap();
+    let kept = read_json(&fixture.directory.join("report.json")).unwrap();
+    assert_eq!(kept["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(kept["findings"][0]["title"], fixture.report["findings"][0]["title"]);
+    assert_eq!(kept["missingEvidence"], json!([]));
+    assert_eq!(
+        read_json(&fixture.directory.join(DROPPED)).unwrap(),
+        json!([{"path":"code.rs","title":"Cites a file the snapshot lacks"}])
+    );
+
+    let mut only = fixture.report.clone();
+    only["findings"] = json!([invalid]);
+    fixture.write(&only);
+    let error = fixture
+        .run(&AtomicBool::new(false), |_| panic!("an absent path is not repairable"))
+        .unwrap_err();
+    assert!(error.contains("absent"), "{error}");
+    assert_eq!(read_json(&fixture.directory.join("report.json")).unwrap(), only);
+    // A chunk drops that last point too, so the other chunks' findings stand; it stays a warning.
+    fs::remove_file(fixture.directory.join(DROPPED)).unwrap();
+    drop_every_invalid(&fixture.directory, || fixture.validate()).unwrap();
+    assert_eq!(
+        read_json(&fixture.directory.join("report.json")).unwrap()["findings"],
+        json!([])
+    );
+    assert_eq!(
+        read_json(&fixture.directory.join(DROPPED)).unwrap(),
+        json!([{"path":"code.rs","title":"Cites a file the snapshot lacks"}])
+    );
+
+    // A general question that stays invalid is dropped the same way, beside a valid finding.
+    let question = json!({
+        "title": "Is the retry meant to be unbounded?", "detail": "Fixture detail",
+        "action": "Confirm the bound", "evidence": invalid["evidence"].clone(), "counterEvidence": invalid["counterEvidence"].clone(),
+    });
+    let mut asked = fixture.report.clone();
+    asked["questions"] = json!([question]);
+    fixture.write(&asked);
+    fixture
+        .run(&AtomicBool::new(false), |_| panic!("an absent path is not repairable"))
+        .unwrap();
+    let kept = read_json(&fixture.directory.join("report.json")).unwrap();
+    assert_eq!(kept["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(kept["questions"], json!([]));
+
+    // So is a suggestion.
+    let suggestion = json!({
+        "title": "No test covers the retry", "detail": "Fixture detail", "action": "Add a test",
+        "path": "code.rs", "line": 1, "evidence": invalid["evidence"].clone(),
+        "counterEvidence": invalid["counterEvidence"].clone(),
+    });
+    let mut suggested = fixture.report.clone();
+    suggested["suggestions"] = json!([suggestion]);
+    fixture.write(&suggested);
+    fixture
+        .run(&AtomicBool::new(false), |_| panic!("an absent path is not repairable"))
+        .unwrap();
+    let kept = read_json(&fixture.directory.join("report.json")).unwrap();
+    assert_eq!(kept["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(kept["suggestions"], json!([]));
+}
+
+#[test]
+fn without_time_for_a_repair_invalid_findings_are_dropped_instead() {
+    let fixture = Fixture::new();
+    let mut invalid = fixture.report["findings"][0].clone();
+    invalid["title"] = json!("Anchored outside the diff");
+    invalid["line"] = json!(999);
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([fixture.report["findings"][0].clone(), invalid]);
+    fixture.write(&report);
+    run(
+        &fixture.directory,
+        &fixture.context,
+        &fixture.directory.join("prompt.md"),
+        &fixture.directory.join("transcript.json"),
+        &AtomicBool::new(false),
+        false,
+        false,
+        || fixture.validate(),
+        |_| panic!("the budget left no time for a repair"),
+    )
+    .unwrap();
+    let kept = read_json(&fixture.directory.join("report.json")).unwrap();
+    assert_eq!(kept["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        read_json(&fixture.directory.join(DROPPED)).unwrap(),
+        json!([{"path":"code.rs","title":"Anchored outside the diff"}])
+    );
+}
+
+#[test]
+fn a_chunk_drops_every_invalid_point_after_a_drop_that_kept_the_last() {
+    let fixture = Fixture::new();
+    let mut invalid = fixture.report["findings"][0].clone();
+    invalid["evidence"][0]["path"] = json!("absent/elsewhere.rs");
+    let question = json!({
+        "title": "Is the retry meant to be unbounded?", "detail": "Fixture detail",
+        "action": "Confirm the bound", "evidence": invalid["evidence"].clone(), "counterEvidence": invalid["counterEvidence"].clone(),
+    });
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([invalid]);
+    report["questions"] = json!([question]);
+    fixture.write(&report);
+    // The repair drops the finding, keeps the last point and returns the finding's error, whose
+    // index no longer exists.
+    let error = fixture
+        .run(&AtomicBool::new(false), |_| panic!("an absent path is not repairable"))
+        .unwrap_err();
+    assert!(error.contains("findings[0]"), "{error}");
+    assert!(drop_points(&fixture.directory, error, || fixture.validate(), false).is_err());
+    drop_every_invalid(&fixture.directory, || fixture.validate()).unwrap();
+    let kept = read_json(&fixture.directory.join("report.json")).unwrap();
+    assert_eq!(
+        (kept["findings"].clone(), kept["questions"].clone()),
+        (json!([]), json!([]))
+    );
+}
+
+#[test]
+fn without_time_for_a_repair_the_repair_gets_the_error_of_the_point_left() {
+    let fixture = Fixture::new();
+    let mut first = fixture.report["findings"][0].clone();
+    first["title"] = json!("First anchored outside the diff");
+    first["line"] = json!(99);
+    let mut second = fixture.report["findings"][0].clone();
+    second["line"] = json!(98);
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([first, second]);
+    fixture.write(&report);
+    let mut diagnostic = String::new();
+    let _ = run(
+        &fixture.directory,
+        &fixture.context,
+        &fixture.directory.join("prompt.md"),
+        &fixture.directory.join("transcript.json"),
+        &AtomicBool::new(false),
+        false,
+        false,
+        || fixture.validate(),
+        |text| {
+            diagnostic = text.to_string();
+            Err("stop after the diagnostic".into())
+        },
+    );
+    // The first finding was dropped; the repair is told about the one left, at line 98.
+    assert!(diagnostic.contains("code.rs:98"), "{diagnostic}");
+}
+
+#[test]
+fn the_only_finding_is_never_dropped_for_a_suggestion_left_alone() {
+    let fixture = Fixture::new();
+    let valid = &fixture.report["findings"][0];
+    let suggestion = json!({
+        "title": "No test covers the retry", "detail": "Fixture detail", "action": "Add a test",
+        "path": valid["path"].clone(), "line": valid["line"].clone(), "evidence": valid["evidence"].clone(),
+        "counterEvidence": valid["counterEvidence"].clone(),
+    });
+    let mut invalid = valid.clone();
+    invalid["evidence"][0]["path"] = json!("absent/elsewhere.rs");
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([invalid]);
+    report["suggestions"] = json!([suggestion]);
+    fixture.write(&report);
+    let error = fixture
+        .run(&AtomicBool::new(false), |_| panic!("an absent path is not repairable"))
+        .unwrap_err();
+    assert!(error.contains("absent"), "{error}");
+    assert_eq!(
+        read_json(&fixture.directory.join("report.json")).unwrap()["findings"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn a_repair_that_changes_the_frozen_context_fails_without_a_fallback() {
+    let fixture = Fixture::new();
+    let mut invalid = fixture.report["findings"][0].clone();
+    invalid["title"] = json!("Anchored outside the diff");
+    invalid["line"] = json!(99);
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([fixture.report["findings"][0].clone(), invalid]);
+    fixture.write(&report);
+    let error = fixture
+        .run(&AtomicBool::new(false), |_| {
+            fixture.write(&fixture.report);
+            fs::write(fixture.context.join("PR.md"), "Changed").unwrap();
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(
+        error.contains("frozen evidence changed during output repair"),
+        "{error}"
+    );
+    assert!(!fixture.directory.join(DROPPED).exists());
 }

@@ -170,3 +170,13 @@ export function reviewBodyHasPostableFinding(body: string | null) {
     }),
   );
 }
+
+/** Heading of the review summary section that lists lower-priority suggestions (backend `SUGGESTIONS_HEADING`). */
+const SUGGESTIONS_HEADING = "### 💡 Suggestions";
+
+/** The suggestions section of a review body, or "" when it has none. */
+export function reviewBodySuggestions(body: string | null) {
+  if (!body) return "";
+  const start = body.startsWith(SUGGESTIONS_HEADING) ? 0 : body.indexOf(`\n${SUGGESTIONS_HEADING}`);
+  return start < 0 ? "" : body.slice(start).trim();
+}

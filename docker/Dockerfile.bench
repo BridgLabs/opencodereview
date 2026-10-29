@@ -1,0 +1,35 @@
+# The public benchmark image: one container reviews one pull request mounted the ReviewBench way
+# and exits. It is not a product runtime and has no HTTP API or UI; see bench/README.md.
+#
+#   docker compose build server
+#   docker build --platform linux/amd64 -f docker/Dockerfile.bench \
+#     --build-arg OCR_RUNTIME_IMAGE=opencodereview-server -t opencodereview-bench .
+ARG OCR_RUNTIME_IMAGE=opencodereview-server:latest
+FROM rust:1.88-bookworm AS build
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+COPY Cargo.toml Cargo.lock ./
+COPY backend ./backend
+COPY assets ./assets
+ARG CARGO_TARGET_CACHE=ocr-cargo-target
+# Both binaries from one build share the executor fingerprint the runner checks.
+RUN --mount=type=cache,id=ocr-cargo-registry,target=/usr/local/cargo/registry,sharing=locked --mount=type=cache,id=${CARGO_TARGET_CACHE},target=/app/target,sharing=locked CARGO_BUILD_JOBS=2 cargo build --locked --release --bin ocr-sandbox --bin ocr-bench \
+  && cp /app/target/release/ocr-sandbox /app/target/release/ocr-bench /usr/local/bin/
+
+FROM ${OCR_RUNTIME_IMAGE}
+# Postgres 17, the major version Compose runs: the migrations need 16 or later.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends gnupg tini \
+  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+  && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends postgresql-17 \
+  && rm -rf /var/lib/apt/lists/*
+RUN chmod -R a+rX /opt/claude /opt/codex \
+  && install -d -m 0755 /work /output /scratch /evidence \
+  && install -d -m 0700 /ipc
+COPY --from=build /usr/local/bin/ocr-sandbox /usr/local/bin/ocr-bench /usr/local/bin/
+COPY docker/bench-entrypoint.sh /usr/local/bin/ocr-bench-entrypoint
+RUN chmod 0755 /usr/local/bin/ocr-bench-entrypoint
+WORKDIR /
+ENTRYPOINT ["tini", "--", "ocr-bench-entrypoint"]

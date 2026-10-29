@@ -105,3 +105,59 @@ fn blobless_clones_fetch_every_diff_blob_before_diffing() {
         .contains("+line 4 changed"));
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn path_diffs_read_bracketed_names_literally() {
+    let repo = std::env::temp_dir().join(format!(
+        "ocr-literal-paths-{}-{}",
+        std::process::id(),
+        crate::db::now_millis()
+    ));
+    fs::create_dir_all(&repo).unwrap();
+    run(&repo, &["init", "-q", "-b", "main"]);
+    run(&repo, &["config", "user.email", "test@example.invalid"]);
+    run(&repo, &["config", "user.name", "Test"]);
+    fs::write(repo.join("[key].ts"), "export const route = 1;\n").unwrap();
+    fs::write(repo.join("k.ts"), "glob decoy\n").unwrap();
+    run(&repo, &["add", "."]);
+    run(&repo, &["commit", "-q", "-m", "base"]);
+    let base = run(&repo, &["rev-parse", "HEAD"]);
+    fs::write(repo.join("[key].ts"), "export const route = 2;\n").unwrap();
+    fs::write(repo.join("k.ts"), "glob decoy changed\n").unwrap();
+    run(&repo, &["commit", "-q", "-am", "head"]);
+    let diff = diff_local_paths(
+        &repo,
+        &format!("{base}..HEAD"),
+        &["[key].ts".to_string()],
+        &AtomicBool::new(false),
+    );
+    let _ = fs::remove_dir_all(&repo);
+    assert!(diff.contains("diff --git a/[key].ts b/[key].ts"), "{diff}");
+    assert!(!diff.contains("k.ts b/k.ts"), "{diff}");
+}
+
+#[test]
+fn blobs_of_deleted_bracketed_paths_are_absent() {
+    let repo = std::env::temp_dir().join(format!(
+        "ocr-deleted-blob-{}-{}",
+        std::process::id(),
+        crate::db::now_millis()
+    ));
+    fs::create_dir_all(&repo).unwrap();
+    run(&repo, &["init", "-q", "-b", "main"]);
+    run(&repo, &["config", "user.email", "test@example.invalid"]);
+    run(&repo, &["config", "user.name", "Test"]);
+    fs::write(repo.join("[key].ts"), "export const route = 1;\n").unwrap();
+    run(&repo, &["add", "."]);
+    run(&repo, &["commit", "-q", "-m", "base"]);
+    run(&repo, &["mv", "[key].ts", "[...key].ts"]);
+    run(&repo, &["commit", "-q", "-m", "head"]);
+    let cancel = AtomicBool::new(false);
+    let (moved, kept) = (
+        show_blob(&repo, "HEAD", "[key].ts", &cancel),
+        show_blob(&repo, "HEAD", "[...key].ts", &cancel),
+    );
+    let _ = fs::remove_dir_all(&repo);
+    assert_eq!(moved, None);
+    assert_eq!(kept.as_deref(), Some("export const route = 1;\n"));
+}

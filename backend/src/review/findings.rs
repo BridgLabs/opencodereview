@@ -515,14 +515,25 @@ pub fn selection_payload(audit: &FindingAudit) -> (String, String) {
         if let Some(comment) = &candidate.comment {
             comments.push(canonical(comment));
         } else {
-            bodies.push(candidate.body.clone());
+            // A body candidate can end with the summary's suggestions, which are appended once below.
+            bodies.push(
+                crate::review::split_suggestions(&candidate.body)
+                    .0
+                    .trim_end()
+                    .to_string(),
+            );
         }
     }
-    let body = if bodies.is_empty() {
+    let mut body = if bodies.is_empty() {
         format!("{} review comments selected for publication.", comments.len())
     } else {
         bodies.join("\n\n")
     };
+    // Suggestions are no candidates: they stay listed in the summary whatever is selected.
+    let (_, suggestions) = crate::review::split_suggestions(&audit.original_body);
+    if !suggestions.trim().is_empty() {
+        body = format!("{body}\n\n{}", suggestions.trim());
+    }
     (
         body,
         json!({ "commit_id": audit.head_sha, "comments": comments }).to_string(),

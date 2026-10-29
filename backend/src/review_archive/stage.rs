@@ -75,7 +75,7 @@ impl Archive {
         if !context.join("PR.md").is_file() || !context.join("skill/SKILL.md").is_file() {
             return Err(Error::Preparation);
         }
-        for path in files {
+        for path in files.iter().filter(|path| !super::in_agent_folder(path)) {
             if let Ok(content) = self.resolve(&self.scope().head_sha, path) {
                 let output = context.join("changed").join(path);
                 fs::create_dir_all(output.parent().ok_or(Error::Path)?).map_err(|_| Error::Preparation)?;
@@ -100,6 +100,10 @@ impl Archive {
                         .map_err(|_| Error::Path)?
                         .to_str()
                         .ok_or(Error::Path)?;
+                    if super::in_agent_folder(relative) {
+                        fs::remove_file(&path).map_err(|_| Error::Preparation)?;
+                        continue;
+                    }
                     match self.resolve(&self.scope().head_sha, relative) {
                         Ok(content) => {
                             if fs::read(&path).map_err(|_| Error::Preparation)? != content.as_bytes() {
@@ -159,7 +163,7 @@ impl Archive {
             return Err(Error::Integrity);
         }
         self.validate_assigned(&stage.files, diff, &stage.before)?;
-        for path in &stage.files {
+        for path in stage.files.iter().filter(|path| !super::in_agent_folder(path)) {
             if let Ok(content) = self.resolve(&self.scope().head_sha, path) {
                 if files.get(&format!("context/changed/{path}")).map(String::as_str) != Some(content) {
                     return Err(Error::Integrity);

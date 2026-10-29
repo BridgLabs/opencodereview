@@ -1,0 +1,16 @@
+{
+  "name": "opencodereview-codex",
+  "display_name": "OpenCodeReview (Codex)",
+  "provider": "OpenCodeReview",
+  "image": "ghcr.io/bridglabs/opencodereview-bench@sha256:REPLACE_WITH_PUSHED_DIGEST",
+  "configuration": [
+    { "key": "provider", "value": "codex", "display_value": "Codex" },
+    { "key": "deadline-secs", "value": "3300", "display_value": "55 min" }
+  ],
+  "secrets": {
+    "files": ["/run/ocr-bench/credential"]
+  },
+  "egress": ["chatgpt.com", "api.openai.com", "auth.openai.com"],
+  "pr_timeout_seconds": 3600,
+  "notes": "Open-source PR reviewer. Runs the product's review pipeline headless: frozen snapshot, sandboxed Codex CLI, evidence-validated findings. The credential file is a Codex auth.json. See bench/README.md in github.com/BridgLabs/opencodereview."
+}

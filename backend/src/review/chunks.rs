@@ -91,6 +91,9 @@ pub(crate) fn run_sharded_review(
     let config_path = run_dir.join("claude.settings.json");
     fs::write(&config_path, review_settings_json()).map_err(|error| error.to_string())?;
     let total_chunks = chunks.len();
+    budget::with(inputs, |budget| {
+        budget.plan(total_chunks, chunk_worker_count(inputs, total_chunks))
+    });
     if inputs.frozen.is_some() {
         let prepared = (|| -> Result<(), String> {
             let mut stages = Vec::new();
@@ -503,8 +506,24 @@ pub(crate) fn run_adaptive_final(
     );
     let mut outputs = Vec::new();
     let mut final_usage = Vec::new();
+    budget::with(inputs, |budget| budget.integrating());
     for (index, stage) in stages.iter().enumerate() {
         check_cancel(cancel)?;
+        if !budget::allows(inputs, budget::Step::FinalBatch) {
+            if let Ok(output) = integration::unconfirmed(stage, &payload, head) {
+                progress(
+                    &sharded_phase_json("final", "running"),
+                    &format!(
+                        "Final integration batch {}/{} skipped: the review's time ran short, so its findings stay as validated in their chunks",
+                        index + 1,
+                        stages.len()
+                    ),
+                );
+                outputs.push(output);
+                continue;
+            }
+        }
+        let integrating = Instant::now();
         let transcript = stage.directory.join("transcript.json");
         let fingerprint = context_fingerprint(&stage.context)?;
         let started = now_millis();
@@ -518,6 +537,7 @@ pub(crate) fn run_adaptive_final(
                 &format!("Final integration batch {}/{}\n{tail}", index + 1, stages.len()),
             )
         };
+        let mut invalid = false;
         let result = spawn_and_supervise(
             inputs,
             cancel,
@@ -552,6 +572,7 @@ pub(crate) fn run_adaptive_final(
                 &stage.context,
                 || integration::validate_output(inputs, stage, &payload, head),
             )
+            .inspect_err(|error| invalid = error != "cancelled")
         });
         let usage = parse_transcript_usage(&transcript);
         record_stage(
@@ -576,7 +597,25 @@ pub(crate) fn run_adaptive_final(
             started,
             now_millis(),
         );
+        budget::with(inputs, |budget| budget.batch_done(integrating.elapsed()));
         final_usage.push(usage);
+        // A batch whose output never validates leaves its candidates as their chunks validated
+        // them, marked unconfirmed, as when the final pass leaves one undecided.
+        let result = match result {
+            Err(error) if invalid => integration::unconfirmed(stage, &payload, head)
+                .inspect(|_| {
+                    progress(
+                        &sharded_phase_json("final", "running"),
+                        &format!(
+                            "Final integration batch {}/{} did not validate, so its findings stay as validated in their chunks: {error}",
+                            index + 1,
+                            stages.len()
+                        ),
+                    )
+                })
+                .map_err(|_| error),
+            result => result,
+        };
         outputs.push(result?);
     }
     let (body, comments_json, final_warnings) = integration::combine(
@@ -803,7 +842,12 @@ pub(crate) fn run_review_chunk_batch(
                     );
                     finished_at.insert(id, Instant::now());
                     match result {
-                        Ok(result) => results.push(result),
+                        Ok(result) => {
+                            if let Some(comments) = &result.comments_json {
+                                budget::with(inputs, |budget| budget.validated(comments));
+                            }
+                            results.push(result)
+                        }
                         Err(error) => {
                             batch_cancel.store(true, Ordering::Relaxed);
                             if error == "cancelled" {
@@ -984,7 +1028,9 @@ pub(crate) fn prepare_review_chunk(
             "{}..{head_sha}",
             incremental_base.unwrap_or(&frozen.archive.scope().merge_base_sha)
         );
+        // Paths are names, not globs: `[key].ts` must not match `k.ts`.
         let mut args = vec![
+            "--literal-pathspecs",
             "diff",
             "--no-ext-diff",
             "--no-textconv",
@@ -993,8 +1039,8 @@ pub(crate) fn prepare_review_chunk(
             "--",
         ];
         args.extend(chunk.files.iter().map(String::as_str));
-        String::from_utf8(indexer::git_frozen_with_input(&inputs.repo_path, &args, cancel, &[])?)
-            .map_err(|error| error.to_string())?
+        // A file in another encoding, such as Latin-1, never fails the review, as in diff_local_paths.
+        String::from_utf8_lossy(&indexer::git_frozen_with_input(&inputs.repo_path, &args, cancel, &[])?).into_owned()
     } else {
         diff_local_paths(
             &inputs.repo_path,
@@ -1117,6 +1163,7 @@ pub(crate) fn run_review_chunk(
         "promptHash": prompt_hash,
         "contextHash": context_hash,
         "diffHash": diff_hash,
+        "lensPass": lens::enabled(inputs),
     });
     let cache_key = sha256_hex(serde_json::to_string(&cache_payload).unwrap_or_default().as_bytes());
     let potential_cache_hit = inputs
@@ -1237,6 +1284,7 @@ pub(crate) fn run_review_chunk(
         });
         execution
     };
+    let reviewing = Instant::now();
     let execution = if inputs.frozen.is_none() {
         recovery::run(
             inputs,
@@ -1252,11 +1300,12 @@ pub(crate) fn run_review_chunk(
     } else {
         launch(&chunk_dir, chunk).map(|()| (chunk_dir.clone(), chunk.clone()))
     };
+    let mut lens_usage = RunUsage::default();
     let artifacts = execution.and_then(|(directory, _)| {
         if context_fingerprint(&chunk_context)? != context_hash {
             return Err("Incomplete review: reviewer modified the evidence snapshot.".into());
         }
-        let evidence_warnings = output_repair::validate(
+        let evidence_warnings = output_repair::validate_chunk(
             inputs,
             cancel,
             &mut chunk_progress,
@@ -1283,6 +1332,47 @@ pub(crate) fn run_review_chunk(
                 )
             },
         )?;
+        budget::with(inputs, |budget| budget.reviewed(reviewing.elapsed()));
+        let materialize_to = |report: &Path, context: &Path, summary: &Path, comments: &Path| {
+            frozen::materialize(
+                inputs,
+                report,
+                context,
+                &chunk.files,
+                head_sha,
+                &chunk_diff,
+                summary,
+                comments,
+            )
+        };
+        let (lensed, usage) = lens::run(
+            inputs,
+            cancel,
+            &mut chunk_progress,
+            &SpawnPaths {
+                config: config_path,
+                prompt: &directory.join("prompt.md"),
+                transcript: &directory.join("transcript.json"),
+                stdout: &directory.join("claude.stdout"),
+                stderr: &directory.join("claude.stderr"),
+                progress_phase: "chunks",
+                sharded_progress: true,
+            },
+            &directory.join("context"),
+            Some(chunk.id as i64),
+            materialize_to,
+        )?;
+        lens_usage = usage;
+        let evidence_warnings = if lensed {
+            materialize_to(
+                &directory.join("report.json"),
+                &directory.join("context"),
+                &summary,
+                &comments,
+            )?
+        } else {
+            evidence_warnings
+        };
         fs::copy(directory.join("report.json"), &summary).map_err(|error| error.to_string())?;
         let summary_text = fs::read_to_string(&summary).unwrap_or_default().trim().to_string();
         if summary_text.is_empty() {
@@ -1305,6 +1395,11 @@ pub(crate) fn run_review_chunk(
         Err(_) => "failed",
     };
     let usage = recovery::record_attempts(inputs, chunk, &attempts, status, &cache_key, potential_cache_hit);
+    let usage = if lens_usage.by_model.is_empty() {
+        usage
+    } else {
+        sum_usage(vec![usage, lens_usage])
+    };
     let (summary_text, comments_json, evidence_warnings) = artifacts?;
     let metrics = attempts
         .last()
@@ -1357,18 +1452,20 @@ fn frozen_omittable_paths(inputs: &ReviewInputs, changed: &[String]) -> std::col
     let head = frozen.archive.scope().head_sha.as_str();
     let entries = frozen.archive.entries();
     let omittable = |entry: &crate::review_archive::Entry| {
-        matches!(
-            entry.exclusion,
-            Some(
-                crate::review_archive::Exclusion::PrivateConfiguration
-                    | crate::review_archive::Exclusion::PrivatePath
-                    | crate::review_archive::Exclusion::Generated
-                    | crate::review_archive::Exclusion::BinaryPath
-                    | crate::review_archive::Exclusion::Binary
-                    | crate::review_archive::Exclusion::NonUtf8
-                    | crate::review_archive::Exclusion::Oversized
+        // Offline, a submodule or symlink has no content to review: nothing pins what it points at.
+        (inputs.offline && matches!(entry.exclusion, Some(crate::review_archive::Exclusion::NonRegular)))
+            || matches!(
+                entry.exclusion,
+                Some(
+                    crate::review_archive::Exclusion::PrivateConfiguration
+                        | crate::review_archive::Exclusion::PrivatePath
+                        | crate::review_archive::Exclusion::Generated
+                        | crate::review_archive::Exclusion::BinaryPath
+                        | crate::review_archive::Exclusion::Binary
+                        | crate::review_archive::Exclusion::NonUtf8
+                        | crate::review_archive::Exclusion::Oversized
+                )
             )
-        )
     };
     changed
         .iter()

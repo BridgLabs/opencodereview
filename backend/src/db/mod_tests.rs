@@ -1565,6 +1565,7 @@ fn build_review_context_plan_selects_graph_neighbours() {
             file("packages/b/src/index.test.ts", Some("packages/b")),
             file("packages/b/src/billing.test.ts", Some("packages/b")),
             file("AGENTS.md", None),
+            file(".claude/hooks/check.local.ts", None),
         ],
         packages: vec![
             RepoIndexPackageInput {
@@ -1607,9 +1608,17 @@ fn build_review_context_plan_selects_graph_neighbours() {
                 resolved: true,
                 to_path: Some("packages/b/src/index.ts".to_string()),
             },
+            // Private agent configuration is never snapshot context, even when it imports the change.
+            RepoIndexEdgeInput {
+                from_path: ".claude/hooks/check.local.ts".to_string(),
+                to_ref: "../../packages/b/src/index".to_string(),
+                kind: "import".to_string(),
+                resolved: true,
+                to_path: Some("packages/b/src/index.ts".to_string()),
+            },
         ],
         skipped_count: 0,
-        total_count: 6,
+        total_count: 7,
         duration_ms: 1,
         ..RepoIndexWrite::default()
     };
@@ -1626,6 +1635,10 @@ fn build_review_context_plan_selects_graph_neighbours() {
     assert!(
         !related.contains(&"packages/b/src/index.ts"),
         "changed file not in related"
+    );
+    assert!(
+        !related.contains(&".claude/hooks/check.local.ts"),
+        "private configuration is not related context"
     );
     assert!(
         plan.test_files.iter().any(|p| p == "packages/b/src/index.test.ts"),

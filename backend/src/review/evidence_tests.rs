@@ -452,6 +452,14 @@ fn pr_description_evidence_is_snapshot_bound_and_not_sufficient_for_a_finding() 
         quote: "Persistence is deferred".into(),
     };
     assert!(verify_reference(&reference, &root).is_ok());
+    // A miscounted line is never moved here, so it would be published wrong: it fails.
+    fs::write(
+        root.join("PR.md"),
+        "Intro.\nPersistence is deferred to the backend task.\n",
+    )
+    .unwrap();
+    assert!(verify_reference(&reference, &root).is_err());
+    fs::write(root.join("PR.md"), "Persistence is deferred to the backend task.\n").unwrap();
     assert!(verify_reference(
         &Reference {
             quote: "Invented contract".into(),
@@ -878,4 +886,130 @@ fn report_shape_errors_name_the_field_path() {
     let mut extra = report.clone();
     extra["findings"][0]["severity"] = json!("high");
     assert_eq!(super::schema_report_fields(extra), report);
+}
+
+#[test]
+fn quotes_bind_to_the_nearest_line_that_holds_them() {
+    let content = "fn a() {\n    let x = 1;\n    let y = 2;\n    x + y\n}\n";
+    assert_eq!(quoted_line(content, 2, "let x = 1;"), Some(2));
+    // Miscounted by up to three lines: the text is exact, so the line is corrected.
+    assert_eq!(quoted_line(content, 4, "let x = 1;"), Some(2));
+    assert_eq!(quoted_line(content, 1, "x + y"), Some(4));
+    // Past the end of the file, but within reach of the quoted line.
+    assert_eq!(quoted_line(content, 7, "x + y"), Some(4));
+    // Too far, absent, or equally near in both directions: still a mismatch.
+    assert_eq!(quoted_line(content, 6, "let x = 1;"), None);
+    assert_eq!(quoted_line(content, 2, "let z = 3;"), None);
+    assert_eq!(quoted_line("same\nother\nsame\n", 2, "same"), None);
+}
+
+#[test]
+fn an_anchor_given_as_a_line_of_the_diff_file_moves_to_that_line_of_its_own_file() {
+    let root = std::env::temp_dir().join(format!("ocr-diff-lines-{}", crate::sandbox::secret().unwrap()));
+    fs::create_dir_all(root.join("changed/src")).unwrap();
+    fs::write(root.join("changed/src/a.rs"), "first();\nsecond();\n").unwrap();
+    fs::write(root.join("changed/src/b.rs"), "allow_all();\n").unwrap();
+    let (report_path, summary, comments) = (
+        root.join("report.json"),
+        root.join("summary.md"),
+        root.join("comments.json"),
+    );
+    let files = vec!["src/a.rs".to_string(), "src/b.rs".to_string()];
+    let diff = "diff --git a/src/a.rs b/src/a.rs\n--- /dev/null\n+++ b/src/a.rs\n@@ -0,0 +1,2 @@\n+first();\n+second();\ndiff --git a/src/b.rs b/src/b.rs\n--- /dev/null\n+++ b/src/b.rs\n@@ -0,0 +1 @@\n+allow_all();\n";
+    let finding = |path: &str, line: i64, quote: &str| {
+        let reference = json!({"path":path,"line":1,"quote":quote});
+        json!({"kind":"finding","title":"Boundary","detail":"Detail","action":"Fix","path":path,"line":line,"side":"RIGHT","evidence":[reference],"counterEvidence":[reference]})
+    };
+    // Line 11 of the diff adds src/b.rs line 1, and line 5 adds src/a.rs line 1.
+    let report = json!({"reviewedFiles":files,"missingEvidence":[],"findings":[finding("src/b.rs", 11, "allow_all();"), finding("src/a.rs", 5, "first();")]});
+    fs::write(&report_path, report.to_string()).unwrap();
+    materialize(&report_path, &root, &files, "head", diff, &summary, &comments).unwrap();
+    let output: serde_json::Value = serde_json::from_str(&fs::read_to_string(&comments).unwrap()).unwrap();
+    let lines = output["comments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|comment| {
+            (
+                comment["path"].as_str().unwrap().to_string(),
+                comment["line"].as_i64().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(lines, [("src/b.rs".to_string(), 1), ("src/a.rs".to_string(), 1)]);
+    // A diff line that belongs to another file is not this finding's line.
+    let report = json!({"reviewedFiles":files,"missingEvidence":[],"findings":[finding("src/a.rs", 11, "first();")]});
+    fs::write(&report_path, report.to_string()).unwrap();
+    assert!(materialize(&report_path, &root, &files, "head", diff, &summary, &comments).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn suggestions_are_validated_and_listed_in_the_summary_instead_of_posted_inline() {
+    let root = std::env::temp_dir().join(format!("ocr-suggestions-{}", crate::sandbox::secret().unwrap()));
+    fs::create_dir_all(root.join("changed/src")).unwrap();
+    fs::write(root.join("changed/src/auth.rs"), "allow_all();\nlog();\n").unwrap();
+    let (report_path, summary, comments) = (
+        root.join("report.json"),
+        root.join("summary.md"),
+        root.join("comments.json"),
+    );
+    let files = vec!["src/auth.rs".to_string()];
+    let diff = "diff --git a/src/auth.rs b/src/auth.rs\n--- /dev/null\n+++ b/src/auth.rs\n@@ -0,0 +1,2 @@\n+allow_all();\n+log();\n";
+    let reference = json!({"path":"src/auth.rs","line":1,"quote":"allow_all();"});
+    let suggestion = json!({"title":"No test covers allow_all","detail":"The new call is untested.","action":"Add a test for the tenant check.","path":"src/auth.rs","line":2,"evidence":[{"path":"src/auth.rs","line":2,"quote":"log();"}],"counterEvidence":[reference]});
+    let report = json!({"reviewedFiles":files,"missingEvidence":[],"findings":[{"kind":"finding","title":"Authorization boundary","detail":"All tenants are allowed","action":"Enforce tenant ownership","path":"src/auth.rs","line":1,"side":"RIGHT","evidence":[reference],"counterEvidence":[reference]}],"suggestions":[suggestion, suggestion]});
+    fs::write(&report_path, report.to_string()).unwrap();
+    materialize(&report_path, &root, &files, "head", diff, &summary, &comments).unwrap();
+    let output: serde_json::Value = serde_json::from_str(&fs::read_to_string(&comments).unwrap()).unwrap();
+    assert_eq!(output["comments"].as_array().unwrap().len(), 1);
+    let body = fs::read_to_string(&summary).unwrap();
+    let (points, section) = crate::review::split_suggestions(&body);
+    assert!(!points.contains("Suggestions"));
+    assert!(section.starts_with(crate::review::SUGGESTIONS_HEADING));
+    assert_eq!(
+        section
+            .matches("- `src/auth.rs:2` **No test covers allow_all**")
+            .count(),
+        1
+    );
+    assert!(!crate::review::findings::actionable(None, Some(section)));
+    crate::review::validate_review_templates(&body, Some(&output.to_string())).unwrap();
+    // A suggestion is held to the same evidence rules as a finding, and its error names it.
+    let mut invalid = report.clone();
+    invalid["suggestions"][1]["evidence"][0]["quote"] = json!("invented();");
+    fs::write(&report_path, invalid.to_string()).unwrap();
+    let error = materialize(&report_path, &root, &files, "head", diff, &summary, &comments).unwrap_err();
+    assert!(error.contains("[suggestions[1].evidence[0]]"), "{error}");
+    // A defect cannot move to the suggestions to skip the counter-evidence checks.
+    let mut invalid = report.clone();
+    invalid["suggestions"][0]["counterEvidence"] = json!([]);
+    fs::write(&report_path, invalid.to_string()).unwrap();
+    let error = materialize(&report_path, &root, &files, "head", diff, &summary, &comments).unwrap_err();
+    assert!(error.contains("suggestions[0].counterEvidence"), "{error}");
+    let mut invalid = report;
+    invalid["suggestions"][0]["path"] = json!("src/other.rs");
+    fs::write(&report_path, invalid.to_string()).unwrap();
+    let error = materialize(&report_path, &root, &files, "head", diff, &summary, &comments).unwrap_err();
+    assert!(
+        error.contains("suggestions[0] has invalid required fields: assigned path"),
+        "{error}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_review_with_only_suggestions_keeps_its_summary_as_written() {
+    let body = format!(
+        "No findings.\n\n{}",
+        suggestions_section(&[
+            json!({"path":"a.rs","line":3,"title":"Stale test name","detail":"The test name still says the feature is missing.","action":"Rename the test."})
+        ])
+    );
+    assert_eq!(
+        crate::review::repair_body_only_review_point(body.clone(), Some(r#"{"comments":[]}"#)),
+        body
+    );
+    crate::review::validate_review_templates(&body, Some(r#"{"comments":[]}"#)).unwrap();
+    assert!(suggestions_section(&[]).is_empty());
 }

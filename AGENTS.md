@@ -13,9 +13,11 @@ backend/src/review/                      Review orchestration, scope, coverage, 
 backend/src/review_archive/              Frozen review archives, retention and purge
 backend/src/github/, indexer/            GitHub calls through `gh`; repository indexer
 backend/src/server/                      HTTP API, background jobs, publication, sign-in flows
+backend/src/bench/                       ocr-bench: headless reviewer of the public benchmark image
 backend/src/db/                          Postgres access, migrations (pg/), queries, SQLite import
 backend/src/assets/                      Built-in review skills
 docker-compose.yml, docker/              Docker runtime, Dockerfiles, smoke and regression scripts
+bench/                                   Public benchmark adapters (ReviewBench, Martian, AACR-Bench) and reports
 .agents/skills/                          Agent workflows: git, comments
 ```
 
@@ -29,7 +31,7 @@ docker-compose.yml, docker/              Docker runtime, Dockerfiles, smoke and 
 ## Ground rules
 
 - **pnpm only.** Do not add `package-lock.json`, `yarn.lock` or `bun.lock`.
-- **Docker is the runtime.** OpenCodeReview runs only through `docker compose`. Do not add native desktop wrappers or non-Docker runtime configuration.
+- **Docker is the runtime.** OpenCodeReview runs only through `docker compose`. Do not add native desktop wrappers or non-Docker runtime configuration. The one exception is the benchmark image (`docker/Dockerfile.bench`, [bench/README.md](bench/README.md)): a single container that reviews one mounted pull request for public benchmarks and exits. It is not a product runtime and has no HTTP API or UI.
 - **File size limits.** Frontend source files stay at or under 800 lines and Rust files at or under 2,500 lines (`pnpm check:file-size`). Split before you hit the limit.
 - **Conventional Commits** for every commit and pull request title.
 - **Pull requests only.** `main` is protected; every change lands through a squash-merged pull request reviewed by a code owner.
@@ -58,13 +60,16 @@ docker-compose.yml, docker/              Docker runtime, Dockerfiles, smoke and 
 - Egress admits only the AI provider hosts in `backend/src/sandbox/egress.rs`.
 - Backend and runner images share an executor fingerprint; deploy them together. Never add an in-process fallback that runs the AI inside `server`.
 - Never automatically re-run inference after a startup failure. A successful process exit still requires report validation.
+- In the benchmark image, `ocr-bench` takes the server's place: it starts Postgres and one `ocr-sandbox runner` in the same container and never runs the AI itself. The runner keeps its rules (UID drop, tool guard, sign-in projection only); `OCR_RUNNER_KEEP` only spares the benchmark's mounts under `/work` between stages. Keep one runner per container: the runner's survivor check covers every process of the model UID.
 - Paid AI calls (real review diagnostics) always require explicit authorization from a maintainer.
 
 ## Review invariants
 
 - Scope uses the live immediate base, head and merge-base. A failed fetch fails preparation; never fall back to stale refs or the default branch.
-- Evidence is frozen and validated for every stage before any inference. Findings must quote the snapshot exactly and anchor to changed lines; invalid reports fail, they are never relabelled clean.
-- Output repair allows at most one extra execution per stage.
+- Evidence is frozen and validated for every stage before any inference. A repository larger than the archive's budgets is frozen with the pull request's changed, related, test and convention files first and the rest in path order until the budgets are full; files past them are excluded (or, past the manifest budget, left out) and can never be cited. Findings must quote the snapshot exactly and anchor to changed lines; invalid reports fail, they are never relabelled clean. Lower-priority points (test gaps, stale names and docs, duplication, style) are suggestions: validated against the snapshot like findings, but listed in the review summary instead of posted inline, and never actionable on their own. After output repair, a finding, general question or suggestion that still fails validation is dropped and reported as a warning while the valid ones stand. A chunk left with nothing valid drops those points too, so one chunk never fails the others' findings; any other report left with nothing valid still fails, and a review with a dropped point is never treated as clean. A candidate the final pass leaves without a usable decision keeps the comment validated in its chunk, marked unconfirmed, and so does every candidate of a final batch whose output never validates. A quote's line may be miscounted by up to three lines: validation moves it to the one nearest line holding the exact text, and a tie or a farther quote still fails. A cited path missing its leading directories is completed only when exactly one file at that revision ends with it and holds the exact text there. A finding anchored to a line number of PR_DIFF.patch itself, instead of its file's, moves to the line that diff line adds or removes when it belongs to the same file.
+- Output repair allows at most one extra execution per stage. It may run beside reported missing evidence. It only corrects lines, sides, quotes and empty counter-evidence; anything else it changes is put back as first reported, and the result is validated as usual.
+- With `review_lens_pass` on, each stage gets one lens execution after its report validates. The lens only adds findings, its report is validated on its own and again once merged, and any lens failure leaves the first report as it stands.
+- A review with a time budget (only `ocr-bench` gives one) starts the lens, an output repair or a final integration batch only while the work it still requires fits before the deadline. Without time for a repair, the invalid points are dropped instead; a batch left out keeps its candidates' chunk-validated comments, marked unconfirmed. Without a budget every step runs.
 - Publication is idempotent and bound to the exact validated selection. Nothing approves automatically.
 - Archive retention deletes only frozen code of merged pull requests; never delete review results, audits, Git data or coverage.
 

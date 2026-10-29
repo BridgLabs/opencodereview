@@ -55,11 +55,17 @@ pub(crate) fn append(body: &str, warnings: &[EvidenceWarning]) -> String {
             "file_unavailable" => "reported unavailable supporting evidence",
             "evidence_excluded" => "reported excluded supporting evidence",
             "insufficient_evidence" => "reported insufficient supporting evidence",
+            "unconfirmed_candidate" => {
+                "has a finding kept as validated in its chunk; the final pass gave it no decision"
+            }
+            "dropped_finding" => "had a point dropped because its evidence did not validate",
+            "files_not_reviewed" => "left changed files unreviewed; they are listed above",
             _ => "reported an evidence limitation",
         };
         result.push_str(&format!("\n> - {affected}: {reason}. "));
         match &warning.reference {
             Some(reference) => result.push_str(&markdown(reference)),
+            None if matches!(warning.reason.as_str(), "unconfirmed_candidate" | "dropped_finding") => {}
             None => result.push_str("The missing supporting reference was not specified."),
         }
     }
@@ -90,5 +96,34 @@ mod tests {
         assert!(!rendered.contains("\n> injected"));
         assert!(!rendered.contains("<script>"));
         assert_eq!(append("Result", &[]), "Result");
+    }
+
+    #[test]
+    fn deferred_files_are_a_warning_that_limits_the_review() {
+        let rendered = append(
+            "Result",
+            &[EvidenceWarning {
+                reason: "files_not_reviewed".into(),
+                path: None,
+                reference: Some("3 changed file(s) above review_focus_files".into()),
+            }],
+        );
+        assert!(rendered.contains("Review scope: left changed files unreviewed; they are listed above. 3 changed file\\(s\\) above review\\_focus\\_files"), "{rendered}");
+    }
+
+    #[test]
+    fn a_dropped_finding_says_why_it_was_dropped() {
+        let rendered = append(
+            "Result",
+            &[EvidenceWarning {
+                reason: "dropped_finding".into(),
+                path: Some("src/a.rs".into()),
+                reference: None,
+            }],
+        );
+        assert!(
+            rendered.contains("src/a.rs: had a point dropped because its evidence did not validate."),
+            "{rendered}"
+        );
     }
 }

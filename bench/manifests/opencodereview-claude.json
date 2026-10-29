@@ -1,0 +1,16 @@
+{
+  "name": "opencodereview-claude",
+  "display_name": "OpenCodeReview (Claude)",
+  "provider": "OpenCodeReview",
+  "image": "ghcr.io/bridglabs/opencodereview-bench@sha256:REPLACE_WITH_PUSHED_DIGEST",
+  "configuration": [
+    { "key": "provider", "value": "claude", "display_value": "Claude" },
+    { "key": "deadline-secs", "value": "3300", "display_value": "55 min" }
+  ],
+  "secrets": {
+    "env": ["CLAUDE_CODE_OAUTH_TOKEN"]
+  },
+  "egress": ["api.anthropic.com"],
+  "pr_timeout_seconds": 3600,
+  "notes": "Open-source PR reviewer. Runs the product's review pipeline headless: frozen snapshot, sandboxed Claude Code CLI, evidence-validated findings. Model and effort are the product defaults; see bench/README.md in github.com/BridgLabs/opencodereview."
+}

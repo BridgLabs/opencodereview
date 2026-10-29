@@ -77,6 +77,8 @@ pub enum Exclusion {
     Oversized,
     Binary,
     NonUtf8,
+    /// Left out because the archive's blob budget was full; see `Archive::build_within`.
+    Budget,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -167,6 +169,47 @@ pub struct Archive {
 
 pub(crate) fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+/// A manifest entry's approximate encoded size beside its path.
+const ENTRY_OVERHEAD: u64 = 200;
+
+/// Which `sources` (sorted) an archive keeps within `manifest_room` and `blob_room`, priority
+/// paths first: the kept flags, and the kept entries whose content no longer fits.
+fn plan_budget(
+    sources: &[SourceEntry],
+    priority: &BTreeSet<String>,
+    manifest_room: u64,
+    blob_room: u64,
+) -> Result<(Vec<bool>, BTreeSet<(String, String)>), Error> {
+    let order = (0..sources.len())
+        .filter(|&index| priority.contains(&sources[index].path))
+        .chain((0..sources.len()).filter(|&index| !priority.contains(&sources[index].path)));
+    let mut kept = vec![false; sources.len()];
+    let mut excluded = BTreeSet::new();
+    let (mut manifest, mut blobs, mut entries) = (0u64, 0u64, 0usize);
+    let mut known = BTreeSet::new();
+    for index in order {
+        let source = &sources[index];
+        let required = priority.contains(&source.path);
+        let size = source.path.len() as u64 + ENTRY_OVERHEAD;
+        if !required && (manifest + size > manifest_room || entries >= MAX_ENTRIES) {
+            continue;
+        }
+        manifest += size;
+        entries += 1;
+        kept[index] = true;
+        if source.exclusion()?.is_some() || known.contains(&source.git_blob_id) {
+            continue;
+        }
+        if !required && blobs + source.bytes > blob_room {
+            excluded.insert((source.revision.clone(), source.path.clone()));
+            continue;
+        }
+        blobs += source.bytes;
+        known.insert(source.git_blob_id.clone());
+    }
+    Ok((kept, excluded))
 }
 
 pub fn validate_limits(blob: u64, manifest: u64, entries: usize) -> Result<(), Error> {
@@ -271,28 +314,42 @@ impl SourceEntry {
     }
 }
 
+/// Paths inside an AI tool's configuration folder. They are reviewed from the frozen archive only,
+/// never copied into a runner's workspace, where an AI CLI could load them as its own
+/// configuration (the runner refuses such stage files).
+pub(crate) fn in_agent_folder(path: &str) -> bool {
+    path.to_ascii_lowercase().split('/').any(|part| {
+        matches!(
+            part,
+            ".devin" | ".agents" | ".claude" | ".gemini" | ".cursor" | ".windsurf" | ".opencode" | ".zed"
+        )
+    })
+}
+
 pub(crate) fn path_exclusion(path: &str) -> Result<Option<Exclusion>, Error> {
     safe_path(path)?;
     let path = path.to_ascii_lowercase();
     let parts = path.split('/').collect::<Vec<_>>();
-    if parts.iter().any(|part| {
-        matches!(
-            *part,
-            ".git"
-                | ".devin"
-                | ".agents"
-                | ".claude"
-                | ".cursor"
-                | ".windsurf"
-                | ".opencode"
-                | ".zed"
-                | ".ssh"
-                | ".gnupg"
-        )
-    }) {
+    let name = parts.last().ok_or(Error::Path)?;
+    if parts.iter().any(|part| matches!(*part, ".git" | ".ssh" | ".gnupg")) {
         return Ok(Some(Exclusion::PrivateConfiguration));
     }
-    let name = parts.last().ok_or(Error::Path)?;
+    // Committed agent instructions, skills and scripts are reviewable code; their settings, MCP
+    // servers, sign-ins and session state are not.
+    if *name == ".mcp.json"
+        || (in_agent_folder(&path)
+            && (name.contains(".local.")
+                || name.contains("credentials")
+                || matches!(
+                    *name,
+                    "settings.json" | "mcp.json" | "auth.json" | "oauth_creds.json" | "history.jsonl"
+                )
+                || parts
+                    .iter()
+                    .any(|part| matches!(*part, "projects" | "sessions" | "todos" | "shell-snapshots" | "statsig"))))
+    {
+        return Ok(Some(Exclusion::PrivateConfiguration));
+    }
     if name.starts_with(".env")
         || matches!(
             *name,
@@ -378,6 +435,7 @@ impl Manifest {
             ) {
                 (Some(expected), Some(actual), None) if expected == actual => {}
                 (None, Some(Exclusion::Binary | Exclusion::NonUtf8), None) if entry.source.bytes > 0 => {}
+                (None, Some(Exclusion::Budget), None) => {}
                 (None, None, Some(digest)) => {
                     let blob = blobs.get(digest).ok_or(Error::Integrity)?;
                     if blob.bytes != entry.source.bytes {
@@ -399,12 +457,25 @@ impl Manifest {
 impl Archive {
     pub fn build(
         scope: Scope,
+        sources: Vec<SourceEntry>,
+        cancel: &AtomicBool,
+        load: impl FnMut(&SourceEntry) -> Result<Vec<u8>, Error>,
+    ) -> Result<Self, Error> {
+        Self::build_within(scope, sources, &BTreeSet::new(), cancel, load)
+    }
+
+    /// Builds the archive within its budgets even for a repository larger than them: the
+    /// `priority` paths (what the review is about) go first, then the rest in path order. Past the
+    /// blob budget an entry stays listed as excluded; past the manifest budget it is left out, as
+    /// if absent. Only the priority paths alone can still exceed a budget.
+    pub fn build_within(
+        scope: Scope,
         mut sources: Vec<SourceEntry>,
+        priority: &BTreeSet<String>,
         cancel: &AtomicBool,
         mut load: impl FnMut(&SourceEntry) -> Result<Vec<u8>, Error>,
     ) -> Result<Self, Error> {
         scope.validate()?;
-        validate_limits(0, 0, sources.len())?;
         sources.sort_by(|a, b| (&a.revision, &a.path).cmp(&(&b.revision, &b.path)));
         for (index, source) in sources.iter().enumerate() {
             source.validate(&scope)?;
@@ -413,6 +484,37 @@ impl Archive {
                 return Err(Error::Contract);
             }
         }
+        let mut manifest_room = MAX_MANIFEST_BYTES;
+        loop {
+            let (kept, excluded) = plan_budget(&sources, priority, manifest_room, MAX_BLOB_BYTES)?;
+            let kept = sources
+                .iter()
+                .zip(kept)
+                .filter(|(_, kept)| *kept)
+                .map(|(source, _)| source.clone())
+                .collect();
+            match Self::build_planned(scope.clone(), kept, &excluded, cancel, &mut load) {
+                // The manifest estimate ran short: plan again for proportionally less room.
+                Err(Error::Limit {
+                    resource: "manifest",
+                    actual,
+                    ..
+                }) if manifest_room > MAX_MANIFEST_BYTES / 4 => {
+                    manifest_room = manifest_room * MAX_MANIFEST_BYTES / actual * 19 / 20;
+                }
+                result => return result,
+            }
+        }
+    }
+
+    fn build_planned(
+        scope: Scope,
+        sources: Vec<SourceEntry>,
+        excluded: &BTreeSet<(String, String)>,
+        cancel: &AtomicBool,
+        mut load: impl FnMut(&SourceEntry) -> Result<Vec<u8>, Error>,
+    ) -> Result<Self, Error> {
+        validate_limits(0, 0, sources.len())?;
         let mut manifest = Manifest {
             version: VERSION,
             policy_version: POLICY_VERSION,
@@ -428,8 +530,9 @@ impl Archive {
             if cancel.load(Ordering::Relaxed) {
                 return Err(Error::Cancelled);
             }
+            let budget = excluded.contains(&(source.revision.clone(), source.path.clone()));
             let mut entry = Entry {
-                exclusion: source.exclusion()?,
+                exclusion: source.exclusion()?.or(budget.then_some(Exclusion::Budget)),
                 source,
                 content_hash: None,
             };
@@ -850,7 +953,7 @@ mod git;
 mod manifest;
 pub mod purge;
 pub mod retention;
-pub use git::{capture, capture_selected, hydrate};
+pub use git::{capture, capture_prioritized, capture_selected, hydrate};
 mod transfer;
 pub use transfer::{transfer_manifest, validate_blob, Incoming};
 mod store;

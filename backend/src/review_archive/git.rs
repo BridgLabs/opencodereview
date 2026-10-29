@@ -160,6 +160,27 @@ pub fn capture_selected(
     paths: Option<&BTreeSet<String>>,
     cancel: &AtomicBool,
 ) -> Result<Archive, Error> {
+    capture_within(repo, scope, paths, &BTreeSet::new(), cancel)
+}
+
+/// Like `capture`, keeping the `priority` paths first when the repository exceeds the archive's
+/// budgets (see `Archive::build_within`).
+pub fn capture_prioritized(
+    repo: &Path,
+    scope: Scope,
+    priority: &BTreeSet<String>,
+    cancel: &AtomicBool,
+) -> Result<Archive, Error> {
+    capture_within(repo, scope, None, priority, cancel)
+}
+
+fn capture_within(
+    repo: &Path,
+    scope: Scope,
+    paths: Option<&BTreeSet<String>>,
+    priority: &BTreeSet<String>,
+    cancel: &AtomicBool,
+) -> Result<Archive, Error> {
     scope.validate()?;
     for revision in scope.revisions().into_iter().chain([scope.base_sha.as_str()]) {
         let resolved = git(
@@ -215,7 +236,7 @@ pub fn capture_selected(
     }
     let mut loaded = None;
     let mut contents = BTreeMap::new();
-    Archive::build(scope, sources, cancel, |entry| {
+    Archive::build_within(scope, sources, priority, cancel, |entry| {
         let index = *memberships
             .get(&(entry.revision.clone(), entry.path.clone()))
             .ok_or(Error::Integrity)?;

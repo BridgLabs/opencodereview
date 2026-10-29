@@ -17,6 +17,10 @@ path = "src/main_server.rs"
 name = "ocr-sandbox"
 path = "src/main_sandbox.rs"
 
+[[bin]]
+name = "ocr-bench"
+path = "src/main_bench.rs"
+
 [lib]
 name = "opencodereview_server"
 
@@ -24,7 +28,7 @@ name = "opencodereview_server"
 base64 = "=0.22.1"
 libc = "=0.2.186"
 postgres = "0.19.14"
-pulldown-cmark = { version = "=0.13.4", default-features = false }
+pulldown-cmark = { version = "=0.13.5", default-features = false }
 r2d2 = "0.8.10"
 r2d2_postgres = "0.18.2"
 reqwest = { version = "0.13.4", features = ["blocking", "form", "json"] }

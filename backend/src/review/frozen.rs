@@ -42,16 +42,32 @@ pub fn capture(
         prior_sha: plan.prior_sha.clone().filter(|_| plan.incremental),
     };
     crate::review_archive::hydrate(&inputs.repo_path, &scope, cancel).map_err(|e| e.to_string())?;
-    let archive = crate::review_archive::capture(&inputs.repo_path, scope, cancel).map_err(|e| e.to_string())?;
-    let archive = crate::review::dependencies::capture(
-        archive,
-        &inputs.repo_path,
-        &plan.changed_files,
-        &inputs.pr_body,
-        &std::collections::BTreeSet::new(),
-        true,
-        cancel,
-    )?;
+    // A repository larger than the archive's budgets keeps what the review is about first.
+    let priority = plan
+        .changed_files
+        .iter()
+        .chain(plan.related_files.iter().map(|file| &file.path))
+        .chain(&plan.test_files)
+        .chain(&plan.convention_files)
+        .cloned()
+        .collect();
+    let archive = crate::review_archive::capture_prioritized(&inputs.repo_path, scope, &priority, cancel)
+        .map_err(|e| e.to_string())?;
+    // An offline review has the checkout and nothing else: no submodules and no linked
+    // repositories to pin, so its archive is the checkout's own.
+    let archive = if inputs.offline {
+        archive
+    } else {
+        crate::review::dependencies::capture(
+            archive,
+            &inputs.repo_path,
+            &plan.changed_files,
+            &inputs.pr_body,
+            &std::collections::BTreeSet::new(),
+            true,
+            cancel,
+        )?
+    };
     let db = inputs.db_handle.as_ref().ok_or("Review storage unavailable")?;
     let mut store = ArchiveStore::open(&inputs.archive_dir, db).map_err(|e| e.to_string())?;
     store
@@ -147,7 +163,7 @@ pub fn materialize(
     summary: &Path,
     comments: &Path,
 ) -> Result<Vec<crate::review::warnings::EvidenceWarning>, String> {
-    match &inputs.frozen {
+    let mut warnings = match &inputs.frozen {
         Some(frozen) => {
             let resolver = crate::review::evidence::EvidenceResolver::frozen(context, &frozen.archive);
             let diff = assigned_diff(&frozen.archive, files, diff);
@@ -161,7 +177,20 @@ pub fn materialize(
         }
         None => crate::review::evidence::materialize(report, context, files, head, diff, summary, comments)
             .map(|_| Vec::new()),
-    }
+    }?;
+    // Findings output repair dropped for failing validation are reported, never silently lost.
+    let dropped = report
+        .parent()
+        .map(|stage| stage.join(crate::review::output_repair::DROPPED))
+        .and_then(|path| fs::read_to_string(path).ok())
+        .and_then(|raw| serde_json::from_str::<Vec<serde_json::Value>>(&raw).ok())
+        .unwrap_or_default();
+    warnings.extend(dropped.iter().map(|finding| crate::review::warnings::EvidenceWarning {
+        reason: "dropped_finding".into(),
+        path: finding["path"].as_str().map(str::to_string),
+        reference: None,
+    }));
+    Ok(crate::review::warnings::merge(warnings))
 }
 
 pub fn decisions(inputs: &ReviewInputs, raw: &str, context: &Path) -> Result<(), String> {

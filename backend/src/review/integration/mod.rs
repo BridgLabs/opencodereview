@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, VecDeque};
 mod output;
 mod prepare;
 
-pub(super) use output::{combine, validate_output};
+pub(super) use output::{combine, unconfirmed, validate_output};
 pub(super) use prepare::{prepare, scoped_diff};
 
 const BATCH_INSTRUCTIONS: &str = "\nThis is one final-integration batch of the same complete PR review. Other batches cover the remaining assigned paths and candidates; do not interpret their absence here as missing implementation. Review exactly the paths in this batch's STAGE.json, while consulting the same full frozen archive for cross-file contracts and counter-evidence. Each candidate keeps its original candidateId. A candidate may contain its original structured point instead of repeated rendered Markdown; preserve its title, details, action and evidence when reasoning. Chunk notes retain contextQuestions, general questions and coverage metadata; their reviewedFiles are context, not your assigned coverage. Resolve every provided candidate explicitly. Do not invent decisions for candidates assigned to another batch.\n";
@@ -14,6 +14,8 @@ pub(super) struct Payload {
     pub sources: Value,
     candidates: BTreeMap<String, Value>,
     notes: Vec<(Vec<String>, Value)>,
+    /// The chunks' validated suggestions, listed in the final summary as they are.
+    pub suggestions: Vec<Value>,
 }
 
 impl Payload {
@@ -22,6 +24,7 @@ impl Payload {
             sources: json!({"commit_id":head,"comments":[]}),
             candidates: BTreeMap::new(),
             notes: vec![],
+            suggestions: vec![],
         }
     }
 
@@ -30,12 +33,22 @@ impl Payload {
             sources,
             candidates: BTreeMap::new(),
             notes: vec![],
+            suggestions: vec![],
         };
         let originals = payload.sources["comments"]
             .as_array()
             .ok_or("Missing integration candidates")?;
         for result in results {
-            let report = serde_json::from_str::<Value>(&result.summary).ok();
+            let mut report = serde_json::from_str::<Value>(&result.summary).ok();
+            if let Some(suggestions) = report
+                .as_mut()
+                .and_then(Value::as_object_mut)
+                .and_then(|report| report.remove("suggestions"))
+            {
+                payload
+                    .suggestions
+                    .extend(suggestions.as_array().cloned().unwrap_or_default());
+            }
             let candidates = originals
                 .iter()
                 .filter(|candidate| candidate["chunkId"].as_u64() == Some(result.chunk.id as u64))
@@ -65,7 +78,9 @@ impl Payload {
                 note.as_object_mut().ok_or("Invalid chunk report")?.remove("findings");
                 json!({"chunkId":result.chunk.id,"report":note})
             } else {
-                json!({"chunkId":result.chunk.id,"summary":result.summary})
+                // Without the suggestions taken out above, which go to the final summary as written.
+                let summary = report.as_ref().map_or_else(|| result.summary.clone(), Value::to_string);
+                json!({"chunkId":result.chunk.id,"summary":summary})
             };
             payload.notes.push((result.chunk.files.clone(), note));
         }

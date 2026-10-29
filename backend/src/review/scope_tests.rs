@@ -25,7 +25,7 @@ fn reprocess_scope_repeats_only_the_previous_paths_still_in_the_pr() {
 fn reprocess_selection_applies_current_policy_before_planning() {
     let current = vec![
         "src/code.ts".into(),
-        ".windsurf/rules.md".into(),
+        ".windsurf/rules.local.md".into(),
         "pnpm-lock.yaml".into(),
         "src/reused.ts".into(),
     ];
@@ -561,9 +561,9 @@ fn excluded_only_delta_keeps_inventory_without_claiming_new_coverage() {
         full_pr_files: vec![
             "pnpm-lock.yaml".into(),
             "src/code.ts".into(),
-            ".windsurf/rules.md".into(),
+            ".windsurf/rules.local.md".into(),
         ],
-        reused_files: vec!["src/code.ts".into(), ".windsurf/rules.md".into()],
+        reused_files: vec!["src/code.ts".into(), ".windsurf/rules.local.md".into()],
         excluded_files: Vec::new(),
     };
     exclude_policy_paths(&mut changed, &mut selection).unwrap();
@@ -576,7 +576,7 @@ fn excluded_only_delta_keeps_inventory_without_claiming_new_coverage() {
             .iter()
             .map(|file| file.path.as_str())
             .collect::<Vec<_>>(),
-        ["pnpm-lock.yaml", ".windsurf/rules.md"]
+        ["pnpm-lock.yaml", ".windsurf/rules.local.md"]
     );
     assert_eq!(
         selection.excluded_files[0].reason,
@@ -852,4 +852,51 @@ fn base_sync_keeps_new_renamed_and_deleted_paths_in_review() {
         assert!(selection.changed_files.contains(&path.to_string()), "missing {path}");
     }
     assert_eq!(selection.selection.reused_files.len(), 18);
+}
+
+#[test]
+fn focus_keeps_the_most_changed_source_files_in_order() {
+    let diff = [
+        ("docs/guide.md", 40),
+        ("src/small.ts", 1),
+        ("src/big.ts", 30),
+        ("package.json", 50),
+        ("src/gone.ts", 5),
+    ]
+    .iter()
+    .map(|(path, lines)| {
+        let target = if *path == "src/gone.ts" {
+            "/dev/null".to_string()
+        } else {
+            format!("b/{path}")
+        };
+        format!(
+            "diff --git a/{path} b/{path}\n--- a/{path}\n+++ {target}\n@@ -1 +1 @@\n{}",
+            "-old\n".repeat(*lines)
+        )
+    })
+    .collect::<String>();
+    let all = [
+        "docs/guide.md",
+        "src/small.ts",
+        "src/big.ts",
+        "package.json",
+        "src/gone.ts",
+    ]
+    .map(String::from)
+    .to_vec();
+    let mut changed = all.clone();
+    let deferred = super::focus_files(&mut changed, &diff, 2);
+    assert_eq!(changed, ["src/big.ts", "src/gone.ts"]);
+    assert_eq!(deferred, ["docs/guide.md", "src/small.ts", "package.json"]);
+    let mut unlimited = all.clone();
+    assert!(super::focus_files(&mut unlimited, &diff, 0).is_empty());
+    assert!(super::focus_files(&mut unlimited, &diff, 5).is_empty());
+    assert_eq!(unlimited, all);
+    // A removed `-- comment` line inside a hunk still counts for its file.
+    let sql = "diff --git a/db/up.sql b/db/up.sql\n--- a/db/up.sql\n+++ b/db/up.sql\n@@ -1,4 +1 @@\n--- note\n-drop a;\n-drop b;\n-drop c;\n+ok;\n\
+        diff --git a/db/other.sql b/db/other.sql\n--- a/db/other.sql\n+++ b/db/other.sql\n@@ -1 +1 @@\n-x;\n+y;\n";
+    let mut changed = vec!["db/other.sql".to_string(), "db/up.sql".to_string()];
+    assert_eq!(super::focus_files(&mut changed, sql, 1), ["db/other.sql"]);
+    assert_eq!(changed, ["db/up.sql"]);
 }

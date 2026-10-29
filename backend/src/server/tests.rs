@@ -257,6 +257,7 @@ fn clean_reviews_are_completed_without_finding_selection_even_with_auto_post_ena
         number: 1,
         base_ref: "main".to_string(),
         fixed_head_sha: None,
+        offline: false,
         expected_scope: None,
         prior_scope: None,
         last_reviewed_sha: None,
@@ -274,6 +275,7 @@ fn clean_reviews_are_completed_without_finding_selection_even_with_auto_post_ena
         review_parallel_chunks: 2,
         db_handle: Some(db.handle()),
         archive_dir: std::env::temp_dir().join(format!("ocr-review-archives-{}", crate::sandbox::secret().unwrap())),
+        budget: None,
     };
     for no_changes in [false, true] {
         handle_completed_review(&db, &inputs, no_changes, false);
@@ -907,6 +909,56 @@ fn relocated_selected_findings_survive_comment_publication() {
 }
 
 #[test]
+fn suggestions_post_with_the_review_but_never_on_their_own_after_duplicates() {
+    let suggestions = format!(
+        "{}\n\n{}\n\n- `a.rs:3` **Stale test name**. Detail Suggested change: Rename it",
+        crate::review::SUGGESTIONS_HEADING,
+        crate::review::SUGGESTIONS_INTRO
+    );
+    let dedupe = |comments: serde_json::Value, suppressed| github::DedupeResult {
+        post_comments: comments,
+        annotated_comments_json: "{\"comments\":[]}".into(),
+        suppressed_count: suppressed,
+    };
+    let only = review_run(
+        Some(&format!("No findings.\n\n{suggestions}")),
+        Some(r#"{"comments":[]}"#),
+    );
+    assert!(review_has_findings(
+        only.comments_json.as_deref(),
+        only.review_body.as_deref()
+    ));
+    assert!(!crate::review::findings::actionable(
+        only.comments_json.as_deref(),
+        only.review_body.as_deref()
+    ));
+    for event in ["COMMENT", "APPROVE"] {
+        let draft = finish_review_post(&only, event, false, dedupe(serde_json::json!([]), 0), "");
+        assert!(draft.body.contains("**Stale test name**"), "{event}");
+        assert!(!draft.body.contains("No findings."), "{event}");
+    }
+    let inline = review_run(
+        Some(&format!(
+            "Automated review produced 1 inline comment(s).\n\n{suggestions}"
+        )),
+        Some(r#"{"comments":[{"body":"[Finding] issue","path":"a.rs","line":3}]}"#),
+    );
+    let draft = finish_review_post(
+        &inline,
+        "COMMENT",
+        false,
+        dedupe(
+            serde_json::json!([{"body":"[Finding] issue","path":"a.rs","line":3}]),
+            0,
+        ),
+        "",
+    );
+    assert!(draft.body.contains("**Stale test name**"));
+    let draft = finish_review_post(&inline, "COMMENT", false, dedupe(serde_json::json!([]), 1), "");
+    assert!(draft.body.is_empty());
+}
+
+#[test]
 fn empty_selected_publication_fails_unless_all_comments_are_proven_duplicates() {
     let run = review_run(
         Some("2 review comments selected for publication."),
@@ -1331,4 +1383,66 @@ fn spawn_single_flight_runs_once_and_recovers() {
     wait_gate();
     assert!(spawn_single_flight(&SINGLE_FLIGHT_GATE, || {}));
     wait_gate();
+}
+
+#[test]
+fn a_review_with_only_suggestions_auto_posts_without_a_person() {
+    let root = std::env::temp_dir().join(format!(
+        "ocr-suggestions-auto-post-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let db = crate::db::Db::for_test_at(root.join("test.sqlite")).open().unwrap();
+    db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
+    db.save_setting("auto_post_mode", "comment").unwrap();
+    let pr_id = db
+        .upsert_pull_request(&crate::db::PullRequestInput {
+            repo_id: 1,
+            number: 1,
+            title: "Fixture".into(),
+            author: "fixture".into(),
+            author_avatar_url: None,
+            is_draft: false,
+            head_sha: "head".into(),
+            base_sha: None,
+            base_ref: Some("main".into()),
+            head_ref: Some("feature".into()),
+            default_branch: Some("main".into()),
+            url: None,
+            lane: "ready".into(),
+            status_reason: None,
+        })
+        .unwrap();
+    let section = crate::review::evidence::suggestions_section(&[
+        serde_json::json!({"path":"src/a.rs","line":2,"title":"Stale test name","detail":"Detail","action":"Rename it"}),
+    ]);
+    let body = format!("No findings.\n\n{section}");
+    let run_id = db.start_review_skeleton_with(pr_id, None).unwrap();
+    db.set_review_run_running(run_id, "[]").unwrap();
+    db.store_finding_audit(
+        run_id,
+        &crate::review::findings::FindingAudit {
+            evidence_warnings: None,
+            head_sha: "head".into(),
+            complete: true,
+            original_body: body.clone(),
+            diff: None,
+            candidates: vec![],
+        },
+    )
+    .unwrap();
+    db.finish_review_run(run_id, &body, None, "[]").unwrap();
+    let revision = db
+        .auto_confirm_generated_finding_selection(pr_id, run_id)
+        .unwrap()
+        .expect("a review with only suggestions has nothing for a person to confirm");
+    let run = db.review_run_by_id(run_id).unwrap().unwrap();
+    assert!(run.review_body.unwrap().ends_with(section.trim()));
+    assert!(db
+        .try_begin_review_post(run_id, pr_id, "head", "COMMENT", "comment", "auto", Some(revision))
+        .unwrap());
 }

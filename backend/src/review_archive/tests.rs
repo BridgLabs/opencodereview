@@ -194,8 +194,12 @@ fn archive_never_loads_policy_exclusions() {
         "credentials.toml",
         "config/hosts.yml",
         "key.pem",
-        "nested/.claude/rules.md",
-        ".windsurf/config.json",
+        "nested/.claude/settings.local.json",
+        ".gemini/oauth_creds.json",
+        ".claude/.credentials.json",
+        ".claude/projects/session.jsonl",
+        ".git/config",
+        "home/.ssh/config",
         "dist/code.js",
         "nested/build/code.js",
         "pnpm-lock.yaml",
@@ -224,6 +228,73 @@ fn archive_never_loads_policy_exclusions() {
             "{path}"
         );
     }
+}
+
+#[test]
+fn committed_agent_instructions_are_reviewable() {
+    for path in [
+        ".claude/agents/reviewer.md",
+        "src/user/.agents/skills/root-cause-tracing/find-polluter.sh",
+        ".cursor/rules/style.mdc",
+        "src/projects/main.rs",
+    ] {
+        assert_eq!(path_exclusion(path).unwrap(), None, "{path}");
+    }
+    for path in [
+        ".claude/settings.json",
+        ".cursor/mcp.json",
+        ".mcp.json",
+        "tools/.gemini/settings.json",
+    ] {
+        assert_eq!(
+            path_exclusion(path).unwrap(),
+            Some(Exclusion::PrivateConfiguration),
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn agent_folder_files_stay_out_of_the_runner_workspace() {
+    let directory = Directory::new();
+    let context = directory.0.join("context");
+    let agent = ".claude/agents/reviewer.md";
+    let archive = build(&[
+        ("code.rs", &scope().head_sha, b"call();\n"),
+        (agent, &scope().head_sha, b"Review carefully.\n"),
+    ]);
+    for path in ["PR.md", "skill/SKILL.md", "related/.agents/skills/a/SKILL.md"] {
+        let target = context.join(path);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(target, "Prepared context").unwrap();
+    }
+    archive
+        .prepare_stage(&context, &[agent.into(), "code.rs".into()], "", &scope().merge_base_sha)
+        .unwrap();
+    assert!(context.join("changed/code.rs").is_file());
+    assert!(!context.join("changed/.claude").exists());
+    assert!(!context.join("related/.agents/skills/a/SKILL.md").exists());
+    let files: BTreeMap<String, String> = [
+        "PR.md",
+        "skill/SKILL.md",
+        "changed/code.rs",
+        "PR_DIFF.patch",
+        "FROZEN.json",
+        "STAGE.json",
+    ]
+    .into_iter()
+    .map(|path| {
+        (
+            format!("context/{path}"),
+            std::fs::read_to_string(context.join(path)).unwrap(),
+        )
+    })
+    .collect();
+    archive.validate_stage_files(&files).unwrap();
+    assert_eq!(
+        archive.resolve(&scope().head_sha, agent).unwrap(),
+        "Review carefully.\n"
+    );
 }
 
 #[test]
@@ -1293,4 +1364,40 @@ fn a_store_with_an_unimported_sqlite_index_refuses_to_open_and_keeps_its_archive
     let report = crate::review_archive::purge::run(&db, &root, true, 10 * crate::review_archive::purge::RETENTION_MS);
     assert!(report.unwrap_err().contains("import-sqlite"));
     assert!(sealed.exists());
+}
+
+#[test]
+fn a_repository_over_budget_keeps_the_reviewed_paths_first() {
+    let head = "a".repeat(40);
+    let sources = vec![
+        source("a/big.rs", &head, &[b'a'; 60]),
+        source("a/copy.rs", &head, &[b'a'; 60]),
+        source("b/other.rs", &head, &[b'b'; 50]),
+        source("z/changed.rs", &head, &[b'z'; 50]),
+    ];
+    let priority = BTreeSet::from(["z/changed.rs".to_string()]);
+    // 120 blob bytes: the changed file first, then a/big.rs (60); its duplicate costs nothing more;
+    // b/other.rs no longer fits and stays listed as excluded.
+    let (kept, excluded) = plan_budget(&sources, &priority, u64::MAX, 120).unwrap();
+    assert_eq!(kept, vec![true; 4]);
+    assert_eq!(excluded, BTreeSet::from([(head.clone(), "b/other.rs".to_string())]));
+    // A manifest with room for two entries keeps the changed file and the first other one.
+    let room = 2 * ENTRY_OVERHEAD + "z/changed.rs".len() as u64 + "a/big.rs".len() as u64;
+    let (kept, _) = plan_budget(&sources, &priority, room, u64::MAX).unwrap();
+    assert_eq!(kept, vec![true, false, false, true]);
+
+    let archive = Archive::build_planned(scope(), sources.clone(), &excluded, &AtomicBool::new(false), |entry| {
+        Ok(vec![entry.path.as_bytes()[0]; entry.bytes as usize])
+    })
+    .unwrap();
+    assert_eq!(archive.resolve(&head, "z/changed.rs").unwrap(), "z".repeat(50));
+    assert_eq!(
+        archive.resolve(&head, "b/other.rs"),
+        Err(Error::Excluded(Exclusion::Budget))
+    );
+    // The budget exclusion survives the archive's own integrity check.
+    let raw = archive.manifest_bytes().unwrap();
+    Archive::decode(&archive.descriptor(), &raw, archive.data.clone()).unwrap();
+    // And so does the runner's transfer check.
+    transfer::transfer_manifest(&archive.descriptor(), &raw).unwrap();
 }

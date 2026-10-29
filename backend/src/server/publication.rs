@@ -864,8 +864,17 @@ pub(crate) fn run_review_job(
     }
 }
 
+/// Whether a review has anything to post: inline comments, a finding or question in its body, or
+/// suggestions.
 pub(crate) fn review_has_findings(comments_json: Option<&str>, review_body: Option<&str>) -> bool {
-    comments_json_has_findings(comments_json) || review_body_has_findings(review_body)
+    comments_json_has_findings(comments_json)
+        || review_body_has_findings(review_body)
+        || !review_suggestions(review_body).is_empty()
+}
+
+/// The suggestions section of a review body, or "" when it has none.
+pub(crate) fn review_suggestions(review_body: Option<&str>) -> &str {
+    review_body.map_or("", |body| review::split_suggestions(body).1.trim())
 }
 
 pub(crate) fn comments_json_has_findings(comments_json: Option<&str>) -> bool {
@@ -1311,6 +1320,9 @@ pub(crate) fn finish_review_post(
         .as_array()
         .is_some_and(|comments| !comments.is_empty());
     let has_body_finding = review_body_has_findings(run.review_body.as_deref());
+    let suggestions = review_suggestions(run.review_body.as_deref());
+    // Suggestions repeat in every review of the pull request, so they never post on their own once
+    // every inline comment was already posted.
     let only_duplicates =
         dedupe.suppressed_count > 0 && !has_inline && !has_body_finding && relocated.trim().is_empty();
     let body = if only_duplicates {
@@ -1322,8 +1334,10 @@ pub(crate) fn finish_review_post(
                 run.review_body.as_deref().unwrap_or_default(),
                 review_post_body(relocated)
             ))
-        } else {
+        } else if suggestions.is_empty() {
             review_post_body(relocated)
+        } else {
+            generated_review_body(&format!("{suggestions}\n\n{}", review_post_body(relocated)))
         }
     } else if has_body_finding && matches!(event, "COMMENT" | "REQUEST_CHANGES") {
         let summary = run.review_body.clone().unwrap_or_default();
@@ -1333,6 +1347,8 @@ pub(crate) fn finish_review_post(
             format!("{summary}\n{relocated}")
         };
         generated_review_body(&combined)
+    } else if !suggestions.is_empty() {
+        generated_review_body(&format!("{suggestions}\n\n{}", review_post_body(relocated)))
     } else {
         review_post_body(relocated)
     };

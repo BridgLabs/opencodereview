@@ -7,12 +7,14 @@ pub(crate) mod progress;
 pub(crate) mod scope;
 pub(crate) mod warnings;
 
+pub(crate) mod budget;
 mod context_support;
 #[cfg(test)]
 mod diagnostics;
 pub(crate) mod frozen;
 mod git;
 mod integration;
+mod lens;
 pub(crate) mod output_repair;
 mod paths;
 mod recovery;
@@ -69,7 +71,7 @@ const DEFAULT_REVIEW_SHARD_THRESHOLD: usize = 20;
 const DEFAULT_MAX_PARALLEL_REVIEW_CHUNKS: usize = 6;
 const CHUNK_SCOPE_NOTE: &str = "Business-context checks are resolved in Final.\n";
 const GIT_TIMEOUT_SECS: u64 = 120;
-pub(crate) const REVIEW_PROMPT_VERSION: &str = "review-v12-review-only";
+pub(crate) const REVIEW_PROMPT_VERSION: &str = "review-v17-suggestions";
 /// Accounts a single stage may move through after usage limits or rejected sign-ins.
 pub(crate) const MAX_ACCOUNT_FAILOVERS: usize = 8;
 static CLAUDE_HOME_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -160,6 +162,9 @@ pub struct ReviewInputs {
     pub number: i64,
     pub base_ref: String,
     pub fixed_head_sha: Option<String>,
+    /// Review a local clone that already holds the pinned base and head (`ocr-bench`): no fetch
+    /// from origin, no GitHub API. Requires `fixed_head_sha` and a SHA `base_ref`.
+    pub offline: bool,
     pub expected_scope: Option<crate::review::scope::ReviewScope>,
     pub prior_scope: Option<crate::review::scope::ReviewScope>,
     /// Head SHA of the last review that produced output, if any. When it is an
@@ -185,6 +190,8 @@ pub struct ReviewInputs {
     pub db_handle: Option<crate::db::Db>,
     /// Where frozen review archives are stored.
     pub archive_dir: PathBuf,
+    /// The time this review has, when it has a fixed one (`ocr-bench`); None runs every step.
+    pub budget: Option<std::sync::Arc<budget::Budget>>,
 }
 
 impl ReviewInputs {

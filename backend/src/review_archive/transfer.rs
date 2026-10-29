@@ -47,6 +47,7 @@ pub fn transfer_manifest(descriptor: &Descriptor, raw: &[u8]) -> Result<Manifest
         ) {
             (Some(expected), Some(actual), None) if expected == actual => {}
             (None, Some(Exclusion::Binary | Exclusion::NonUtf8), None) if entry.source.bytes > 0 => {}
+            (None, Some(Exclusion::Budget), None) => {}
             (None, None, Some(digest)) if blobs.get(digest) == Some(&entry.source.bytes) => {
                 expanded = expanded.checked_add(entry.source.bytes).ok_or(Error::Budget)?;
                 used.insert(digest);

@@ -93,6 +93,15 @@ pub(crate) fn sanitize_review_comments(comments_json: Option<&str>) -> Result<Op
 }
 
 pub(crate) fn repair_body_only_review_point(body: String, comments_json: Option<&str>) -> String {
+    let (main, suggestions) = split_suggestions(&body);
+    if !suggestions.is_empty() {
+        let main = repair_body_only_review_point(main.trim_end().to_string(), comments_json);
+        return if main.trim().is_empty() {
+            suggestions.to_string()
+        } else {
+            format!("{main}\n\n{suggestions}")
+        };
+    }
     if comments_json_contains_items(comments_json)
         || is_no_issue_summary(&body)
         || is_structured_review_point(&body)
@@ -168,6 +177,7 @@ pub(crate) fn body_only_review_title(body: &str, fallback: &str) -> String {
 }
 
 pub(crate) fn validate_review_templates(body: &str, comments_json: Option<&str>) -> Result<(), String> {
+    let (body, _) = split_suggestions(body);
     let comments = comments_json
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
         .and_then(|value| value.get("comments").cloned())
@@ -233,6 +243,26 @@ pub(crate) fn contains_positive_finding_signal(lower: &str) -> bool {
         || lower.contains("regression")
         || lower.contains("can fail")
         || lower.contains("hide an untemplated")
+}
+
+/// Heading of the summary section that lists lower-priority suggestions instead of posting them
+/// inline. It never contains a [Finding]/[Question] marker, so suggestions never count as findings.
+pub(crate) const SUGGESTIONS_HEADING: &str = "### 💡 Suggestions";
+pub(crate) const SUGGESTIONS_INTRO: &str =
+    "Lower-priority points, such as test gaps, stale names or docs, and duplication. They are not posted as inline comments.";
+
+/// `body` split before its suggestions section: the review points, then the section (empty when
+/// there is none).
+pub(crate) fn split_suggestions(body: &str) -> (&str, &str) {
+    let start = if body.starts_with(SUGGESTIONS_HEADING) {
+        Some(0)
+    } else {
+        body.find(&format!("\n{SUGGESTIONS_HEADING}")).map(|at| at + 1)
+    };
+    match start {
+        Some(at) => (&body[..at], &body[at..]),
+        None => (body, ""),
+    }
 }
 
 /// First line of every generated finding/question. Reviews post from the user's

@@ -110,8 +110,16 @@ pub(crate) fn run_inner(
 
     // Fetch the PR head into local git objects via the git transport (github.com),
     // never the REST API. Working tree/branch untouched.
-    let fetched_head_sha = fetch_pr_head(&inputs.repo_path, inputs.number, cancel)?;
-    let head_sha = inputs.fixed_head_sha.clone().unwrap_or(fetched_head_sha);
+    let head_sha = match (&inputs.fixed_head_sha, inputs.offline) {
+        (Some(head), true) => resolve_rev_sha(&inputs.repo_path, &format!("{head}^{{commit}}"), cancel)
+            .filter(|resolved| resolved == head)
+            .ok_or("Pinned head commit is missing from the local clone")?,
+        (None, true) => return Err("An offline review needs a pinned head commit".into()),
+        (fixed, false) => {
+            let fetched_head_sha = fetch_pr_head(&inputs.repo_path, inputs.number, cancel)?;
+            fixed.clone().unwrap_or(fetched_head_sha)
+        }
+    };
 
     if inputs
         .expected_scope
@@ -354,11 +362,21 @@ pub(crate) fn run_inner(
     } else {
         None
     };
+    let deferred = crate::review::scope::focus_files(
+        &mut changed,
+        &diff,
+        usize::try_from(db.settings()?.review_focus_files).unwrap_or(0),
+    );
+    if !deferred.is_empty() {
+        diff = integration::scoped_diff(&diff, &changed, &full_pr_changed);
+    }
+    // A review that deferred files supplies no coverage at all (`deferred_files_warning`).
     let coverage_ids = if changed.is_empty() && !selection.excluded_files.is_empty() {
         Vec::new()
     } else {
         crate::review::coverage::covered_ids(&inputs.repo_path, &base_rev, &head_sha, &full_pr_diff, cancel)?
     };
+    let deferred_note = deferred_files_note(&deferred);
     if scope_reuse.is_some() && reprocessed_source.is_none() {
         scope = format!(
             "{}; {} file(s) reuse verified coverage; {} excluded, not reviewed",
@@ -626,6 +644,8 @@ pub(crate) fn run_inner(
             &risk_plan,
         )?;
         output.risk = score_review_risk(&risk_plan, &full_pr_diff, output.comments_json.as_deref());
+        output.body.push_str(&deferred_note);
+        output.evidence_warnings.extend(deferred_files_warning(&deferred));
         progress(&sharded_phase_json("ready", "ok"), "Sharded review ready for approval.");
         return Ok(output);
     }
@@ -672,6 +692,8 @@ pub(crate) fn run_inner(
         )
     })?;
     let stage_started_at = now_millis();
+    let reviewing = Instant::now();
+    budget::with(inputs, |budget| budget.plan(1, 1));
     let execution = spawn_and_supervise(
         inputs,
         cancel,
@@ -688,6 +710,7 @@ pub(crate) fn run_inner(
     );
 
     // Parse artifacts. The summary is required; comments are optional.
+    let mut lens_usage = RunUsage::default();
     let artifacts = execution.and_then(|()| {
         progress(&phase_json("review", "ok"), "AI output generated");
         progress(
@@ -724,6 +747,47 @@ pub(crate) fn run_inner(
                 )
             },
         )?;
+        budget::with(inputs, |budget| budget.reviewed(reviewing.elapsed()));
+        let materialize_to = |report: &Path, context: &Path, summary: &Path, comments: &Path| {
+            frozen::materialize(
+                inputs,
+                report,
+                context,
+                &review_map.reviewable_files,
+                &head_sha,
+                &diff,
+                summary,
+                comments,
+            )
+        };
+        let (lensed, usage) = lens::run(
+            inputs,
+            cancel,
+            progress,
+            &SpawnPaths {
+                config: &config_path,
+                prompt: &prompt_path,
+                transcript: &transcript_path,
+                stdout: &stdout_path,
+                stderr: &stderr_path,
+                progress_phase: "review",
+                sharded_progress: false,
+            },
+            &context_dir,
+            None,
+            materialize_to,
+        )?;
+        lens_usage = usage;
+        let evidence_warnings = if lensed {
+            materialize_to(
+                &run_dir.join("report.json"),
+                &context_dir,
+                &summary_path,
+                &comments_path,
+            )?
+        } else {
+            evidence_warnings
+        };
         let body = fs::read_to_string(&summary_path).unwrap_or_default().trim().to_string();
         if body.is_empty() {
             let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
@@ -769,7 +833,13 @@ pub(crate) fn run_inner(
         now_millis(),
     );
 
-    let (body, comments_json, evidence_warnings) = artifacts?;
+    let (body, comments_json, mut evidence_warnings) = artifacts?;
+    evidence_warnings.extend(deferred_files_warning(&deferred));
+    let usage = if lens_usage.by_model.is_empty() {
+        usage
+    } else {
+        sum_usage(vec![usage, lens_usage])
+    };
     let risk = score_review_risk(&risk_plan, &full_pr_diff, comments_json.as_deref());
     progress(
         &phase_json("validate", "ok"),
@@ -780,13 +850,46 @@ pub(crate) fn run_inner(
     );
     progress(&phase_json("ready", "ok"), "Review ready for approval.");
     Ok(ReviewOutput {
-        body,
+        body: body + &deferred_note,
         comments_json,
         evidence_warnings,
         usage,
         risk,
         no_new_changes: false,
     })
+}
+
+/// The summary section naming the files a focused review left out; empty when it reviewed all.
+/// A review that deferred files is limited: like any review with an evidence warning it supplies
+/// no coverage, never counts as the last reviewed head and is never clean, so nothing treats the
+/// deferred files as reviewed.
+fn deferred_files_warning(deferred: &[String]) -> Option<crate::review::warnings::EvidenceWarning> {
+    (!deferred.is_empty()).then(|| crate::review::warnings::EvidenceWarning {
+        reason: "files_not_reviewed".into(),
+        path: None,
+        reference: Some(format!("{} changed file(s) above review_focus_files", deferred.len())),
+    })
+}
+
+fn deferred_files_note(deferred: &[String]) -> String {
+    if deferred.is_empty() {
+        return String::new();
+    }
+    let listed = deferred
+        .iter()
+        .take(50)
+        .map(|path| format!("\n- `{path}`"))
+        .collect::<String>();
+    let more = deferred
+        .len()
+        .checked_sub(50)
+        .filter(|more| *more > 0)
+        .map(|more| format!("\n- and {more} more"))
+        .unwrap_or_default();
+    format!(
+        "\n\nNot reviewed ({} file(s) above the review focus limit; raise review_focus_files and re-run to cover them){listed}{more}",
+        deferred.len()
+    )
 }
 
 pub(crate) struct SpawnPaths<'a> {

@@ -188,6 +188,7 @@ pub(crate) fn start_review_job_with_intent(
                 number,
                 base_ref: expected_scope.base_ref.clone(),
                 fixed_head_sha: None,
+                offline: false,
                 expected_scope: Some(expected_scope),
                 prior_scope,
                 last_reviewed_sha,
@@ -205,6 +206,7 @@ pub(crate) fn start_review_job_with_intent(
                 review_parallel_chunks: settings.review_parallel_chunks.clamp(1, 20) as usize,
                 db_handle: Some(db_handle.clone()),
                 archive_dir: state.config.archive_dir(),
+                budget: None,
             };
             Ok(inputs)
         })();

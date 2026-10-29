@@ -36,6 +36,7 @@ logs/
 .tmp/
 tmp/
 cache/
+bench/results/
 
 # Python bytecode from the Docker diagnostics
 __pycache__/

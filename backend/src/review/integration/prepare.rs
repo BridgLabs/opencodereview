@@ -77,6 +77,9 @@ fn shared_inputs(master: &Path) -> Result<BTreeMap<String, Input>, String> {
     Ok(output)
 }
 
+/// Candidates one final-integration batch verifies before it is split by files.
+pub(crate) const MAX_BATCH_CANDIDATES: usize = 30;
+
 pub(crate) fn prepare(
     inputs: &ReviewInputs,
     master: &Path,
@@ -136,7 +139,11 @@ pub(crate) fn prepare(
             .validate_assigned(&task.files, &diff, before)
             .map_err(|error| error.to_string())?;
         let mut files = shared_inputs(master)?;
-        for path in &task.files {
+        for path in task
+            .files
+            .iter()
+            .filter(|path| !crate::review_archive::in_agent_folder(path))
+        {
             match frozen.archive.resolve(&frozen.archive.scope().head_sha, path) {
                 Ok(_) => {
                     files.insert(format!("context/changed/{path}"), Input::Source(path.clone()));
@@ -243,10 +250,22 @@ pub(crate) fn prepare(
             .checked_add(stage.len() + "context/STAGE.json".len())
             .ok_or("Integration input size overflow")?;
         files.insert("context/STAGE.json".into(), Input::Text(stage));
+        // Every candidate gets its own verification, so a crowded batch can outlast the stage
+        // time limit; it is split by files, never dropping a candidate.
+        let crowded = task.ids.len() > MAX_BATCH_CANDIDATES
+            && payload
+                .originals()
+                .iter()
+                .filter(|candidate| task.ids.iter().any(|id| candidate["candidateId"] == *id))
+                .filter_map(|candidate| candidate["comment"]["path"].as_str())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                > 1;
         let fits = bytes <= evidence_limit.min(crate::review::policy::MAX_EVIDENCE_BYTES)
             && prompt.len() <= crate::review::policy::MAX_PROMPT_BYTES
             && files.len() <= 5000
-            && task.files.len() <= 1000;
+            && task.files.len() <= 1000
+            && !crowded;
         if !fits {
             if task.files.len() > 1 {
                 let middle = task.files.len() / 2;

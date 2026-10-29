@@ -66,3 +66,46 @@ fn unmapped_keep_and_missing_context_are_incomplete() {
         assert!(validate_decisions(&sources, Some(&decisions), r#"{"comments":[]}"#).is_err());
     }
 }
+
+#[test]
+fn a_saved_selection_keeps_the_summary_suggestions() {
+    let section = crate::review::evidence::suggestions_section(&[
+        json!({"path":"src/a.rs","line":2,"title":"Stale test name","detail":"Detail","action":"Rename it"}),
+    ]);
+    let comment = json!({"path":"src/a.rs","line":3,"side":"RIGHT","body":"Finding body"});
+    let audit = FindingAudit {
+        evidence_warnings: None,
+        head_sha: "head".into(),
+        complete: true,
+        original_body: format!("Automated review produced 1 inline comment(s).\n\n{section}"),
+        diff: None,
+        candidates: vec![FindingCandidate {
+            id: "candidate-1".into(),
+            kind: "finding".into(),
+            origin: "chunk".into(),
+            chunk_id: Some(1),
+            ai_decision: "keep".into(),
+            ai_reason: None,
+            default_selected: true,
+            selected: true,
+            blocked_reason: None,
+            comment: Some(comment),
+            body: "Finding body".into(),
+            original_body: None,
+        }],
+    };
+    let (body, comments) = selection_payload(&audit);
+    assert!(
+        body.starts_with("1 review comments selected for publication."),
+        "{body}"
+    );
+    assert!(body.ends_with(section.trim()), "{body}");
+    assert!(comments.contains("Finding body"));
+    // A general finding in the body carries the section too; it is listed once.
+    let mut general = audit.clone();
+    general.candidates[0].comment = None;
+    general.candidates[0].body = format!("**[Finding] General**\n\nDetail\n\n{section}");
+    let (body, _) = selection_payload(&general);
+    assert_eq!(body.matches(crate::review::SUGGESTIONS_HEADING).count(), 1, "{body}");
+    assert!(body.starts_with("**[Finding] General**"), "{body}");
+}

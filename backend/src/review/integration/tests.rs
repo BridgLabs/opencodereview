@@ -143,10 +143,7 @@ fn all_binary_frozen_review_paths_keep_explicit_preflight_failure() {
 
 #[test]
 fn private_artifacts_are_omitted_from_bound_diffs_and_report_coverage() {
-    let files = vec![
-        "src/media.ts".to_string(),
-        ".windsurf/skills/api-perf-investigate/SKILL.md".to_string(),
-    ];
+    let files = vec!["src/media.ts".to_string(), ".windsurf/settings.local.json".to_string()];
     let inputs = frozen_inputs(
         &files
             .iter()
@@ -193,11 +190,7 @@ fn private_artifacts_are_omitted_from_bound_diffs_and_report_coverage() {
 #[test]
 fn private_artifacts_only_keep_explicit_preflight_failure() {
     for (index, path, reason) in [
-        (
-            0,
-            ".windsurf/skills/api-perf-investigate/SKILL.md",
-            "PrivateConfiguration",
-        ),
+        (0, ".windsurf/settings.local.json", "PrivateConfiguration"),
         (1, ".env.test", "PrivatePath"),
     ] {
         let files = vec![path.to_string()];
@@ -779,10 +772,18 @@ fn adaptive_integration_validates_batches_and_remaps_decisions() {
         .to_string(),
     )
     .unwrap();
-    assert!(
-        validate_output(&inputs, stage, &payload, HEAD).is_err(),
-        "unknown candidate ids must fail"
-    );
+    // A fabricated decision adds nothing: every real candidate keeps its chunk-validated comment,
+    // marked unconfirmed.
+    let output = validate_output(&inputs, stage, &payload, HEAD).unwrap();
+    assert_eq!(output.decisions.len(), stage.candidate_ids.len());
+    assert!(output
+        .decisions
+        .iter()
+        .all(|decision| decision["candidateId"] != "unknown-candidate"));
+    assert!(output
+        .evidence_warnings
+        .iter()
+        .any(|warning| warning.reason == "unconfirmed_candidate"));
     let duplicate: Vec<Value> = stage
         .candidate_ids
         .iter()
@@ -801,9 +802,11 @@ fn adaptive_integration_validates_batches_and_remaps_decisions() {
         .to_string(),
     )
     .unwrap();
-    assert!(
-        validate_output(&inputs, stage, &payload, HEAD).is_err(),
-        "duplicate candidate ids must fail"
+    let output = validate_output(&inputs, stage, &payload, HEAD).unwrap();
+    assert_eq!(
+        output.decisions.len(),
+        stage.candidate_ids.len(),
+        "duplicate decisions collapse to one per candidate"
     );
     let mut tampered: Vec<Value> = stage
         .candidate_ids
@@ -1138,9 +1141,15 @@ fn final_identical_duplicates_remap_original_decisions_without_losing_other_find
             .len(),
         3
     );
+    // A keep pointing past the report leaves that candidate undecided: it keeps its chunk comment.
     decisions["decisions"][1]["commentIndex"] = json!(3);
     fs::write(&path, decisions.to_string()).unwrap();
-    assert!(validate_output(&inputs, stage, &payload, HEAD).is_err());
+    let output = validate_output(&inputs, stage, &payload, HEAD).unwrap();
+    assert_eq!(output.decisions.len(), 2);
+    assert!(output
+        .evidence_warnings
+        .iter()
+        .any(|warning| warning.reason == "unconfirmed_candidate"));
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -1150,7 +1159,7 @@ fn read_report_value(path: &Path) -> Value {
 
 #[test]
 fn final_output_repair_preserves_distinct_findings_and_decision_indices() {
-    for (index, mode) in ["keep", "changed", "missing"].into_iter().enumerate() {
+    for (index, mode) in ["keep", "changed", "missing", "reworded"].into_iter().enumerate() {
         let alter_decision = mode == "changed";
         let files = vec!["src/shared.rs".to_string()];
         let inputs = frozen_inputs(&[(files[0].clone(), LINE.into())]);
@@ -1197,14 +1206,19 @@ fn final_output_repair_preserves_distinct_findings_and_decision_indices() {
             &stage.directory.join("transcript.json"),
             &AtomicBool::new(false),
             true,
+            true,
             || validate_output(&inputs, stage, &payload, HEAD),
             |_| {
                 attempts += 1;
                 fake_final(&inputs, stage, &payload);
-                if alter_decision {
+                if alter_decision || mode == "reworded" {
                     let path = stage.directory.join("finding_decisions.json");
                     let mut decisions: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-                    decisions["decisions"][0]["commentIndex"] = json!(1);
+                    if alter_decision {
+                        decisions["decisions"][0]["commentIndex"] = json!(1);
+                    } else {
+                        decisions["decisions"][0]["reason"] = json!("Reworded by the repair");
+                    }
                     fs::write(path, decisions.to_string()).unwrap();
                 }
                 Ok(())
@@ -1216,8 +1230,19 @@ fn final_output_repair_preserves_distinct_findings_and_decision_indices() {
             assert!(!stage.directory.join("rejected-report.json").exists());
             assert_eq!(read_report_value(&stage.directory.join("report.json")), invalid);
         } else if alter_decision {
-            assert!(output.err().unwrap().contains("changed candidate decisions"));
+            // The repair that changed a decision is set aside; the report as first written then
+            // drops its one invalid finding and keeps the other.
+            let output = output.unwrap();
+            assert_eq!(output.decisions.len(), 2);
+            let report = read_report_value(&stage.directory.join("report.json"));
+            assert_eq!(report["findings"].as_array().unwrap().len(), 1);
+            assert!(output
+                .evidence_warnings
+                .iter()
+                .any(|warning| warning.reason == "dropped_finding"));
         } else {
+            let decisions = read_report_value(&stage.directory.join("finding_decisions.json"));
+            assert_ne!(decisions["decisions"][0]["reason"], json!("Reworded by the repair"));
             let output = output.unwrap();
             assert_eq!(output.comments.len(), 2);
             let (_, comments, _evidence_warnings) = combine(
@@ -1674,4 +1699,137 @@ fn prepared_prompt_budget_includes_snapshot_read_instructions() {
     assert_eq!(prompt.matches(instructions).count(), 1);
     assert!(prompt.len() <= crate::review::policy::MAX_PROMPT_BYTES);
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn crowded_integration_splits_by_files_without_dropping_candidates() {
+    let files: Vec<String> = (0..2).map(|i| format!("src/file-{i}.rs")).collect();
+    let inputs = frozen_inputs(&files.iter().map(|f| (f.clone(), LINE.to_string())).collect::<Vec<_>>());
+    let (root, context, map, diff) = fixture(-1204, &inputs, &files);
+    let results: Vec<ChunkResult> = files
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let points = (0..20)
+                .map(|issue| point(path, &format!("Issue {index}-{issue}"), "Inspect the value"))
+                .collect();
+            chunk_result(&inputs, &root, (index + 1) as i64, path, points, vec![], vec![])
+        })
+        .collect();
+    let sources = merge_chunk_findings(&results, HEAD);
+    let payload = Payload::from_results(&results, sources).unwrap();
+    let stages = prepare(
+        &inputs,
+        &context,
+        &map,
+        &diff,
+        &root.join("batches"),
+        &payload,
+        crate::review::policy::MAX_EVIDENCE_BYTES,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(stages.len(), 2);
+    assert!(stages
+        .iter()
+        .all(|stage| stage.candidate_ids.len() <= super::prepare::MAX_BATCH_CANDIDATES));
+    let ids = stages
+        .iter()
+        .flat_map(|stage| stage.candidate_ids.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(ids.len(), payload.originals().len());
+}
+
+#[test]
+fn a_batch_skipped_for_time_keeps_its_chunk_findings_unconfirmed() {
+    let files = vec!["src/shared.rs".to_string()];
+    let inputs = frozen_inputs(&[(files[0].clone(), LINE.into())]);
+    let (root, context, map, diff) = fixture(-9400, &inputs, &files);
+    let result = chunk_result(
+        &inputs,
+        &root,
+        1,
+        &files[0],
+        vec![
+            point(&files[0], "Same title", "First defect"),
+            point(&files[0], "Same title", "Second defect"),
+        ],
+        vec![],
+        vec![],
+    );
+    let sources = merge_chunk_findings(std::slice::from_ref(&result), HEAD);
+    let payload = Payload::from_results(&[result], sources).unwrap();
+    let stages = prepare(
+        &inputs,
+        &context,
+        &map,
+        &diff,
+        &root.join("batches"),
+        &payload,
+        crate::review::policy::MAX_EVIDENCE_BYTES,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    let output = unconfirmed(&stages[0], &payload, HEAD).unwrap();
+    assert_eq!(output.decisions.len(), 2);
+    assert!(output
+        .evidence_warnings
+        .iter()
+        .all(|warning| warning.reason == "unconfirmed_candidate"));
+    let (_, comments, warnings) = combine(
+        &inputs,
+        &payload,
+        vec![output],
+        &map.reviewable_files,
+        HEAD,
+        &diff,
+        &root,
+    )
+    .unwrap();
+    let comments: Value = serde_json::from_str(&comments).unwrap();
+    assert_eq!(comments["comments"].as_array().unwrap().len(), 2);
+    assert!(!warnings.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn chunk_suggestions_go_to_the_final_summary_not_to_the_final_pass() {
+    let suggestion =
+        json!({"path":"src/a.rs","line":2,"title":"Stale test name","detail":"Detail","action":"Rename it"});
+    let result = ChunkResult {
+        cached: false,
+        chunk: ReviewChunk {
+            id: 1,
+            files: vec!["src/a.rs".into()],
+            related_files: vec![],
+            global_context_files: vec![],
+            omitted_convention_files: vec![],
+            risk_triggers: vec![],
+            cross_chunk_group_ids: vec![],
+        },
+        summary:
+            json!({"reviewedFiles":["src/a.rs"],"missingEvidence":[],"findings":[],"suggestions":[suggestion.clone()]})
+                .to_string(),
+        comments_json: Some(json!({"commit_id":HEAD,"comments":[]}).to_string()),
+        evidence_warnings: vec![],
+        usage: RunUsage::default(),
+    };
+    let results = vec![result.clone()];
+    let payload = Payload::from_results(&results, merge_chunk_findings(&results, HEAD)).unwrap();
+    assert_eq!(payload.suggestions, std::slice::from_ref(&suggestion));
+    assert!(payload
+        .notes
+        .iter()
+        .all(|(_, note)| note["report"].get("suggestions").is_none()));
+    // A report whose findings do not line up with its candidates goes as text, without them too.
+    let mut unstructured = result;
+    unstructured.summary = json!({"reviewedFiles":["src/a.rs"],"missingEvidence":[],
+        "findings":[{"path":"src/a.rs","line":9}],"suggestions":[suggestion.clone()]})
+    .to_string();
+    let results = vec![unstructured];
+    let payload = Payload::from_results(&results, merge_chunk_findings(&results, HEAD)).unwrap();
+    assert_eq!(payload.suggestions, [suggestion]);
+    let (_, note) = &payload.notes[0];
+    assert!(note["report"].is_null());
+    assert!(!note["summary"].as_str().unwrap().contains("Stale test name"), "{note}");
 }
