@@ -872,6 +872,12 @@ pub(crate) fn review_has_findings(comments_json: Option<&str>, review_body: Opti
         || !review_suggestions(review_body).is_empty()
 }
 
+/// Whether a review has points a finding selection chooses from: inline comments or a finding or
+/// question in its body. A review with only suggestions has none and publishes without one.
+pub(crate) fn review_has_selectable_points(comments_json: Option<&str>, review_body: Option<&str>) -> bool {
+    comments_json_has_findings(comments_json) || review_body_has_findings(review_body)
+}
+
 /// The suggestions section of a review body, or "" when it has none.
 pub(crate) fn review_suggestions(review_body: Option<&str>) -> &str {
     review_body.map_or("", |body| review::split_suggestions(body).1.trim())
@@ -920,14 +926,15 @@ pub(crate) fn auto_post_review(
 ) -> Result<AutoPostReview, String> {
     let manual_selection = db.review_requires_finding_selection(run.id)?;
     validate_live_review_scope(db, run.id, full_name, number, &run.head_sha, repo_path)?;
-    let selection_revision = if manual_selection {
-        Some(
-            db.auto_confirm_generated_finding_selection(pr_id, run.id)?
-                .ok_or("No safe generated finding selection is available; human confirmation is required.")?,
-        )
-    } else {
-        None
-    };
+    let selection_revision =
+        if manual_selection && review_has_selectable_points(run.comments_json.as_deref(), run.review_body.as_deref()) {
+            Some(
+                db.auto_confirm_generated_finding_selection(pr_id, run.id)?
+                    .ok_or("No safe generated finding selection is available; human confirmation is required.")?,
+            )
+        } else {
+            None
+        };
     let run = db
         .review_run_by_id(run.id)?
         .ok_or("Review run disappeared during automatic confirmation.")?;

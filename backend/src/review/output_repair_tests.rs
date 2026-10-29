@@ -779,3 +779,31 @@ fn without_time_for_a_repair_the_repair_gets_the_error_of_the_point_left() {
     // The first finding was dropped; the repair is told about the one left, at line 98.
     assert!(diagnostic.contains("code.rs:98"), "{diagnostic}");
 }
+
+#[test]
+fn the_only_finding_is_never_dropped_for_a_suggestion_left_alone() {
+    let fixture = Fixture::new();
+    let valid = &fixture.report["findings"][0];
+    let suggestion = json!({
+        "title": "No test covers the retry", "detail": "Fixture detail", "action": "Add a test",
+        "path": valid["path"].clone(), "line": valid["line"].clone(), "evidence": valid["evidence"].clone(),
+        "counterEvidence": valid["counterEvidence"].clone(),
+    });
+    let mut invalid = valid.clone();
+    invalid["evidence"][0]["path"] = json!("absent/elsewhere.rs");
+    let mut report = fixture.report.clone();
+    report["findings"] = json!([invalid]);
+    report["suggestions"] = json!([suggestion]);
+    fixture.write(&report);
+    let error = fixture
+        .run(&AtomicBool::new(false), |_| panic!("an absent path is not repairable"))
+        .unwrap_err();
+    assert!(error.contains("absent"), "{error}");
+    assert_eq!(
+        read_json(&fixture.directory.join("report.json")).unwrap()["findings"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
