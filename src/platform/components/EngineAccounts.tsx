@@ -3,7 +3,7 @@ import { ArrowLeft, Check } from "lucide-react";
 import { useState } from "react";
 import { ClaudeSignIn, ClaudeTokenSignIn, CodexSignIn } from "../../components/AccessConnect";
 import { cx } from "../../components/DesignSystem";
-import type { AiAccount } from "../../types";
+import type { AiAccount, UsageWindow } from "../../types";
 import {
   accountHealth,
   accountStatusText,
@@ -16,14 +16,25 @@ import {
 
 type Provider = AiAccount["provider"];
 
+/** When the account has plan left again: the latest reset among its used-up windows, if any is ahead. */
+function usedUpUntil(windows: UsageWindow[], now = Date.now()) {
+  const resets = windows
+    .filter((window) => percentLeft(window) === 0)
+    .map((window) => (window.resetsAt === null ? NaN : new Date(window.resetsAt).getTime()))
+    .filter((at) => Number.isFinite(at) && at > now);
+  return resets.length ? Math.max(...resets) : null;
+}
+
 /** What a row says about an account: how much is left beside its name, or, under it, why it
  * can't take reviews now. The full status is in the row's tooltip. */
-function accountNote(account: AiAccount, left: number | null, now = Date.now()) {
+function accountNote(account: AiAccount, windows: UsageWindow[], left: number | null, now = Date.now()) {
   const health = accountHealth(account, now);
   if (health === "signed-out") return "Signed out";
   if (health === "resting") return `Limit reached · resets in ${relative((account.limitedUntil ?? now) - now)}`;
-  if (health === "paused") return left === null ? "Paused" : `Paused · ${left}% left`;
-  return left === null ? "" : `${left}% left`;
+  const until = usedUpUntil(windows, now);
+  const amount = until === null ? (left === null ? null : `${left}% left`) : `Resets in ${relative(until - now)}`;
+  if (health === "paused") return amount === null ? "Paused" : `Paused · ${amount}`;
+  return amount ?? "";
 }
 
 /** The provider's signed-in accounts; choosing one makes new reviews start on it. */
@@ -71,7 +82,7 @@ export function AccountChoices({
               <span className="truncate">{account.label}</span>
               {unavailable && (
                 <span className={cx("truncate text-caption", health === "resting" ? "text-warning" : "text-danger")}>
-                  {accountNote(account, left)}
+                  {accountNote(account, windows, left)}
                 </span>
               )}
             </span>
@@ -82,7 +93,7 @@ export function AccountChoices({
                   left !== null && left <= 10 ? "text-danger" : "text-fg-subtle",
                 )}
               >
-                {accountNote(account, left)}
+                {accountNote(account, windows, left)}
               </span>
             )}
           </button>
