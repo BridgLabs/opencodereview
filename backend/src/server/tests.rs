@@ -677,10 +677,10 @@ fn findings_review_payload_lists_each_inline_comment_in_a_table() {
         format!("<sub>🤖 Automated review by OpenCodeReview</sub>\n\n**[{kind}] {title}**\n\nDetails.")
     };
     let comments = serde_json::json!({ "comments": [
-        { "path": "db/migrate/0042_billing_schema.sql", "line": 18, "body": point("Finding", "Rollback drops invoices written after deploy") },
+        { "path": "db/migrate/0042_billing_schema.sql", "line": 18, "body": format!("{}\n\n<!-- ocr:severity=high -->", point("Finding", "Rollback drops invoices written after deploy")) },
         { "path": "src/billing/invoices.ts", "line": 57, "body": point("Question", "Should the old schema stay readable during deploy?") },
         { "path": "src/billing/total.ts", "body": point("Finding", "Totals use `a | b` instead of `a || b`") },
-        { "body": point("Finding", "Missing rollout note") },
+        { "body": format!("{}\n\n<!-- ocr:severity=low -->", point("Finding", "Missing rollout note")) },
     ]});
     let payload = build_review_payload(
         "owner/repo",
@@ -697,10 +697,10 @@ fn findings_review_payload_lists_each_inline_comment_in_a_table() {
     assert_eq!(value["body"].as_str().unwrap(), "### ⚠️ OpenCodeReview found 3 issues and 1 question\n\n\
 Reviewed [`5c540aa1`](https://github.com/owner/repo/commit/5c540aa1234567). Each issue below has the details and a suggested fix.\n\n\
 | | Issue | Where |\n|---|---|---|\n\
-| ⚠️ | Rollback drops invoices written after deploy | `db/migrate/0042_billing_schema.sql:18` |\n\
-| ❓ | Should the old schema stay readable during deploy? | `src/billing/invoices.ts:57` |\n\
-| ⚠️ | Totals use `a \\| b` instead of `a \\|\\| b` | `src/billing/total.ts` |\n\
-| ⚠️ | Missing rollout note | General |\n\n\
+| 🔴 | Rollback drops invoices written after deploy | `db/migrate/0042_billing_schema.sql:18` |\n\
+| 🟠 | Totals use `a \\| b` instead of `a \\|\\| b` | `src/billing/total.ts` |\n\
+| 🟡 | Missing rollout note | General |\n\
+| ❓ | Should the old schema stay readable during deploy? | `src/billing/invoices.ts:57` |\n\n\
 <sub>Reviewed by [OpenCodeReview](https://github.com/BridgLabs/opencodereview).</sub>\n\n\
 <!-- ocr-review-post:v1 run=7 -->");
 }
@@ -716,7 +716,7 @@ fn findings_summary_headings_count_questions_and_truncate_long_titles() {
     assert!(questions.starts_with("### ❓ OpenCodeReview has 2 questions\n\n"));
     let single = posted_findings_review_body("owner/repo", "abcdef1234", &[point("Finding", &"x".repeat(300))]);
     assert!(single.starts_with("### ⚠️ OpenCodeReview found 1 issue\n\n"));
-    assert!(single.contains(&format!("| ⚠️ | {}… | `a.rs:1` |", "x".repeat(119))));
+    assert!(single.contains(&format!("| 🟠 | {}… | `a.rs:1` |", "x".repeat(119))));
 }
 
 #[test]

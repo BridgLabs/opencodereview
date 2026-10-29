@@ -792,6 +792,7 @@ fn renderer_preserves_required_templates() {
                 quote: "tenant".into(),
             }],
             counter_evidence: vec![],
+            severity: None,
         };
         assert!(crate::review::is_structured_review_point(&render(&point)));
     }
@@ -836,9 +837,9 @@ fn report_shape_errors_name_the_field_path() {
     assert_eq!(super::report_shape_error(&report), None);
     let cases = [
         (
-            "/findings/0/severity",
+            "/findings/0/priority",
             json!("high"),
-            "report.findings[0]: unknown field `severity`",
+            "report.findings[0]: unknown field `priority`",
         ),
         (
             "/findings/0/evidence/0/line",
@@ -884,7 +885,7 @@ fn report_shape_errors_name_the_field_path() {
         Some("report.findings[0]: unknown field (unnamed)")
     );
     let mut extra = report.clone();
-    extra["findings"][0]["severity"] = json!("high");
+    extra["findings"][0]["priority"] = json!("high");
     assert_eq!(super::schema_report_fields(extra), report);
 }
 
@@ -1022,4 +1023,36 @@ fn a_review_with_only_suggestions_keeps_its_summary_as_written() {
     );
     crate::review::validate_review_templates(&body, Some(r#"{"comments":[]}"#)).unwrap();
     assert!(suggestions_section(&[]).is_empty());
+}
+
+#[test]
+fn findings_carry_their_severity_and_questions_none() {
+    let point = |kind: &str, severity: Option<&str>| Point {
+        kind: kind.into(),
+        title: "Boundary".into(),
+        detail: "Wrong tenant".into(),
+        action: "Check tenant".into(),
+        path: "src/auth.rs".into(),
+        line: 1,
+        side: "RIGHT".into(),
+        evidence: vec![],
+        counter_evidence: vec![],
+        severity: severity.map(str::to_string),
+    };
+    for (given, read) in [
+        (Some("high"), "high"),
+        (Some("Critical"), "high"),
+        (Some("low"), "low"),
+        (Some("urgent"), "medium"),
+        (None, "medium"),
+    ] {
+        assert_eq!(
+            comment_severity(&render(&point("finding", given))),
+            Some(read),
+            "{given:?}"
+        );
+    }
+    assert_eq!(comment_severity(&render(&point("question", Some("high")))), None);
+    // The marker is an HTML comment: GitHub never shows it.
+    assert!(render(&point("finding", Some("high"))).ends_with("\n\n<!-- ocr:severity=high -->"));
 }

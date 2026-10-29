@@ -120,7 +120,7 @@ fn repairs_invalid_final_anchors_and_chunk_quotes_with_unchanged_frozen_evidence
         if kind == "anchor" {
             invalid["findings"][0]["line"] = json!(99);
         } else if kind == "unknown-field" {
-            invalid["findings"][0]["severity"] = json!("high");
+            invalid["findings"][0]["priority"] = json!("high");
         } else if kind == "field-type" {
             invalid["findings"][0]["evidence"][0]["line"] = json!("1");
         } else if kind == "quote" {
@@ -516,7 +516,7 @@ fn repair_is_bounded_preserves_usage_and_keeps_cancellation_distinct() {
 fn schema_repair_cannot_change_reported_content() {
     let fixture = Fixture::new();
     let mut invalid = fixture.report.clone();
-    invalid["findings"][0]["severity"] = json!("high");
+    invalid["findings"][0]["priority"] = json!("high");
     fixture.write(&invalid);
     let mut changed = fixture.report.clone();
     changed["findings"][0]["title"] = json!("Another conclusion");
