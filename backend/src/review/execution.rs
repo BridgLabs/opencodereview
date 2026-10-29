@@ -370,25 +370,11 @@ pub(crate) fn run_inner(
     if !deferred.is_empty() {
         diff = integration::scoped_diff(&diff, &changed, &full_pr_changed);
     }
-    // Files left out are not covered, so the next review picks them up: the coverage lists only
-    // the files reviewed, their diff, and no per-commit patch ids (`coverage::partial_ids`).
-    let (covered_files, covered_diff) = if deferred.is_empty() {
-        (full_pr_changed.clone(), full_pr_diff.clone())
-    } else {
-        let covered = full_pr_changed
-            .iter()
-            .filter(|path| !deferred.contains(path))
-            .cloned()
-            .collect::<Vec<_>>();
-        let diff = integration::scoped_diff(&full_pr_diff, &covered, &full_pr_changed);
-        (covered, diff)
-    };
+    // A review that deferred files supplies no coverage at all (`deferred_files_warning`).
     let coverage_ids = if changed.is_empty() && !selection.excluded_files.is_empty() {
         Vec::new()
-    } else if deferred.is_empty() {
-        crate::review::coverage::covered_ids(&inputs.repo_path, &base_rev, &head_sha, &covered_diff, cancel)?
     } else {
-        crate::review::coverage::partial_ids(&inputs.repo_path, &covered_diff, cancel)?
+        crate::review::coverage::covered_ids(&inputs.repo_path, &base_rev, &head_sha, &full_pr_diff, cancel)?
     };
     let deferred_note = deferred_files_note(&deferred);
     if scope_reuse.is_some() && reprocessed_source.is_none() {
@@ -420,10 +406,10 @@ pub(crate) fn run_inner(
         base_sha: &base_rev,
         merge_base_sha: &merge_base_sha,
         head_sha: &head_sha,
-        changed_files: &covered_files,
+        changed_files: &full_pr_changed,
         covered_patch_ids: &coverage_ids,
-        diff_hash: &crate::review::coverage::diff_hash(&covered_diff),
-        diff_text: &covered_diff,
+        diff_hash: &crate::review::coverage::diff_hash(&full_pr_diff),
+        diff_text: &full_pr_diff,
         source_json: coverage_source.as_deref(),
     })?;
     progress(
@@ -659,6 +645,7 @@ pub(crate) fn run_inner(
         )?;
         output.risk = score_review_risk(&risk_plan, &full_pr_diff, output.comments_json.as_deref());
         output.body.push_str(&deferred_note);
+        output.evidence_warnings.extend(deferred_files_warning(&deferred));
         progress(&sharded_phase_json("ready", "ok"), "Sharded review ready for approval.");
         return Ok(output);
     }
@@ -843,7 +830,8 @@ pub(crate) fn run_inner(
         now_millis(),
     );
 
-    let (body, comments_json, evidence_warnings) = artifacts?;
+    let (body, comments_json, mut evidence_warnings) = artifacts?;
+    evidence_warnings.extend(deferred_files_warning(&deferred));
     let usage = if lens_usage.by_model.is_empty() {
         usage
     } else {
@@ -869,6 +857,17 @@ pub(crate) fn run_inner(
 }
 
 /// The summary section naming the files a focused review left out; empty when it reviewed all.
+/// A review that deferred files is limited: like any review with an evidence warning it supplies
+/// no coverage, never counts as the last reviewed head and is never clean, so nothing treats the
+/// deferred files as reviewed.
+fn deferred_files_warning(deferred: &[String]) -> Option<crate::review::warnings::EvidenceWarning> {
+    (!deferred.is_empty()).then(|| crate::review::warnings::EvidenceWarning {
+        reason: "files_not_reviewed".into(),
+        path: None,
+        reference: Some(format!("{} changed file(s) above review_focus_files", deferred.len())),
+    })
+}
+
 fn deferred_files_note(deferred: &[String]) -> String {
     if deferred.is_empty() {
         return String::new();
@@ -885,7 +884,7 @@ fn deferred_files_note(deferred: &[String]) -> String {
         .map(|more| format!("\n- and {more} more"))
         .unwrap_or_default();
     format!(
-        "\n\nNot reviewed ({} file(s) above the review focus limit; a later review covers them){listed}{more}",
+        "\n\nNot reviewed ({} file(s) above the review focus limit; raise review_focus_files and re-run to cover them){listed}{more}",
         deferred.len()
     )
 }

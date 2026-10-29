@@ -59,6 +59,7 @@ pub(crate) fn append(body: &str, warnings: &[EvidenceWarning]) -> String {
                 "has a finding kept as validated in its chunk; the final pass gave it no decision"
             }
             "dropped_finding" => "had a point dropped because its evidence did not validate",
+            "files_not_reviewed" => "left changed files unreviewed; they are listed above",
             _ => "reported an evidence limitation",
         };
         result.push_str(&format!("\n> - {affected}: {reason}. "));
@@ -95,6 +96,19 @@ mod tests {
         assert!(!rendered.contains("\n> injected"));
         assert!(!rendered.contains("<script>"));
         assert_eq!(append("Result", &[]), "Result");
+    }
+
+    #[test]
+    fn deferred_files_are_a_warning_that_limits_the_review() {
+        let rendered = append(
+            "Result",
+            &[EvidenceWarning {
+                reason: "files_not_reviewed".into(),
+                path: None,
+                reference: Some("3 changed file(s) above review_focus_files".into()),
+            }],
+        );
+        assert!(rendered.contains("Review scope: left changed files unreviewed; they are listed above. 3 changed file\\(s\\) above review\\_focus\\_files"), "{rendered}");
     }
 
     #[test]
