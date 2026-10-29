@@ -537,6 +537,15 @@ pub(crate) fn mark_no_change_recovery_needed(db: &Database, inputs: &review::Rev
     );
 }
 
+/// One line per finished review saying what automatic publication did with it, so a review that
+/// waits for a person when auto-post is on always says why.
+fn log_auto_post(inputs: &review::ReviewInputs, outcome: &str) {
+    eprintln!(
+        "auto-post {}#{} run {}: {outcome}",
+        inputs.full_name, inputs.number, inputs.run_id
+    );
+}
+
 pub(crate) fn handle_completed_review(
     db: &Database,
     inputs: &review::ReviewInputs,
@@ -544,6 +553,7 @@ pub(crate) fn handle_completed_review(
     has_findings: bool,
 ) {
     let Ok(Some(run)) = db.review_run_by_id(inputs.run_id) else {
+        log_auto_post(inputs, "not attempted: the review run is no longer readable");
         return;
     };
     let prior = db.review_result(inputs.pr_id).ok().flatten();
@@ -554,6 +564,7 @@ pub(crate) fn handle_completed_review(
         .unwrap_or_else(|_| "off".to_string());
     let auto_post_findings = has_findings && matches!(mode.as_str(), "comment" | "request_changes");
     if has_findings && db.review_requires_finding_selection(run.id).unwrap_or(true) && !auto_post_findings {
+        log_auto_post(inputs, &format!("left for a decision: auto_post_mode is {mode}"));
         let _ = db.mark_review_ready_for_run(inputs.pr_id, run.id);
         let _ = db.set_pr_lane(
             inputs.pr_id,
@@ -578,6 +589,7 @@ pub(crate) fn handle_completed_review(
     }
 
     if no_new_changes {
+        log_auto_post(inputs, "not attempted: no new changes since the previous result");
         let legacy = prior
             .is_none()
             .then(|| {
@@ -643,6 +655,7 @@ pub(crate) fn handle_completed_review(
     }
 
     if !has_findings {
+        log_auto_post(inputs, "clean result: publishing the no-issues status");
         let result = reserve_effective_review_result(
             db,
             &run,
@@ -684,6 +697,7 @@ pub(crate) fn handle_completed_review(
             event,
         ) {
             Ok(AutoPostReview::Posted(review_id)) => {
+                log_auto_post(inputs, "posted");
                 let review_url = review_id.map(|id| {
                     format!(
                         "https://github.com/{}/pull/{}#pullrequestreview-{id}",
@@ -715,7 +729,7 @@ pub(crate) fn handle_completed_review(
                     }
                 }
             }
-            Ok(AutoPostReview::Superseded) => (),
+            Ok(AutoPostReview::Superseded) => log_auto_post(inputs, "superseded by a new PR head"),
             Err(error) => {
                 let superseded = github::live_pr_state(&inputs.full_name, inputs.number)
                     .is_ok_and(|live| live.state != "OPEN" || live.head_sha != run.head_sha);
@@ -728,6 +742,7 @@ pub(crate) fn handle_completed_review(
                     return;
                 }
                 let reason = format!("Auto-post failed: {error}");
+                log_auto_post(inputs, &reason);
                 let _ = db.set_pr_lane(inputs.pr_id, "ready", Some(&reason));
                 let _ = reserve_effective_review_result(
                     db,
@@ -746,6 +761,7 @@ pub(crate) fn handle_completed_review(
             }
         }
     } else {
+        log_auto_post(inputs, &format!("left for a decision: auto_post_mode is {mode}"));
         let _ = reserve_effective_review_result(
             db,
             &run,
@@ -829,6 +845,11 @@ pub(crate) fn run_review_job(
                     let has_findings = review_has_findings(output.comments_json.as_deref(), Some(&output.body));
                     handle_completed_review(&db, &inputs, output.no_new_changes, has_findings);
                     coverage_finalized = true;
+                } else {
+                    log_auto_post(
+                        &inputs,
+                        "not attempted: the run was no longer running when its review finished",
+                    );
                 }
             }
             Err(_) if superseded.load(Ordering::Relaxed) => {
