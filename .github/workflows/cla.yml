@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   cla:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft && (github.event_name == 'pull_request_target' || github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the OpenCodeReview Contributor Assignment Agreement 1.2 and I agree to it.')
     steps:
