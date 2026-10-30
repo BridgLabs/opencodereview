@@ -71,7 +71,7 @@ const DEFAULT_REVIEW_SHARD_THRESHOLD: usize = 20;
 const DEFAULT_MAX_PARALLEL_REVIEW_CHUNKS: usize = 6;
 const CHUNK_SCOPE_NOTE: &str = "Business-context checks are resolved in Final.\n";
 const GIT_TIMEOUT_SECS: u64 = 120;
-pub(crate) const REVIEW_PROMPT_VERSION: &str = "review-v20-root-cause";
+pub(crate) const REVIEW_PROMPT_VERSION: &str = "review-v21-root-cause-file";
 /// Accounts a single stage may move through after usage limits or rejected sign-ins.
 pub(crate) const MAX_ACCOUNT_FAILOVERS: usize = 8;
 static CLAUDE_HOME_COUNTER: AtomicU64 = AtomicU64::new(0);
