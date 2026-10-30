@@ -1,0 +1,37 @@
+name: Docker smoke
+
+# Called by ci.yml. A separate file, so ci.yml edits do not rebuild the images: the changes job runs
+# this only when the images, the sandbox or this file change.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    name: Build and smoke
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
+        with:
+          persist-credentials: false
+
+      # BuildKit keeps its layers and cache mounts on a Blacksmith sticky disk, so the release build of
+      # the server reuses the last run's compile instead of starting from nothing.
+      - name: Setup Docker builder
+        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2.2.0
+        with:
+          cache-key: opencodereview/compose-images
+
+      - name: Validate Compose file
+        run: docker compose config --quiet
+
+      - name: Build images
+        run: docker compose build
+
+      # Fake inference: no credentials and no paid calls.
+      - name: Runner sandbox smoke
+        run: python3 -u docker/runner-smoke.py
