@@ -60,8 +60,9 @@ jobs:
                 frontend=true
                 ;;
             esac
+            # The server embeds files from assets/ (include_bytes!, include_str!) and tests them.
             case "$file" in
-              backend/*|Cargo.toml|Cargo.lock)
+              backend/*|assets/*|Cargo.toml|Cargo.lock)
                 backend=true
                 ;;
             esac
