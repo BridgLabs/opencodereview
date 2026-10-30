@@ -412,7 +412,9 @@ Run every checklist hit FIRST (blind to any prior comments), THEN filter:
 
 - A **Finding** is an evidenced defect with a concrete minimal fix: wrong
   results, crashes, security, data loss or corruption, concurrency, broken
-  contracts or callers. Findings are posted inline, next to the code.
+  contracts or callers. Each finding names its trigger: who calls the code,
+  with which input or state, and what then goes wrong. Findings are posted
+  inline, next to the code.
 - A **Suggestion** is an evidenced lower-priority point of one of these kinds
   only: a missing or weak test, a test name, comment, doc or message left
   stale, duplication, dead code, naming or style. Suggestions are listed
