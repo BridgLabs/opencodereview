@@ -392,8 +392,10 @@ Run every checklist hit FIRST (blind to any prior comments), THEN filter:
 - **Rank & cap** — rank survivors by impact first, confidence second, ease of
   fix third. Keep a cap of ~40 findings/questions; if more survive,
   keep the top-ranked — EXCEPT critical security findings, which are never
-  capped. Report each distinct location of a problem as its own finding, since
-  each needs its own fix; merge only findings on the same lines.
+  capped. Report one finding per root cause: when the same defect recurs at
+  several locations (sibling functions, both branches, each caller left
+  behind), report it once at the location that matters most and name the
+  other locations in its detail, so the author makes one fix decision.
 - **Known suppressions (do NOT flag)** — tool-owned lint/format/type/SAST
   issues; missing tests for docs-only, type-only, or shim/re-export changes that
   don't change runtime behavior; pure presentational/refactor changes with no
