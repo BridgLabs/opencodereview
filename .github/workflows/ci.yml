@@ -31,6 +31,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       backend: ${{ steps.filter.outputs.backend }}
       docker: ${{ steps.filter.outputs.docker }}
+      scripts: ${{ steps.filter.outputs.scripts }}
       dependencies: ${{ steps.filter.outputs.dependencies }}
     steps:
       - name: Checkout
@@ -51,40 +52,76 @@ jobs:
           frontend=false
           backend=false
           docker=false
+          scripts=false
           dependencies=false
           while IFS= read -r file; do
             case "$file" in
-              src/*|assets/*|site/*|scripts/*|index.html|package.json|pnpm-lock.yaml|knip.json|biome.json|tsconfig*.json|vite.config.*|.github/workflows/ci.yml)
+              src/*|assets/*|site/*|scripts/*|index.html|package.json|pnpm-lock.yaml|knip.json|biome.json|tsconfig*.json|vite.config.*)
                 frontend=true
                 ;;
             esac
             case "$file" in
-              backend/*|Cargo.toml|Cargo.lock|deny.toml|.github/workflows/ci.yml|docker/*)
+              backend/*|Cargo.toml|Cargo.lock)
                 backend=true
                 ;;
             esac
-            # The image build and sandbox smoke cost several minutes, so they run only when the
-            # images or the sandbox change. Other code is covered by the frontend and backend jobs,
-            # and the Release workflow builds the images again before publishing.
+            # The image build and sandbox smoke cost several minutes, so they run only when what the
+            # images are built from changes, or the sandbox. Other code is covered by the frontend and
+            # backend jobs, and the Release workflow builds the images again before publishing.
             case "$file" in
-              docker/*|docker-compose.yml|.dockerignore|backend/src/sandbox/*|Cargo.lock|.github/workflows/docker-smoke.yml)
+              docker/Dockerfile*|docker/*.sh|docker/*.conf|docker/postgres/*|docker/ocr-docker-cleanup|docker/runner-smoke.py|docker-compose.yml|.dockerignore|backend/src/sandbox/*|Cargo.lock|.github/workflows/docker-smoke.yml)
                 docker=true
                 ;;
             esac
+            # The maintainer scripts in docker/ and the web proxy config have their own Python tests.
             case "$file" in
-              Cargo.toml|Cargo.lock|backend/Cargo.toml|deny.toml|package.json|pnpm-lock.yaml|.github/workflows/ci.yml)
+              docker/*.py|docker/web-nginx*.conf)
+                scripts=true
+                ;;
+            esac
+            case "$file" in
+              Cargo.toml|Cargo.lock|backend/Cargo.toml|deny.toml|package.json|pnpm-lock.yaml)
                 dependencies=true
                 ;;
             esac
           done < changed-files.txt
 
+          # An edit to this workflow runs the jobs whose definition it changed. An edit outside the
+          # jobs (triggers, env, concurrency) or to this filter can change any of them, so it runs all.
+          if grep -qx '.github/workflows/ci.yml' changed-files.txt; then
+            git show "$BASE:.github/workflows/ci.yml" > ci-base.yml 2>/dev/null || : > ci-base.yml
+            changed=$(python3 - <<'PY' || echo all
+          import yaml
+          base = yaml.safe_load(open("ci-base.yml")) or {}
+          head = yaml.safe_load(open(".github/workflows/ci.yml"))
+          jobs_base, jobs_head = base.pop("jobs", {}), head.pop("jobs", {})
+          if base != head:
+              print("all")
+          else:
+              print(" ".join(sorted(job for job in set(jobs_base) | set(jobs_head) if jobs_base.get(job) != jobs_head.get(job))))
+          PY
+            )
+            echo "Changed in ci.yml: ${changed:-nothing}"
+            for job in $changed; do
+              case "$job" in
+                all|changes) frontend=true; backend=true; docker=true; scripts=true; dependencies=true ;;
+                frontend) frontend=true ;;
+                backend-lint|backend-test) backend=true ;;
+                docker) docker=true ;;
+                scripts) scripts=true ;;
+                dependencies) dependencies=true ;;
+              esac
+            done
+          fi
+
           {
             echo "frontend=$frontend"
             echo "backend=$backend"
             echo "docker=$docker"
+            echo "scripts=$scripts"
             echo "dependencies=$dependencies"
           } >> "$GITHUB_OUTPUT"
-          echo "Frontend: $frontend, backend: $backend, Docker: $docker, dependencies: $dependencies"
+          echo "Frontend: $frontend, backend: $backend, Docker: $docker, scripts: $scripts, dependencies: $dependencies"
 
   file-size:
     name: Source file-size guard
@@ -173,9 +210,6 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Web proxy behavior regression
-        run: python3 -B docker/test-web-proxy.py
-
   backend-lint:
     name: Backend lint
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -211,8 +245,23 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+  scripts:
+    name: Docker script tests
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 10
+    needs: changes
+    if: needs.changes.outputs.scripts == 'true'
+    steps:
+      - name: Checkout
+        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
+        with:
+          persist-credentials: false
+
       - name: Diagnostic regression tests
         run: python3 -B docker/test_diagnostics.py
+
+      - name: Web proxy behavior regression
+        run: python3 -B docker/test-web-proxy.py
 
   backend-test:
     name: Backend test (${{ matrix.shard }}/8)
@@ -339,7 +388,7 @@ jobs:
     name: check
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
-    needs: [changes, file-size, docs, frontend, backend-lint, backend-test, dependencies, docker]
+    needs: [changes, file-size, docs, frontend, backend-lint, scripts, backend-test, dependencies, docker]
     if: ${{ always() && !github.event.pull_request.draft }}
     steps:
       - name: Require every job to succeed or be skipped
