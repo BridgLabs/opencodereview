@@ -134,6 +134,7 @@ beforeEach(async () => {
     reviewChunkSize: 5,
     reviewParallelChunks: 2,
     reviewMaxFiles: 100,
+    reviewSuggestionsEnabled: false,
     prSummaryCommentEnabled: false,
     reviewResultMode: "silent",
     autoPostMode: "off",
@@ -236,6 +237,19 @@ describe("settings workspace", () => {
     await inputValue(concurrency, "8");
     await act(async () => button("Save changes").click());
     expect(vi.mocked(setupApi.saveSettingsBatch).mock.calls[0][0]).toEqual({ settings: { review_concurrency: "8" } });
+  });
+
+  it("leaves suggestions off by default and saves turning them on", async () => {
+    await navigate("PR selection");
+    expect(container.textContent).toContain("Post suggestions");
+    expect(button("Off").classList.contains("active")).toBe(true);
+    await act(async () => button("On").click());
+    expect(button("On").classList.contains("active")).toBe(true);
+    await act(async () => button("Save changes").click());
+    expect(vi.mocked(setupApi.saveSettingsBatch).mock.calls[0][0]).toEqual({
+      settings: { review_suggestions_enabled: "true" },
+    });
+    expect(client.getQueryData<Settings>(["setup", "settings", "review"])!.reviewSuggestionsEnabled).toBe(true);
   });
 
   it("keeps one global action pair and saves changes from every section together", async () => {

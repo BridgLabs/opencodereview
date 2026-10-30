@@ -27,6 +27,7 @@ pub fn execute(
             }
         }
         let db = inputs.open_db()?;
+        output.body = kept_review_body(&db, &output.body);
         let source_audit = db
             .load_finding_audit(inputs.run_id)?
             .ok_or("Finding evidence snapshot is unavailable")?;
@@ -857,6 +858,17 @@ pub(crate) fn run_inner(
         risk,
         no_new_changes: false,
     })
+}
+
+/// `body` as the review keeps it, in its stored body and its audit. Reviews still list
+/// suggestions, so low-priority points never turn into findings, but only the
+/// `review_suggestions_enabled` setting (off by default) keeps them for posting.
+pub(crate) fn kept_review_body(db: &crate::db::Database, body: &str) -> String {
+    if db.settings().is_ok_and(|settings| settings.review_suggestions_enabled) {
+        body.to_string()
+    } else {
+        crate::review::without_suggestions(body)
+    }
 }
 
 /// The summary section naming the files a focused review left out; empty when it reviewed all.

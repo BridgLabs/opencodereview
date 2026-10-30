@@ -341,7 +341,13 @@ fn legacy_merge_with_only_excluded_delta_finishes_without_inference() {
         reprocess: false,
         skill_content: "Review correctness".into(),
         unresolved_review_head: None,
-        unresolved_review_body: None,
+        // With suggestions off (the default) the review keeps none, not even a pending one's.
+        unresolved_review_body: Some(format!(
+            "No findings.\n\n{}",
+            crate::review::evidence::suggestions_section(&[serde_json::json!(
+                {"path":"code.rs","line":1,"title":"Stale test name","detail":"Detail","action":"Rename it"}
+            )])
+        )),
         pr_title: "Sync main".into(),
         pr_body: String::new(),
         model: "fixture".into(),
@@ -357,6 +363,9 @@ fn legacy_merge_with_only_excluded_delta_finishes_without_inference() {
     assert!(output.no_new_changes);
     assert!(output.body.contains("pnpm-lock.yaml") && output.body.contains("excluded, not reviewed"));
     assert!(output.body.contains("not a new clean review"));
+    assert!(!output.body.contains("Suggestions"), "{}", output.body);
+    let audit = db.load_finding_audit(run).unwrap().unwrap();
+    assert!(!audit.original_body.contains("Suggestions"));
     let plan = db.context_plan_for_review_run(run).unwrap().unwrap();
     assert!(plan.changed_files.is_empty());
     let selection = plan.scope_selection.unwrap();

@@ -51,7 +51,7 @@ def main():
     if args.pr is not None:
         command += ["--pr", str(args.pr)]
     command += ["-e", f"RB_CONFIG_PROVIDER={args.provider}"]
-    for name in ("RB_CONFIG_MODEL", "RB_CONFIG_EFFORT", "RB_CONFIG_MAX_FILES", "RB_CONFIG_FOCUS_FILES", "RB_CONFIG_LENS_PASS", "RB_CONFIG_DIFF_RENAMES", "RB_CONFIG_DEADLINE_SECS"):
+    for name in ("RB_CONFIG_MODEL", "RB_CONFIG_EFFORT", "RB_CONFIG_MAX_FILES", "RB_CONFIG_FOCUS_FILES", "RB_CONFIG_LENS_PASS", "RB_CONFIG_SUGGESTIONS", "RB_CONFIG_DIFF_RENAMES", "RB_CONFIG_DEADLINE_SECS"):
         if os.environ.get(name):
             command += ["-e", f"{name}={os.environ[name]}"]
     # try-agent.sh forwards variables, not files: a sign-in file travels as its contents.

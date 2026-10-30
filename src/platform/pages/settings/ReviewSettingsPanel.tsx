@@ -71,6 +71,17 @@ export function ReviewSettingsPanel({
           onChange={(value) => onSave("poll_interval_seconds", value)}
         />
       </SettingsGroup>
+      <SettingsGroup title="Review comments" description="Choose what a review posts besides its findings.">
+        <SettingChoice
+          title="Post suggestions"
+          description="Lower-priority notes, such as tests, docs and naming, listed in a collapsed section of the review summary. Off posts only findings and questions."
+          options={["true", "false"]}
+          labels={{ true: "On", false: "Off" }}
+          value={String(settings.reviewSuggestionsEnabled)}
+          disabled={loading}
+          onChange={(value) => onSave("review_suggestions_enabled", value)}
+        />
+      </SettingsGroup>
       <SettingsGroup title="Title filters" description="Skip low-value PRs by keyword.">
         <TokenEditor
           label="Ignored keywords"

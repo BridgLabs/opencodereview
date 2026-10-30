@@ -86,6 +86,9 @@ pub struct Settings {
     /// Runs one more execution per review stage that looks for what the first pass usually
     /// misses (tests, docs, maintainability, API shape) and adds only new findings.
     pub review_lens_pass: bool,
+    /// Lists the review's lower-priority suggestions (tests, docs, naming) in a collapsed section
+    /// of its summary. Off by default: a review then posts only its findings and questions.
+    pub review_suggestions_enabled: bool,
     pub dismiss_stale_approvals: bool,
     pub auto_index_stale_repos: bool,
     /// Opt-in auto-post mode when a finished review HAS findings, instead of waiting
