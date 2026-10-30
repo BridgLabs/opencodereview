@@ -625,17 +625,56 @@ fn render(point: &Point) -> String {
     }
 }
 
+/// Title words that tell two suggestions apart: lowercase, without edge punctuation, short words
+/// and fillers.
+fn title_words(title: &str) -> HashSet<String> {
+    const FILLERS: &[&str] = &[
+        "the", "and", "for", "its", "this", "that", "with", "not", "now", "still",
+    ];
+    title
+        .split_whitespace()
+        .map(|word| word.trim_matches(|c: char| ".,:;'\"`()".contains(c)).to_lowercase())
+        .filter(|word| word.chars().count() > 2 && !FILLERS.contains(&word.as_str()))
+        .collect()
+}
+
+/// Whether a suggestion repeats one already listed: the same title in the same file, or a title
+/// sharing at least half its words within three lines of it. Chunk and final stages can each
+/// report the same point in their own words.
+fn repeats(
+    listed: &(String, i64, String, HashSet<String>),
+    path: &str,
+    line: i64,
+    title: &str,
+    words: &HashSet<String>,
+) -> bool {
+    let (listed_path, listed_line, listed_title, listed_words) = listed;
+    if listed_path != path {
+        return false;
+    }
+    if *listed_title == title {
+        return true;
+    }
+    let union = listed_words.union(words).count();
+    (listed_line - line).abs() <= 3 && union > 0 && 2 * listed_words.intersection(words).count() >= union
+}
+
 /// The summary section listing validated suggestions (`path`, `line`, `title`, `detail`, `action`),
-/// one per path and title, or nothing when there are none.
+/// without repeats, or nothing when there are none.
 pub(crate) fn suggestions_section(suggestions: &[serde_json::Value]) -> String {
-    let mut seen = HashSet::new();
+    let mut listed: Vec<(String, i64, String, HashSet<String>)> = Vec::new();
     let items = suggestions
         .iter()
         .filter(|item| {
-            seen.insert((
-                item["path"].as_str().unwrap_or_default().to_string(),
-                item["title"].as_str().unwrap_or_default().trim().to_lowercase(),
-            ))
+            let path = item["path"].as_str().unwrap_or_default();
+            let line = item["line"].as_i64().unwrap_or_default();
+            let title = item["title"].as_str().unwrap_or_default().trim().to_lowercase();
+            let words = title_words(&title);
+            if listed.iter().any(|seen| repeats(seen, path, line, &title, &words)) {
+                return false;
+            }
+            listed.push((path.to_string(), line, title, words));
+            true
         })
         .map(|item| {
             let field = |key: &str| {
