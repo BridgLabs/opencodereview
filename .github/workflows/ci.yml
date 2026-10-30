@@ -336,13 +336,15 @@ jobs:
     uses: ./.github/workflows/docker-smoke.yml
 
   # The required check. It runs on every event, on the smallest runner, so a pull request never
-  # merges on a skipped `check`: GitHub counts a skipped required check as passed.
+  # merges on a skipped `check`: GitHub counts a skipped required check as passed. Dependabot's own
+  # events are the exception and run nothing, so its pull requests show `check` as skipped until a
+  # maintainer adds the `ci` label (the labeling event's actor is the maintainer).
   check:
     name: check
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     needs: [changes, file-size, docs, frontend, backend-lint, backend-test, dependencies, docker]
-    if: always()
+    if: always() && (github.actor != 'dependabot[bot]' || github.event.label.name == 'ci')
     permissions:
       checks: read
     steps:
