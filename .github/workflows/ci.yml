@@ -2,12 +2,11 @@ name: CI
 
 # Only pull requests are checked. The main ruleset requires branches up to date with main before
 # they merge, so what lands on main is exactly what was checked; a second run on main would repeat
-# it. The jobs run on paid runners, so they start only when a maintainer adds the `ci` label: opening
-# a pull request or pushing to it runs nothing but the `check` gate. To check a later push,
-# remove the label and add it again. Only people with triage access can add labels.
+# it. Every push to a pull request is checked; draft pull requests wait until they are marked ready
+# for review.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -15,11 +14,9 @@ permissions:
 env:
   RUST_TOOLCHAIN: "1.98.1"
 
-# A push cancels the run on the commit it replaces, the `ci` label's included. Every other event
-# (opened, reopened, ready for review, other labels) keeps the same commit, so it gets its own group
-# and does not cancel a run the `ci` label started.
+# A push cancels the run on the commit it replaces.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event.action == 'synchronize' || github.event.label.name == 'ci' }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Third-party actions are pinned to a full commit SHA, with the release in a comment: a tag can be
@@ -27,7 +24,7 @@ concurrency:
 jobs:
   changes:
     name: Detect changed areas
-    if: github.event.label.name == 'ci'
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     outputs:
@@ -91,7 +88,7 @@ jobs:
 
   file-size:
     name: Source file-size guard
-    if: github.event.label.name == 'ci'
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
@@ -108,7 +105,7 @@ jobs:
 
   docs:
     name: Documentation links
-    if: github.event.label.name == 'ci'
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
@@ -336,21 +333,16 @@ jobs:
     if: needs.changes.outputs.docker == 'true'
     uses: ./.github/workflows/docker-smoke.yml
 
-  # The required check. It runs on every event, on the smallest runner, so a pull request never
-  # merges on a skipped `check`: GitHub counts a skipped required check as passed. Dependabot's own
-  # events are the exception and run nothing, so its pull requests show `check` as skipped until a
-  # maintainer adds the `ci` label (the labeling event's actor is the maintainer).
+  # The required check, on the smallest runner. It is skipped only for a draft, which cannot merge:
+  # GitHub counts a skipped required check as passed.
   check:
     name: check
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     needs: [changes, file-size, docs, frontend, backend-lint, backend-test, dependencies, docker]
-    if: always() && (github.actor != 'dependabot[bot]' || github.event.label.name == 'ci')
-    permissions:
-      checks: read
+    if: ${{ always() && !github.event.pull_request.draft }}
     steps:
       - name: Require every job to succeed or be skipped
-        if: github.event.label.name == 'ci'
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
@@ -362,19 +354,3 @@ jobs:
             esac
           done
 
-      # A push or another label runs no jobs. This commit passes only if the `ci` label already
-      # checked it, which keeps a later label from turning a failed or missing run into a pass.
-      - name: Require a passed run on this commit
-        if: github.event.label.name != 'ci'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          passed=$(gh api "repos/$REPO/commits/$SHA/check-runs?check_name=check&per_page=100" \
-            --jq '[.check_runs[] | select(.conclusion == "success")] | length')
-          if [ "$passed" -eq 0 ]; then
-            echo "::error::CI has not run on this commit. A maintainer starts it with the ci label."
-            exit 1
-          fi
-          echo "A previous run passed on $SHA"
