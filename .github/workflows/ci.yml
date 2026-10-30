@@ -15,10 +15,11 @@ permissions:
 env:
   RUST_TOOLCHAIN: "1.98.1"
 
-# A push cancels the run on the commit it replaces, the `ci` label's included. Other labels get their
-# own group, so adding one does not cancel a run the `ci` label started.
+# A push cancels the run on the commit it replaces, the `ci` label's included. Every other event
+# (opened, reopened, ready for review, other labels) keeps the same commit, so it gets its own group
+# and does not cancel a run the `ci` label started.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event.action != 'labeled' || github.event.label.name == 'ci' }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event.action == 'synchronize' || github.event.label.name == 'ci' }}
   cancel-in-progress: true
 
 # Third-party actions are pinned to a full commit SHA, with the release in a comment: a tag can be
