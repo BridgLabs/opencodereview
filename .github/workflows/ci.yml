@@ -3,7 +3,7 @@ name: CI
 # Only pull requests are checked. The main ruleset requires branches up to date with main before
 # they merge, so what lands on main is exactly what was checked; a second run on main would repeat
 # it. The jobs run on paid runners, so they start only when a maintainer adds the `ci` label: opening
-# a pull request or pushing to it runs nothing but the free `check` gate. To check a later push,
+# a pull request or pushing to it runs nothing but the `check` gate. To check a later push,
 # remove the label and add it again. Only people with triage access can add labels.
 on:
   pull_request:
@@ -334,11 +334,11 @@ jobs:
     if: needs.changes.outputs.docker == 'true'
     uses: ./.github/workflows/docker-smoke.yml
 
-  # The required check. It runs on every event, on a free runner, so a pull request never merges on a
-  # skipped `check`: GitHub counts a skipped required check as passed.
+  # The required check. It runs on every event, on the smallest runner, so a pull request never
+  # merges on a skipped `check`: GitHub counts a skipped required check as passed.
   check:
     name: check
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     needs: [changes, file-size, docs, frontend, backend-lint, backend-test, dependencies, docker]
     if: always()

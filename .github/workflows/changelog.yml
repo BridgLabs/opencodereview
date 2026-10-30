@@ -19,7 +19,7 @@ jobs:
     name: Release notes
     # Dependabot and draft pull requests skip CI to save Actions minutes.
     if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - name: Checkout
