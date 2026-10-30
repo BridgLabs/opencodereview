@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   cla:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft && (github.event_name == 'pull_request_target' || github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the OpenCodeReview Contributor Assignment Agreement 1.2 and I agree to it.')
     steps:
@@ -27,6 +27,6 @@ jobs:
           path-to-document: https://github.com/BridgLabs/opencodereview/blob/main/CLA.md
           path-to-signatures: signatures/cla-assignment-1.2.json
           branch: cla-signatures
-          allowlist: bpinheiroms,dependabot[bot]
+          allowlist: bpinheiroms,dependabot[bot],blacksmith-sh[bot]
           custom-pr-sign-comment: I have read the OpenCodeReview Contributor Assignment Agreement 1.2 and I agree to it.
           custom-notsigned-prcomment: Thank you for your contribution. Before it can be merged, each author signs the [OpenCodeReview Contributor Assignment Agreement](https://github.com/BridgLabs/opencodereview/blob/main/CLA.md), which assigns the copyright in the contribution to the maintainer. To sign, add a comment with the line below.

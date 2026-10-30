@@ -2,10 +2,12 @@ name: CI
 
 # Only pull requests are checked. The main ruleset requires branches up to date with main before
 # they merge, so what lands on main is exactly what was checked; a second run on main would repeat
-# it. Draft pull requests wait until they are marked ready for review.
+# it. The jobs run on paid runners, so they start only when a maintainer adds the `ci` label: opening
+# a pull request or pushing to it runs nothing but the `check` gate. To check a later push,
+# remove the label and add it again. Only people with triage access can add labels.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
 
 permissions:
   contents: read
@@ -13,8 +15,11 @@ permissions:
 env:
   RUST_TOOLCHAIN: "1.98.1"
 
+# A push cancels the run on the commit it replaces, the `ci` label's included. Every other event
+# (opened, reopened, ready for review, other labels) keeps the same commit, so it gets its own group
+# and does not cancel a run the `ci` label started.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event.action == 'synchronize' || github.event.label.name == 'ci' }}
   cancel-in-progress: true
 
 # Third-party actions are pinned to a full commit SHA, with the release in a comment: a tag can be
@@ -22,9 +27,8 @@ concurrency:
 jobs:
   changes:
     name: Detect changed areas
-    # Dependabot and draft pull requests skip CI to save Actions minutes.
-    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
-    runs-on: ubuntu-latest
+    if: github.event.label.name == 'ci'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     outputs:
       frontend: ${{ steps.filter.outputs.frontend }}
@@ -33,7 +37,7 @@ jobs:
       dependencies: ${{ steps.filter.outputs.dependencies }}
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -66,7 +70,7 @@ jobs:
             # images or the sandbox change. Other code is covered by the frontend and backend jobs,
             # and the Release workflow builds the images again before publishing.
             case "$file" in
-              docker/*|docker-compose.yml|.dockerignore|backend/src/sandbox/*|Cargo.lock|.github/workflows/ci.yml)
+              docker/*|docker-compose.yml|.dockerignore|backend/src/sandbox/*|Cargo.lock|.github/workflows/docker-smoke.yml)
                 docker=true
                 ;;
             esac
@@ -87,13 +91,12 @@ jobs:
 
   file-size:
     name: Source file-size guard
-    # Dependabot and draft pull requests skip CI to save Actions minutes.
-    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
-    runs-on: ubuntu-latest
+    if: github.event.label.name == 'ci'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
         with:
           persist-credentials: false
       - name: Setup Node
@@ -105,13 +108,12 @@ jobs:
 
   docs:
     name: Documentation links
-    # Dependabot and draft pull requests skip CI to save Actions minutes.
-    if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
-    runs-on: ubuntu-latest
+    if: github.event.label.name == 'ci'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
         with:
           persist-credentials: false
       # Offline: only links between files of this repository and their heading anchors. External
@@ -124,13 +126,13 @@ jobs:
 
   frontend:
     name: Frontend typecheck and build
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
         with:
           persist-credentials: false
 
@@ -179,7 +181,7 @@ jobs:
 
   backend-lint:
     name: Backend lint
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     needs: changes
     if: needs.changes.outputs.backend == 'true'
@@ -187,7 +189,7 @@ jobs:
       CARGO_INCREMENTAL: "0"
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
         with:
           persist-credentials: false
 
@@ -217,7 +219,7 @@ jobs:
 
   backend-test:
     name: Backend test (${{ matrix.shard }}/8)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     needs: changes
     if: needs.changes.outputs.backend == 'true'
@@ -250,7 +252,7 @@ jobs:
       SHARDS: 8
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
         with:
           persist-credentials: false
 
@@ -302,13 +304,13 @@ jobs:
 
   dependencies:
     name: Dependency audit
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     needs: changes
     if: needs.changes.outputs.dependencies == 'true'
     steps:
       - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
         with:
           persist-credentials: false
 
@@ -327,36 +329,28 @@ jobs:
       - name: npm dependencies
         run: pnpm audit --audit-level high
 
+  # In its own file, so editing this workflow does not rebuild the images.
   docker:
     name: Docker images and sandbox smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
     needs: changes
     if: needs.changes.outputs.docker == 'true'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
+    uses: ./.github/workflows/docker-smoke.yml
 
-      - name: Validate Compose file
-        run: docker compose config --quiet
-
-      - name: Build images
-        run: docker compose build
-
-      # Fake inference: no credentials and no paid calls.
-      - name: Runner sandbox smoke
-        run: python3 -u docker/runner-smoke.py
-
+  # The required check. It runs on every event, on the smallest runner, so a pull request never
+  # merges on a skipped `check`: GitHub counts a skipped required check as passed. Dependabot's own
+  # events are the exception and run nothing, so its pull requests show `check` as skipped until a
+  # maintainer adds the `ci` label (the labeling event's actor is the maintainer).
   check:
     name: check
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     needs: [changes, file-size, docs, frontend, backend-lint, backend-test, dependencies, docker]
-    if: always() && github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
+    if: always() && (github.actor != 'dependabot[bot]' || github.event.label.name == 'ci')
+    permissions:
+      checks: read
     steps:
       - name: Require every job to succeed or be skipped
+        if: github.event.label.name == 'ci'
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
@@ -367,3 +361,20 @@ jobs:
               *) echo "A required job finished with: $result"; exit 1 ;;
             esac
           done
+
+      # A push or another label runs no jobs. This commit passes only if the `ci` label already
+      # checked it, which keeps a later label from turning a failed or missing run into a pass.
+      - name: Require a passed run on this commit
+        if: github.event.label.name != 'ci'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          passed=$(gh api "repos/$REPO/commits/$SHA/check-runs?check_name=check&per_page=100" \
+            --jq '[.check_runs[] | select(.conclusion == "success")] | length')
+          if [ "$passed" -eq 0 ]; then
+            echo "::error::CI has not run on this commit. A maintainer starts it with the ci label."
+            exit 1
+          fi
+          echo "A previous run passed on $SHA"
