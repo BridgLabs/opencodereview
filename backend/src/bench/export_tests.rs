@@ -33,7 +33,7 @@ fn body(kind: &str, title: &str, detail: &str, action: &str) -> String {
     } else {
         ("\u{1f50e} Details", "\u{1f6e0}\u{fe0f} Suggested fix")
     };
-    format!("<sub>\u{1f916} Automated review by OpenCodeReview</sub>\n\n**[{kind}] {title}**\n\n{detail}\n\n<details>\n<summary>{details}</summary>\n\n{detail}\n\nWhy: src/pool.rs:4 (abc)\n\n</details>\n\n<details>\n<summary>{fix}</summary>\n\n{action}\n\n</details>\n\n<details>\n<summary>\u{1f916} Prompt for AI Agents</summary>\n\n```text\nfix it\n```\n\n</details>")
+    format!("<sub>\u{1f916} Automated review by OpenCodeReview</sub>\n\n**[{kind}] {title}**\n\n{detail}\n\n<details>\n<summary>{details}</summary>\n\nWhy: src/pool.rs:4 (abc)\n\n</details>\n\n<details>\n<summary>{fix}</summary>\n\n{action}\n\n</details>\n\n<details>\n<summary>\u{1f916} Prompt for AI Agents</summary>\n\n```text\nfix it\n```\n\n</details>")
 }
 
 #[test]
