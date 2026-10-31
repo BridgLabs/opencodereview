@@ -11,20 +11,13 @@ permissions:
 jobs:
   docker:
     name: Build and smoke
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      # BuildKit keeps its layers and cache mounts on a Blacksmith sticky disk, so the release build of
-      # the server reuses the last run's compile instead of starting from nothing.
-      - name: Setup Docker builder
-        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2.2.0
-        with:
-          cache-key: opencodereview/compose-images
 
       - name: Validate Compose file
         run: docker compose config --quiet

@@ -22,13 +22,13 @@ jobs:
   canary:
     name: Newest provider CLIs
     if: github.repository == 'BridgLabs/opencodereview'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 75
     permissions:
       contents: read
     steps:
       - name: Checkout
-        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -55,7 +55,7 @@ jobs:
     name: Report a failed canary
     needs: canary
     if: always() && github.repository == 'BridgLabs/opencodereview'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
