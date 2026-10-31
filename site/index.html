@@ -133,7 +133,7 @@
             "name": "How is it different from CodeRabbit or Greptile?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "They are hosted services billed per developer. OpenCodeReview runs on your own machine, its code is on GitHub, and it reviews with the AI plan you already pay for."
+              "text": "They are hosted services billed per developer or per review. OpenCodeReview runs on your own machine, its code is on GitHub, and it reviews with the AI plan you already pay for."
             }
           },
           {
@@ -173,6 +173,7 @@
       <a class="logo" href="#top" aria-label="OpenCodeReview home"><svg style="color:var(--mascot)"><use href="#bubble" /></svg>OpenCodeReview</a>
       <nav class="nav-links" aria-label="Sections">
         <a href="#how">How it works</a>
+        <a href="#compare">Compare</a>
         <a href="#pricing">Pricing</a>
         <a href="#faq">FAQ</a>
       </nav>
@@ -313,6 +314,29 @@
       </div>
     </section>
 
+    <section id="compare" class="wrap">
+      <div class="center reveal">
+        <h2 class="h2">Why not CodeRabbit or Greptile?</h2>
+        <p class="section-lede">Both are good hosted tools. You pay them, and your code goes through their cloud.</p>
+      </div>
+      <div class="compare reveal">
+        <table>
+          <thead><tr><th scope="col"><span class="sr-only">Compared on</span></th><th scope="col" class="us"><span class="us-name"><svg width="26" height="26" style="color:var(--mascot)"><use href="#bubble" /></svg>OpenCodeReview</span></th><th scope="col">CodeRabbit</th><th scope="col">Greptile</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">What you pay</th><td class="us"><svg class="tick" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><div><b>$0</b><small>On the Claude or ChatGPT plan you already have</small></div></td><td><b>From $24</b><small>Per developer, per month</small></td><td><b>$1 to $10</b><small>Per review, after 50 free a month for one developer</small></td></tr>
+            <tr><th scope="row">Where it runs</th><td class="us"><svg class="tick" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><div><b>Your machine</b><small>Anywhere Docker runs</small></div></td><td><b>Their cloud</b><small>Self-hosting on Enterprise</small></td><td><b>Their cloud</b><small>Self-hosting on Enterprise</small></td></tr>
+            <tr><th scope="row">Who sees your code</th><td class="us"><svg class="tick" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><div><b>You and your AI provider</b><small>Nothing passes through us</small></div></td><td><b>Them</b><small>And the AI providers they use</small></td><td><b>Them</b><small>And the AI providers they use</small></td></tr>
+            <tr><th scope="row">The model</th><td class="us"><svg class="tick" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><div><b>Your choice</b><small>Claude Code or Codex, on your account</small></div></td><td><b>Theirs</b><small>Picked by them</small></td><td><b>Theirs</b><small>Picked by them</small></td></tr>
+            <tr><th scope="row">Source code</th><td class="us"><svg class="tick" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><div><b>On GitHub</b><small>Read every line</small></div></td><td><b>Closed</b></td><td><b>Closed</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="compare-note reveal">
+        <p>Pick them if you'd rather not run anything yourself, or your code lives on GitLab or Bitbucket.</p>
+        <small>Prices from the <a href="https://www.coderabbit.ai/pricing">CodeRabbit</a> and <a href="https://www.greptile.com/pricing">Greptile</a> pricing pages, October 2026.</small>
+      </div>
+    </section>
+
     <section id="pricing" class="wrap">
       <div class="price reveal">
         <div>
@@ -341,7 +365,7 @@
           <details><summary>Is OpenCodeReview really free?</summary><p>For individuals and companies under 100 people and $1M in yearly revenue, yes, including commercial use. Larger companies need a commercial license: write to <a href="mailto:contato@bridglabs.com">contato@bridglabs.com</a>. Reviews run on your own Claude or ChatGPT account, so the only cost is what you already pay your AI provider.</p></details>
           <details><summary>Which plans work?</summary><p>Claude Pro, Max or Team through Claude Code, and ChatGPT plans that include Codex. Local models are not supported. You can connect several accounts; when one hits its usage limit, the review continues on the next.</p></details>
           <details><summary>Where does my code go?</summary><p>It stays on the machine that runs OpenCodeReview. Reviews call your AI provider with your own sign-in, the same way its CLI does when you use it yourself.</p></details>
-          <details><summary>How is it different from CodeRabbit or Greptile?</summary><p>They are hosted services billed per developer. OpenCodeReview runs on your own machine, its code is on GitHub, and it reviews with the AI plan you already pay for.</p></details>
+          <details><summary>How is it different from CodeRabbit or Greptile?</summary><p>They are hosted services billed per developer or per review. OpenCodeReview runs on your own machine, its code is on GitHub, and it reviews with the AI plan you already pay for.</p></details>
           <details><summary>Does my laptop need to stay on?</summary><p>Reviews run while OpenCodeReview is running. For reviews around the clock, run it on any always-on machine with Docker, such as a small VPS or a home server.</p></details>
         </div>
       </div>
@@ -359,7 +383,7 @@
   <footer>
     <div class="wrap">
       <span>© 2026 BRIDG LABS LTDA</span>
-      <nav aria-label="Footer"><a href="#how">How it works</a><a href="#pricing">Pricing</a><a href="https://github.com/BridgLabs/opencodereview#readme">Docs</a><a href="https://github.com/BridgLabs/opencodereview/blob/main/CONTRIBUTING.md">Contributing</a><a href="https://github.com/BridgLabs/opencodereview">GitHub</a></nav>
+      <nav aria-label="Footer"><a href="#how">How it works</a><a href="#compare">Compare</a><a href="#pricing">Pricing</a><a href="https://github.com/BridgLabs/opencodereview#readme">Docs</a><a href="https://github.com/BridgLabs/opencodereview/blob/main/CONTRIBUTING.md">Contributing</a><a href="https://github.com/BridgLabs/opencodereview">GitHub</a></nav>
     </div>
   </footer>
 
