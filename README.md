@@ -73,8 +73,6 @@ For example, with GitHub Enterprise:
 OCR_GH_HOST=github.example.com docker compose up --build
 ```
 
-The full list of variables, including the ones Compose sets internally, is in [docs/configuration.md](docs/configuration.md).
-
 ## How it works
 
 ```text
@@ -93,8 +91,6 @@ browser ──> web (nginx, :1421) ──/api──> server (Rust API, 127.0.0.1
 | `review-egress` | Outbound proxy that allows only `api.anthropic.com`, `chatgpt.com`, `api.openai.com` and `auth.openai.com`, on port 443 and public addresses only. |
 
 A review fetches the live base and head of the pull request, selects the scope (full, incremental, base sync or stacked), builds context from the index, freezes the evidence into an archive, runs the AI in a runner (split into chunks for large PRs), validates the report and publishes it. On GitHub, OpenCodeReview posts a collapsed summary comment that it updates on each push, a result comment that replaces the previous one, and the validated findings as a single non-blocking review with inline comments. It never approves a pull request on its own.
-
-More detail: [architecture](docs/architecture.md), [reviews](docs/reviews.md), [indexing](docs/indexing.md), [skills](docs/skills.md).
 
 ## Security and privacy
 
@@ -116,7 +112,7 @@ pnpm build
 cargo test --workspace --locked
 ```
 
-See [docs/development.md](docs/development.md) for the full setup, test suites and repository layout.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full setup and checks.
 
 ## Contributing
 

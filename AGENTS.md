@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guide for contributors and AI coding agents working on OpenCodeReview. Read it before changing code. User-facing documentation lives in [README.md](README.md) and [docs/](docs).
+Guide for contributors and AI coding agents working on OpenCodeReview. Read it before changing code. User-facing documentation lives in [README.md](README.md).
 
 ## Repository map
 
@@ -102,7 +102,7 @@ python3 -B docker/test-web-proxy.py
 docker compose config --quiet
 ```
 
-After building images, `python3 -u docker/runner-smoke.py` validates the sandbox with fake inference (no credentials, no paid calls). Rust tests need `OCR_TEST_DATABASE_URL` pointing at a Postgres where the role may create databases ([docs/development.md](docs/development.md)). Zero matching tests is not a pass.
+After building images, `python3 -u docker/runner-smoke.py` validates the sandbox with fake inference (no credentials, no paid calls). Rust tests need `OCR_TEST_DATABASE_URL` pointing at a Postgres where the role may create databases ([CONTRIBUTING.md](CONTRIBUTING.md)). Zero matching tests is not a pass.
 
 ## Database
 
