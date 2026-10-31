@@ -11,6 +11,12 @@ pub struct ReviewScope {
     pub base_sha: String,
 }
 
+/// Whether a stored review plan belongs to repository `repo_id`. Plans stored before the fix in
+/// `build_snapshot_context_plan` carry their run's temporary index id (the run id) instead.
+pub(crate) fn plan_belongs_to(plan: &crate::db::ReviewContextPlan, repo_id: i64, run_id: i64) -> bool {
+    plan.repo_id == repo_id || plan.repo_id == run_id
+}
+
 pub fn merge_base(repo: &Path, base: &str, head: &str, cancel: &AtomicBool) -> Result<String, String> {
     let bytes = crate::review::git_capture(repo, &["merge-base", base, head], cancel, 15)?;
     let sha = String::from_utf8(bytes)
