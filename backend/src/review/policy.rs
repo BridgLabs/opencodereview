@@ -11,7 +11,7 @@ pub const MAX_RUNNERS: usize = 64;
 /// Model processes running at once across reviews; each also needs a free runner replica.
 pub const MAX_PROCESSES: usize = MAX_RUNNERS;
 /// Chunks one review runs at once, so a large pull request leaves runners for other reviews.
-pub const MAX_PROCESSES_PER_REVIEW: usize = 3;
+pub const MAX_PROCESSES_PER_REVIEW: usize = 6;
 
 pub fn validate_prepared_inputs(evidence_bytes: usize, prompt_bytes: usize) -> Result<(), String> {
     if evidence_bytes > MAX_EVIDENCE_BYTES {

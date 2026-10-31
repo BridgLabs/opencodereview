@@ -67,7 +67,8 @@ pub(super) fn validate(command: &str, roots: &[&Path]) -> Result<(), String> {
         }
         let start = start.parse::<u32>().map_err(|_| ERROR)?;
         let end = end.parse::<u32>().map_err(|_| ERROR)?;
-        if start == 0 || end < start || end - start >= 200 || end > 1_000_000 {
+        // Inclusive ranges like '200,400p' (201 lines) are the model's usual reading of "200 lines".
+        if start == 0 || end < start || end - start > 200 || end > 1_000_000 {
             return Err(ERROR.into());
         }
         quoted(tail.strip_prefix(" -- ").ok_or(ERROR)?)?
@@ -77,7 +78,13 @@ pub(super) fn validate(command: &str, roots: &[&Path]) -> Result<(), String> {
             return Err(ERROR.into());
         }
         let (path, tail) = quoted(tail.strip_prefix(' ').ok_or(ERROR)?)?;
-        (path, tail.strip_suffix(" | /usr/bin/head -n 80").ok_or(ERROR)?)
+        let (tail, limit) = tail.rsplit_once(" | /usr/bin/head -n ").ok_or(ERROR)?;
+        if !limit.bytes().all(|byte| byte.is_ascii_digit())
+            || !(1..=80).contains(&limit.parse::<u32>().map_err(|_| ERROR)?)
+        {
+            return Err(ERROR.into());
+        }
+        (path, tail)
     } else if let Some(arguments) = command.strip_prefix("/usr/bin/ls -1A -- ") {
         quoted(arguments)?
     } else {

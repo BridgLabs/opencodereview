@@ -531,3 +531,62 @@ fn sharded_chunks_group_related_tests_and_handlers() {
         .files
         .contains(&"apps/admin/tests/resolved-engagement-page/resolved-engagements.test.ts".to_string()));
 }
+
+#[test]
+fn side_by_side_batches_overlap_and_return_outputs_in_order() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let running = AtomicUsize::new(0);
+    let peak = AtomicUsize::new(0);
+    let mut messages = Vec::new();
+    let (outputs, usages) = super::run_side_by_side(
+        4,
+        3,
+        &AtomicBool::new(false),
+        &mut |_, tail| messages.push(tail.to_string()),
+        |index, _, progress| {
+            let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(now, Ordering::SeqCst);
+            progress("{}", &format!("batch {index}"));
+            // Later batches finish first, so the order comes from the index, not completion.
+            std::thread::sleep(std::time::Duration::from_millis(40 * (4 - index as u64)));
+            running.fetch_sub(1, Ordering::SeqCst);
+            (Ok(index), Some(super::RunUsage::default()))
+        },
+    )
+    .unwrap();
+    assert_eq!(outputs, vec![0, 1, 2, 3]);
+    assert_eq!(usages.len(), 4);
+    assert_eq!(peak.load(Ordering::SeqCst), 3);
+    assert_eq!(messages.len(), 4);
+}
+
+#[test]
+fn a_failed_side_by_side_batch_cancels_the_others_and_reports_its_error() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let result = super::run_side_by_side(5, 2, &AtomicBool::new(false), &mut |_, _| {}, |index, cancel, _| {
+        if index == 1 {
+            return (Err::<usize, _>("batch output invalid".into()), None);
+        }
+        while index == 0 && !cancel.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return (Err("cancelled".into()), None);
+        }
+        (Ok(index), None)
+    });
+    assert_eq!(result.unwrap_err(), "batch output invalid");
+}
+
+#[test]
+fn cancelling_the_review_cancels_side_by_side_batches() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let cancel = AtomicBool::new(true);
+    let result = super::run_side_by_side(2, 2, &cancel, &mut |_, _| {}, |_, batch_cancel, _| {
+        while !batch_cancel.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        (Err::<usize, _>("cancelled".into()), None)
+    });
+    assert_eq!(result.unwrap_err(), "cancelled");
+}
