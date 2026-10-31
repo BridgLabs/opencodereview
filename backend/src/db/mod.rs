@@ -177,6 +177,8 @@ pub struct ReviewCard {
     pub result_inherited: bool,
     /// The latest review has nothing but summary suggestions.
     pub suggestions_only: bool,
+    /// The latest review asks questions and reports no finding.
+    pub questions_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -127,3 +127,21 @@ fn a_review_with_only_summary_suggestions_is_suggestions_only() {
     ));
     assert!(!suggestions_only(None, Some("No findings.")));
 }
+
+#[test]
+fn a_review_that_only_asks_questions_is_questions_only() {
+    let question =
+        json!({"comments":[{"path":"src/a.rs","line":3,"side":"RIGHT","body":"**[Question] Checked?**"}]}).to_string();
+    let finding =
+        json!({"comments":[{"path":"src/a.rs","line":3,"side":"RIGHT","body":"**[Finding] Bug**"}]}).to_string();
+    let summary = Some("1 review comments selected for publication.");
+    assert!(questions_only(Some(&question), summary));
+    assert!(questions_only(
+        Some(r#"{"comments":[]}"#),
+        Some("**[Question] Checked?**")
+    ));
+    // A finding inline or in the body, or no question at all, is not.
+    assert!(!questions_only(Some(&finding), summary));
+    assert!(!questions_only(Some(&question), Some("**[Finding] Bug**")));
+    assert!(!questions_only(Some(r#"{"comments":[]}"#), Some("No findings.")));
+}

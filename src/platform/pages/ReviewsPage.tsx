@@ -339,19 +339,17 @@ export function ReviewsPage() {
     monitoring?.resultPublicationStatus === "failed" &&
     monitoring.resultObservedHeadSha === monitoring.headSha &&
     executionControl?.kind !== "stop";
-  const resultFindingCount =
+  // Without the audit (no stage open), count the run's stored inline comments.
+  const storedComments =
+    monitoredRun?.commentsJson && !reviewBodyHasPostableFinding(monitoredRun.reviewBody)
+      ? parseComments(monitoredRun.commentsJson)
+      : undefined;
+  const countKept = (kind: "finding" | "question") =>
     findingView?.audit?.candidates.filter(
-      (candidate) =>
-        candidateKind(candidate) === "finding" && candidate.aiDecision === "kept" && !candidate.blockedReason,
-    ).length ??
-    (monitoredRun?.commentsJson && !reviewBodyHasPostableFinding(monitoredRun.reviewBody)
-      ? parseComments(monitoredRun.commentsJson).filter((comment) => reviewPointKind(comment.body) === "finding").length
-      : undefined);
-  const resultQuestionCount =
-    findingView?.audit?.candidates.filter(
-      (candidate) =>
-        candidateKind(candidate) === "question" && candidate.aiDecision === "kept" && !candidate.blockedReason,
-    ).length ?? 0;
+      (candidate) => candidateKind(candidate) === kind && candidate.aiDecision === "kept" && !candidate.blockedReason,
+    ).length ?? storedComments?.filter((comment) => reviewPointKind(comment.body) === kind).length;
+  const resultFindingCount = countKept("finding");
+  const resultQuestionCount = countKept("question") ?? 0;
   const authorOptions = useMemo(() => {
     const authors = new Map<string, ReviewCard>();
     for (const card of items)
