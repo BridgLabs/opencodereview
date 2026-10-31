@@ -617,7 +617,7 @@ fn render(point: &Point) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let body = format!("{}\n\n**[{kind}] {}**\n\n{}\n\n<details>\n<summary>{details}</summary>\n\n{}\n\nWhy: {refs}\n\n</details>\n\n<details>\n<summary>{action}</summary>\n\n{}\n\n</details>\n\n<details>\n<summary>\u{1f916} Prompt for AI Agents</summary>\n\n```text\n{preamble}\n\n{task}\n```\n\n</details>", crate::review::REVIEW_ATTRIBUTION, text(&point.title.split_whitespace().collect::<Vec<_>>().join(" ")), text(&point.detail), text(&point.detail), text(&point.action));
+    let body = format!("{}\n\n**[{kind}] {}**\n\n{}\n\n<details>\n<summary>{details}</summary>\n\nWhy: {refs}\n\n</details>\n\n<details>\n<summary>{action}</summary>\n\n{}\n\n</details>\n\n<details>\n<summary>\u{1f916} Prompt for AI Agents</summary>\n\n```text\n{preamble}\n\n{task}\n```\n\n</details>", crate::review::REVIEW_ATTRIBUTION, text(&point.title.split_whitespace().collect::<Vec<_>>().join(" ")), text(&point.detail), text(&point.action));
     if question {
         body
     } else {

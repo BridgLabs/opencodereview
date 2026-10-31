@@ -794,7 +794,14 @@ fn renderer_preserves_required_templates() {
             counter_evidence: vec![],
             severity: None,
         };
-        assert!(crate::review::is_structured_review_point(&render(&point)));
+        let body = render(&point);
+        assert!(crate::review::is_structured_review_point(&body));
+        assert_eq!(
+            body.matches("Wrong tenant").count(),
+            1,
+            "the detail is shown once: {body}"
+        );
+        assert!(body.contains("Why: src/auth.rs:1"));
     }
 }
 

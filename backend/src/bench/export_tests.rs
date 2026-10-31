@@ -33,7 +33,29 @@ fn body(kind: &str, title: &str, detail: &str, action: &str) -> String {
     } else {
         ("\u{1f50e} Details", "\u{1f6e0}\u{fe0f} Suggested fix")
     };
-    format!("<sub>\u{1f916} Automated review by OpenCodeReview</sub>\n\n**[{kind}] {title}**\n\n{detail}\n\n<details>\n<summary>{details}</summary>\n\n{detail}\n\nWhy: src/pool.rs:4 (abc)\n\n</details>\n\n<details>\n<summary>{fix}</summary>\n\n{action}\n\n</details>\n\n<details>\n<summary>\u{1f916} Prompt for AI Agents</summary>\n\n```text\nfix it\n```\n\n</details>")
+    format!("<sub>\u{1f916} Automated review by OpenCodeReview</sub>\n\n**[{kind}] {title}**\n\n{detail}\n\n<details>\n<summary>{details}</summary>\n\nWhy: src/pool.rs:4 (abc)\n\n</details>\n\n<details>\n<summary>{fix}</summary>\n\n{action}\n\n</details>\n\n<details>\n<summary>\u{1f916} Prompt for AI Agents</summary>\n\n```text\nfix it\n```\n\n</details>")
+}
+
+#[test]
+fn points_read_comments_posted_before_the_detail_was_shown_once() {
+    // Comments posted earlier repeat the explanation inside Details, before `Why:`.
+    let old = body(
+        "Finding",
+        "Race on `conns`",
+        "conns is read without the mutex.",
+        "Hold the lock.",
+    )
+    .replacen(
+        "<summary>\u{1f50e} Details</summary>\n\n",
+        "<summary>\u{1f50e} Details</summary>\n\nconns is read without the mutex.\n\n",
+        1,
+    );
+    assert_eq!(old.matches("conns is read without the mutex.").count(), 2);
+    let comments = serde_json::json!({"comments": [{"path": "src/pool.rs", "line": 6, "side": "RIGHT", "body": old}]});
+    let points = points(&comments.to_string(), DIFF).unwrap();
+    assert_eq!(points.len(), 1);
+    assert_eq!(points[0].detail, "conns is read without the mutex.");
+    assert_eq!(points[0].action, "Hold the lock.");
 }
 
 #[test]
