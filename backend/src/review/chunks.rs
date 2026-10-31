@@ -630,7 +630,11 @@ pub(crate) fn run_side_by_side<T: Send>(
                         .ok()
                         .and_then(|phases| phases.into_iter().find(|item| item["id"] == phase_id))
                         .and_then(|item| item["status"].as_str().map(str::to_string));
-                    if status.as_deref() == Some("queued") && running.iter().any(|other| *other != index) {
+                    // A batch waiting again (for example before an output repair) no longer runs.
+                    if status.as_deref() == Some("queued") {
+                        running.remove(&index);
+                    }
+                    if status.as_deref() == Some("queued") && !running.is_empty() {
                         if let Some(shown) = &shown {
                             progress(shown, &tail);
                             continue;

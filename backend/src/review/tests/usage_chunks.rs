@@ -638,3 +638,54 @@ fn a_waiting_batch_does_not_show_the_final_phase_as_queued_while_another_runs() 
         "{shown:?}"
     );
 }
+
+#[test]
+fn a_batch_waiting_again_no_longer_counts_as_running() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let step = AtomicUsize::new(0);
+    let wait_for = |at: usize| {
+        while step.load(Ordering::SeqCst) < at {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // Let the previous report reach the collector first.
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    };
+    let mut shown = Vec::new();
+    super::run_side_by_side(
+        "final",
+        3,
+        3,
+        &AtomicBool::new(false),
+        &mut |phase, tail| shown.push((tail.to_string(), phase.to_string())),
+        |index, _, progress| {
+            match index {
+                0 => {
+                    progress(&super::sharded_phase_json("final", "running"), "0 runs");
+                    progress(&super::sharded_phase_json("final", "queued"), "0 waits for a repair");
+                    step.store(1, Ordering::SeqCst);
+                    wait_for(3);
+                }
+                2 => {
+                    wait_for(1);
+                    progress(&super::sharded_phase_json("final", "running"), "2 runs");
+                    step.store(2, Ordering::SeqCst);
+                }
+                _ => {
+                    wait_for(2);
+                    // Wait until batch 2 reported done.
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    progress(&super::sharded_phase_json("final", "queued"), "1 waits");
+                    step.store(3, Ordering::SeqCst);
+                }
+            }
+            (Ok(index), None)
+        },
+    )
+    .unwrap();
+    let (tail, phase) = shown.last().unwrap();
+    assert_eq!(tail, "1 waits");
+    assert!(
+        phase.contains(r#""id":"final","label":"Final integration","status":"queued""#),
+        "every batch waits, so the phase shows queued: {shown:?}"
+    );
+}
