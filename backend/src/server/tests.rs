@@ -975,7 +975,8 @@ fn a_review_keeps_its_suggestions_only_when_the_setting_is_on() {
     let suggestions = crate::review::evidence::suggestions_section(&[serde_json::json!(
         {"path":"a.rs","line":3,"title":"Stale test name","detail":"Detail","action":"Rename it"}
     )]);
-    let deferred = "\n\nFiles not reviewed\n- `b.rs`";
+    let deferred = crate::review::deferred_files_note(&["b.rs".to_string()]);
+    assert!(!deferred.is_empty());
     let body = format!("No findings.\n\n{suggestions}{deferred}");
     // Off by default: the stored body has no suggestions, so a suggestions-only review is clean,
     // and what follows the section stays.

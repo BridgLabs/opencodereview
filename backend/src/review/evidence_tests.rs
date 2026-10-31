@@ -1065,6 +1065,9 @@ fn suggestions_section_drops_a_point_repeated_in_other_words() {
             "Doc comment names ServerConfigsProvider but the function is NewServerConfigs",
         ),
         item("main_test.go", 157, "No test covers the new Redis handler"),
+        // Titles that differ only in the name they point at are different points.
+        item("parser.rs", 10, "No test covers parse_header"),
+        item("parser.rs", 12, "No test covers parse_body"),
         // Same words, but far from the first one: another place, listed again.
         item(
             "main_test.go",
@@ -1072,7 +1075,8 @@ fn suggestions_section_drops_a_point_repeated_in_other_words() {
             "TestRedisHandler passes the metrics port as REDIS_PORT",
         ),
     ]);
-    assert!(section.contains(" (5)</summary>"), "{section}");
+    assert!(section.contains(" (7)</summary>"), "{section}");
+    assert!(section.contains("parse_body"), "{section}");
     assert!(!section.contains("The doc comment names"), "{section}");
     assert!(!section.contains("`main_test.go:158`"), "{section}");
     assert!(

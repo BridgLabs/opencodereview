@@ -1581,6 +1581,8 @@ fn frozen_final_decision_example_requires_explicit_snapshot_and_revision() {
     assert_eq!(example["decisions"][1]["counterEvidence"][0]["revision"], HEAD);
     assert!(prompt.contains("Do not cite chunk reports or candidate summaries as counter-evidence"));
     assert!(prompt.contains("Include findingDecisions alongside report in your final JSON response"));
+    assert!(prompt.contains("candidates in the same file with the same root cause and the same fix are duplicates too"));
+    assert!(prompt.contains("candidates in different files, or needing different fixes, stay separate comments"));
     assert!(!prompt.contains("Write /"));
     fs::remove_dir_all(root).unwrap();
 }

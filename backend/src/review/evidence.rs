@@ -625,55 +625,93 @@ fn render(point: &Point) -> String {
     }
 }
 
-/// Title words that tell two suggestions apart: lowercase, without edge punctuation, short words
-/// and fillers.
-fn title_words(title: &str) -> HashSet<String> {
+/// A suggestion already in the summary list, with the title words `repeats` compares.
+struct Listed {
+    path: String,
+    line: i64,
+    title: String,
+    words: HashSet<String>,
+    code: HashSet<String>,
+}
+
+impl Listed {
+    fn new(path: &str, line: i64, title: &str) -> Self {
+        let mut words = HashSet::new();
+        let mut code = HashSet::new();
+        for word in title_words(title) {
+            let lower = word.to_lowercase();
+            if names_code(word) {
+                code.insert(lower.clone());
+            }
+            words.insert(lower);
+        }
+        Self {
+            path: path.to_string(),
+            line,
+            title: title.to_lowercase(),
+            words,
+            code,
+        }
+    }
+}
+
+/// Title words that tell two suggestions apart: without edge punctuation, short words and
+/// fillers.
+fn title_words(title: &str) -> impl Iterator<Item = &str> {
     const FILLERS: &[&str] = &[
         "the", "and", "for", "its", "this", "that", "with", "not", "now", "still",
     ];
     title
         .split_whitespace()
-        .map(|word| word.trim_matches(|c: char| ".,:;'\"`()".contains(c)).to_lowercase())
-        .filter(|word| word.chars().count() > 2 && !FILLERS.contains(&word.as_str()))
-        .collect()
+        .map(|word| word.trim_matches(|c: char| ".,:;'\"`()".contains(c)))
+        .filter(|word| word.chars().count() > 2 && !FILLERS.contains(&word.to_lowercase().as_str()))
 }
 
-/// Whether a suggestion repeats one already listed: the same title in the same file, or a title
-/// sharing at least half its words within three lines of it. Chunk and final stages can each
-/// report the same point in their own words.
-fn repeats(
-    listed: &(String, i64, String, HashSet<String>),
-    path: &str,
-    line: i64,
-    title: &str,
-    words: &HashSet<String>,
-) -> bool {
-    let (listed_path, listed_line, listed_title, listed_words) = listed;
-    if listed_path != path {
+/// Whether a title word names something in the code (`parse_header`, `NewServerConfigs`,
+/// `v2`, `config.path`) rather than describing it.
+fn names_code(word: &str) -> bool {
+    word.chars()
+        .skip(1)
+        .any(|c| c.is_uppercase() || c.is_ascii_digit() || "_.:/".contains(c))
+}
+
+/// Whether a suggestion repeats one already listed: the same title in the same file, or, within
+/// three lines of it, a title sharing at least half of the two titles' words combined. Chunk and
+/// final stages can each report the same point in their own words. Titles that differ in a name
+/// from the code (`No test covers parse_header` and `No test covers parse_body`) are different
+/// points.
+fn repeats(listed: &Listed, other: &Listed) -> bool {
+    if listed.path != other.path {
         return false;
     }
-    if *listed_title == title {
+    if listed.title == other.title {
         return true;
     }
-    let union = listed_words.union(words).count();
-    (listed_line - line).abs() <= 3 && union > 0 && 2 * listed_words.intersection(words).count() >= union
+    let shared = listed.words.intersection(&other.words).count();
+    let union = listed.words.union(&other.words).count();
+    let names_differ = listed
+        .words
+        .symmetric_difference(&other.words)
+        .any(|word| listed.code.contains(word) || other.code.contains(word));
+    (listed.line - other.line).abs() <= 3 && union > 0 && 2 * shared >= union && !names_differ
 }
 
 /// The summary section listing validated suggestions (`path`, `line`, `title`, `detail`, `action`),
 /// without repeats, or nothing when there are none.
 pub(crate) fn suggestions_section(suggestions: &[serde_json::Value]) -> String {
-    let mut listed: Vec<(String, i64, String, HashSet<String>)> = Vec::new();
+    let mut listed: Vec<Listed> = Vec::new();
     let items = suggestions
         .iter()
         .filter(|item| {
-            let path = item["path"].as_str().unwrap_or_default();
-            let line = item["line"].as_i64().unwrap_or_default();
-            let title = item["title"].as_str().unwrap_or_default().trim().to_lowercase();
-            let words = title_words(&title);
-            if listed.iter().any(|seen| repeats(seen, path, line, &title, &words)) {
+            let point = Listed::new(
+                item["path"].as_str().unwrap_or_default(),
+                item["line"].as_i64().unwrap_or_default(),
+                item["title"].as_str().unwrap_or_default().trim(),
+            );
+            if listed.iter().any(|seen| repeats(seen, &point)) {
                 return false;
             }
-            listed.push((path.to_string(), line, title, words));
+            listed.push(point);
             true
         })
         .map(|item| {

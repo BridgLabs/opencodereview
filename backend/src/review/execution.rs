@@ -883,7 +883,7 @@ fn deferred_files_warning(deferred: &[String]) -> Option<crate::review::warnings
     })
 }
 
-fn deferred_files_note(deferred: &[String]) -> String {
+pub(crate) fn deferred_files_note(deferred: &[String]) -> String {
     if deferred.is_empty() {
         return String::new();
     }
