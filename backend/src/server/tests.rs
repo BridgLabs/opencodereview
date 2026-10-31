@@ -970,6 +970,29 @@ fn suggestions_post_with_the_review_but_never_on_their_own_after_duplicates() {
 }
 
 #[test]
+fn a_review_keeps_its_suggestions_only_when_the_setting_is_on() {
+    let db = crate::db::Db::for_test().open().unwrap();
+    let suggestions = crate::review::evidence::suggestions_section(&[serde_json::json!(
+        {"path":"a.rs","line":3,"title":"Stale test name","detail":"Detail","action":"Rename it"}
+    )]);
+    let deferred = crate::review::deferred_files_note(&["b.rs".to_string()]);
+    assert!(!deferred.is_empty());
+    let body = format!("No findings.\n\n{suggestions}{deferred}");
+    // Off by default: the stored body has no suggestions, so a suggestions-only review is clean,
+    // and what follows the section stays.
+    let kept = crate::review::kept_review_body(&db, &body);
+    assert_eq!(kept, format!("No findings.{deferred}"));
+    assert!(review_suggestions(Some(&kept)).is_empty());
+    assert!(!review_has_findings(Some(r#"{"comments":[]}"#), Some(&kept)));
+    assert_eq!(crate::review::kept_review_body(&db, "No findings."), "No findings.");
+    // On: the body is kept exactly as the review wrote it.
+    db.save_setting("review_suggestions_enabled", "true").unwrap();
+    let kept = crate::review::kept_review_body(&db, &body);
+    assert_eq!(kept, body);
+    assert!(review_has_findings(Some(r#"{"comments":[]}"#), Some(&kept)));
+}
+
+#[test]
 fn empty_selected_publication_fails_unless_all_comments_are_proven_duplicates() {
     let run = review_run(
         Some("2 review comments selected for publication."),

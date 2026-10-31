@@ -41,6 +41,7 @@ Configuration, read from the contract's `RB_CONFIG_*` variables:
 | `RB_CONFIG_MAX_FILES` | 800 | Settings → Review → maximum files. The product defaults to 100; a pull request it declines scores nothing, so the benchmark allows more. |
 | `RB_CONFIG_FOCUS_FILES` | 100 | The `review_focus_files` setting, which has no Settings screen yet. Above it, the review covers the highest-priority files (source code first, then the most changed lines) and lists the rest as not reviewed. `0` reviews every file; the product default is `0`. |
 | `RB_CONFIG_LENS_PASS` | `true` | The `review_lens_pass` setting, which has no Settings screen yet. Each review stage gets one more execution that looks for what a first pass usually leaves out (tests, docs, maintainability, API shape, small slips) and adds only new findings; if it fails, the first report stands. It costs roughly one more execution per stage. The product default is `false`. |
+| `RB_CONFIG_SUGGESTIONS` | `false` | Settings → PR selection → Review comments → Post suggestions (`review_suggestions_enabled`), with the product's default. `true` keeps the review's lower-priority suggestions, which the export then lists after the inline findings. |
 | `RB_CONFIG_DIFF_RENAMES` | `false` | Benchmarks treat a moved file as new content and anchor golden findings in it, so the review diff shows renamed files as added (`diff.renames=false`). `true` keeps git's rename detection, as the product does. |
 
 Credentials:

@@ -274,6 +274,20 @@ pub(crate) fn split_suggestions(body: &str) -> (&str, &str) {
     }
 }
 
+/// `body` without its suggestions section, for a review whose suggestions are not posted. What
+/// follows the collapsed section (the note on files a focused review left out) stays.
+pub(crate) fn without_suggestions(body: &str) -> String {
+    let (points, section) = split_suggestions(body);
+    if section.is_empty() {
+        return body.to_string();
+    }
+    let rest = section
+        .strip_prefix(SUGGESTIONS_HEADING)
+        .and_then(|section| section.split_once("</details>"))
+        .map_or("", |(_, rest)| rest);
+    format!("{}{rest}", points.trim_end())
+}
+
 /// First line of every generated finding/question. Reviews post from the user's
 /// own GitHub account, so this line is what marks the comment as automated.
 pub(crate) const REVIEW_ATTRIBUTION: &str = "<sub>🤖 Automated review by OpenCodeReview</sub>";

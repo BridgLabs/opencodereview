@@ -92,7 +92,8 @@ pub fn run_from_env() -> Result<(), String> {
     // Settings → Review → maximum files. A pull request the product declines scores nothing here.
     // Above the focus limit, the highest-priority files are reviewed and the rest are listed, so
     // a very large pull request still finishes inside the benchmark's time limit. The lens pass
-    // adds a second look per stage at what a first pass usually leaves out.
+    // adds a second look per stage at what a first pass usually leaves out. Suggestions follow the
+    // product default, off, unless asked for.
     for (variable, key, default) in [
         ("RB_CONFIG_MAX_FILES", "review_max_files", DEFAULT_MAX_FILES.to_string()),
         (
@@ -101,6 +102,11 @@ pub fn run_from_env() -> Result<(), String> {
             DEFAULT_FOCUS_FILES.to_string(),
         ),
         ("RB_CONFIG_LENS_PASS", "review_lens_pass", "true".to_string()),
+        (
+            "RB_CONFIG_SUGGESTIONS",
+            "review_suggestions_enabled",
+            "false".to_string(),
+        ),
     ] {
         let value = env(variable).unwrap_or(default);
         db.open()?

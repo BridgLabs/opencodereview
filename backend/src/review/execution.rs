@@ -27,6 +27,7 @@ pub fn execute(
             }
         }
         let db = inputs.open_db()?;
+        output.body = kept_review_body(&db, &output.body);
         let source_audit = db
             .load_finding_audit(inputs.run_id)?
             .ok_or("Finding evidence snapshot is unavailable")?;
@@ -859,6 +860,17 @@ pub(crate) fn run_inner(
     })
 }
 
+/// `body` as the review keeps it, in its stored body and its audit. Reviews still list
+/// suggestions, so low-priority points never turn into findings, but only the
+/// `review_suggestions_enabled` setting (off by default) keeps them for posting.
+pub(crate) fn kept_review_body(db: &crate::db::Database, body: &str) -> String {
+    if db.settings().is_ok_and(|settings| settings.review_suggestions_enabled) {
+        body.to_string()
+    } else {
+        crate::review::without_suggestions(body)
+    }
+}
+
 /// The summary section naming the files a focused review left out; empty when it reviewed all.
 /// A review that deferred files is limited: like any review with an evidence warning it supplies
 /// no coverage, never counts as the last reviewed head and is never clean, so nothing treats the
@@ -871,7 +883,7 @@ fn deferred_files_warning(deferred: &[String]) -> Option<crate::review::warnings
     })
 }
 
-fn deferred_files_note(deferred: &[String]) -> String {
+pub(crate) fn deferred_files_note(deferred: &[String]) -> String {
     if deferred.is_empty() {
         return String::new();
     }

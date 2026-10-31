@@ -13,6 +13,8 @@ export interface Settings {
   reviewChunkSize: number;
   reviewParallelChunks: number;
   reviewMaxFiles: number;
+  /** Lists lower-priority suggestions in a collapsed section of the review summary. */
+  reviewSuggestionsEnabled: boolean;
   dismissStaleApprovals: boolean;
   autoIndexStaleRepos: boolean;
   /** Auto-post mode for reviews WITH findings: "off" | "comment" | "request_changes". */

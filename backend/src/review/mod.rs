@@ -43,6 +43,8 @@ mod local;
 
 pub(crate) use chunks::*;
 pub use execution::execute;
+#[cfg(test)]
+pub(crate) use execution::{deferred_files_note, kept_review_body};
 pub(crate) use execution::{review_settings_json, spawn_and_supervise, spawn_phase_json, SpawnPaths};
 pub(crate) use local::*;
 
