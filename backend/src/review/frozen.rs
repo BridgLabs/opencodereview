@@ -110,8 +110,9 @@ pub(super) fn decision_example(inputs: &ReviewInputs) -> String {
         reference["revision"] = frozen.archive.scope().head_sha.clone().into();
     }
     let mut example = serde_json::json!({"decisions":[
-        {"candidateId":"candidate-1","decision":"keep","commentIndex":0,"reason":"Verified finding"},
-        {"candidateId":"candidate-2","decision":"discard","reason":"Inspected guard refutes this candidate","counterEvidence":[reference]}
+        {"candidateId":"candidate-1","decision":"keep","unchanged":true,"reason":"Verified; the chunk comment stands as written"},
+        {"candidateId":"candidate-2","decision":"discard","reason":"Inspected guard refutes this candidate","counterEvidence":[reference]},
+        {"candidateId":"candidate-3","decision":"keep","commentIndex":0,"reason":"Verified; the line and impact are corrected in report.json findings"}
     ]});
     if let Some(frozen) = &inputs.frozen {
         example["contractVersion"] = 2.into();

@@ -92,10 +92,12 @@ pub(crate) fn unconfirmed(stage: &Prepared, payload: &Payload, head: &str) -> Re
     })
 }
 
-/// Gives every candidate the final pass left without a usable decision (none, a duplicate, an
-/// unknown kind or a keep pointing nowhere) the comment already validated in its chunk, kept and
-/// marked unconfirmed, so one gap in the final output never drops validated findings or fails the
-/// review. Returns the completed decisions and comments and the paths of unconfirmed candidates.
+/// Gives every candidate the final pass kept `unchanged` the comment already validated in its
+/// chunk, so the final pass writes out only the findings it changes or adds. Every candidate it
+/// left without a usable decision (none, a duplicate, an unknown kind or a keep pointing nowhere)
+/// gets that comment too, kept and marked unconfirmed, so one gap in the final output never drops
+/// validated findings or fails the review. Returns the completed decisions and comments and the
+/// paths of unconfirmed candidates.
 pub(crate) fn complete_decisions(
     sources: &Value,
     decisions: &str,
@@ -108,8 +110,33 @@ pub(crate) fn complete_decisions(
     let entries = doc["decisions"].as_array().cloned().unwrap_or_default();
     let mut kept = Vec::new();
     let mut unconfirmed = Vec::new();
+    let mut reused = false;
+    let index_of = |comments: &mut Vec<Value>, comment: &Value| match comments
+        .iter()
+        .position(|existing| comment_key(existing) == comment_key(comment))
+    {
+        Some(index) => index,
+        None => {
+            comments.push(comment.clone());
+            comments.len() - 1
+        }
+    };
     for candidate in &candidates {
         let id = &candidate["candidateId"];
+        let comment = &candidate["comment"];
+        let unchanged = entries.iter().find(|entry| {
+            entry["candidateId"] == *id
+                && entry["decision"] == "keep"
+                && entry["unchanged"] == true
+                && entry["reason"].as_str().is_some_and(|reason| !reason.trim().is_empty())
+        });
+        if let Some(entry) = unchanged.filter(|_| !comment.is_null()) {
+            let mut entry = entry.clone();
+            entry["commentIndex"] = json!(index_of(&mut comments, comment));
+            kept.push(entry);
+            reused = true;
+            continue;
+        }
         let usable = entries.iter().find(|entry| {
             entry["candidateId"] == *id
                 && entry["reason"].as_str().is_some_and(|reason| !reason.trim().is_empty())
@@ -127,20 +154,10 @@ pub(crate) fn complete_decisions(
             kept.push(entry.clone());
             continue;
         }
-        let comment = &candidate["comment"];
         if comment.is_null() {
             return Err("Incomplete review: an undecided candidate has no validated comment".into());
         }
-        let index = match comments
-            .iter()
-            .position(|existing| comment_key(existing) == comment_key(comment))
-        {
-            Some(index) => index,
-            None => {
-                comments.push(comment.clone());
-                comments.len() - 1
-            }
-        };
+        let index = index_of(&mut comments, comment);
         kept.push(json!({
             "candidateId": id,
             "decision": "keep",
@@ -149,7 +166,7 @@ pub(crate) fn complete_decisions(
         }));
         unconfirmed.push(comment["path"].as_str().unwrap_or_default().to_string());
     }
-    if unconfirmed.is_empty() && kept.len() == entries.len() {
+    if !reused && unconfirmed.is_empty() && kept.len() == entries.len() {
         return Ok((decisions.into(), raw.into(), unconfirmed));
     }
     doc["decisions"] = Value::Array(kept);

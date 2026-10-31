@@ -1579,6 +1579,9 @@ fn frozen_final_decision_example_requires_explicit_snapshot_and_revision() {
     assert_eq!(example["contractVersion"], 2);
     assert_eq!(example["snapshotId"], snapshot_id(&inputs));
     assert_eq!(example["decisions"][1]["counterEvidence"][0]["revision"], HEAD);
+    assert_eq!(example["decisions"][0]["unchanged"], true);
+    assert!(example["decisions"][0].get("commentIndex").is_none());
+    assert!(prompt.contains("so do not write it again in report.json findings"));
     assert!(prompt.contains("Do not cite chunk reports or candidate summaries as counter-evidence"));
     assert!(prompt.contains("Include findingDecisions alongside report in your final JSON response"));
     assert!(prompt.contains("candidates in the same file with the same root cause and the same fix are duplicates too"));
@@ -1839,4 +1842,158 @@ fn chunk_suggestions_go_to_the_final_summary_not_to_the_final_pass() {
     let (_, note) = &payload.notes[0];
     assert!(note["report"].is_null());
     assert!(!note["summary"].as_str().unwrap().contains("Stale test name"), "{note}");
+}
+
+/// Writes a final report holding only the first candidate's point (when `rewrite_first`), keeping
+/// it by index and every other candidate `unchanged` with `reason`.
+fn final_keeping_unchanged(
+    inputs: &ReviewInputs,
+    stage: &Prepared,
+    payload: &Payload,
+    rewrite_first: bool,
+    reason: &str,
+) {
+    let snapshot = snapshot_id(inputs);
+    let findings: Vec<Value> = stage
+        .candidate_ids
+        .iter()
+        .take(usize::from(rewrite_first))
+        .map(|id| payload.candidates.get(id).unwrap()["point"].clone())
+        .collect();
+    fs::write(
+        stage.directory.join("report.json"),
+        json!({
+            "contractVersion":2,"snapshotId":snapshot,"reviewedFiles":stage.files,
+            "missingEvidence":[],"findings":findings,"questions":[],"contextQuestions":[]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let decisions: Vec<Value> = stage
+        .candidate_ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| {
+            if rewrite_first && index == 0 {
+                json!({"candidateId":id,"decision":"keep","commentIndex":0,"reason":"Verified and reworded"})
+            } else {
+                json!({"candidateId":id,"decision":"keep","unchanged":true,"reason":reason})
+            }
+        })
+        .collect();
+    fs::write(
+        stage.directory.join("finding_decisions.json"),
+        json!({"contractVersion":2,"snapshotId":snapshot,"decisions":decisions}).to_string(),
+    )
+    .unwrap();
+}
+
+fn unchanged_fixture(seed: i64) -> (ReviewInputs, PathBuf, ReviewMap, String, Payload, Vec<Prepared>) {
+    let files: Vec<String> = (0..3).map(|i| format!("src/kept-{i}.rs")).collect();
+    let inputs = frozen_inputs(&files.iter().map(|f| (f.clone(), LINE.to_string())).collect::<Vec<_>>());
+    let (root, context, map, diff) = fixture(seed, &inputs, &files);
+    let results: Vec<ChunkResult> = files
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            chunk_result(
+                &inputs,
+                &root,
+                (index + 1) as i64,
+                path,
+                vec![point(path, &format!("Issue {index}"), "Inspect the value")],
+                vec![],
+                vec![],
+            )
+        })
+        .collect();
+    let sources = merge_chunk_findings(&results, HEAD);
+    let payload = Payload::from_results(&results, sources).unwrap();
+    let stages = prepare(
+        &inputs,
+        &context,
+        &map,
+        &diff,
+        &root.join("batches"),
+        &payload,
+        crate::review::policy::MAX_EVIDENCE_BYTES,
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    (inputs, root, map, diff, payload, stages)
+}
+
+#[test]
+fn candidates_kept_unchanged_post_their_chunk_comments_confirmed() {
+    let (inputs, root, map, diff, payload, stages) = unchanged_fixture(-1210);
+    let mut outputs = Vec::new();
+    for stage in &stages {
+        final_keeping_unchanged(&inputs, stage, &payload, false, "Verified; the chunk comment stands");
+        outputs.push(validate_output(&inputs, stage, &payload, HEAD).unwrap());
+    }
+    assert!(outputs.iter().all(|output| output.evidence_warnings.is_empty()));
+    let merge = root.join("merge");
+    let (_, comments, warnings) =
+        combine(&inputs, &payload, outputs, &map.reviewable_files, HEAD, &diff, &merge).unwrap();
+    assert!(warnings.is_empty(), "unchanged keeps are confirmed, not unconfirmed");
+    let comments: Value = serde_json::from_str(&comments).unwrap();
+    let comments = comments["comments"].as_array().unwrap();
+    let originals = payload.originals();
+    assert_eq!(comments.len(), originals.len());
+    for original in originals.iter() {
+        assert!(
+            comments.contains(&original["comment"]),
+            "chunk comment is posted as validated"
+        );
+    }
+    let decisions = fs::read_to_string(merge.join("finding_decisions.json")).unwrap();
+    let entries: Value = serde_json::from_str(&decisions).unwrap();
+    for entry in entries["decisions"].as_array().unwrap() {
+        assert_eq!(entry["reason"], "Verified; the chunk comment stands");
+        let candidate = originals
+            .iter()
+            .find(|c| c["candidateId"] == entry["candidateId"])
+            .unwrap();
+        assert_eq!(
+            comments[entry["commentIndex"].as_u64().unwrap() as usize],
+            candidate["comment"]
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_rewritten_finding_and_unchanged_keeps_share_one_batch() {
+    let (inputs, root, _, _, payload, stages) = unchanged_fixture(-1211);
+    let stage = &stages[0];
+    assert!(stage.candidate_ids.len() > 1);
+    final_keeping_unchanged(&inputs, stage, &payload, true, "Verified; the chunk comment stands");
+    let output = validate_output(&inputs, stage, &payload, HEAD).unwrap();
+    assert!(output.evidence_warnings.is_empty());
+    assert_eq!(output.comments.len(), stage.candidate_ids.len());
+    let indices: BTreeSet<u64> = output
+        .decisions
+        .iter()
+        .map(|entry| entry["commentIndex"].as_u64().unwrap())
+        .collect();
+    assert_eq!(
+        indices.len(),
+        stage.candidate_ids.len(),
+        "every candidate maps to its own comment"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn an_unchanged_keep_without_a_reason_stays_unconfirmed() {
+    let (inputs, root, _, _, payload, stages) = unchanged_fixture(-1212);
+    let stage = &stages[0];
+    final_keeping_unchanged(&inputs, stage, &payload, false, " ");
+    let output = validate_output(&inputs, stage, &payload, HEAD).unwrap();
+    assert_eq!(output.evidence_warnings.len(), stage.candidate_ids.len());
+    assert!(output
+        .evidence_warnings
+        .iter()
+        .all(|warning| warning.reason == "unconfirmed_candidate"));
+    fs::remove_dir_all(root).unwrap();
 }
