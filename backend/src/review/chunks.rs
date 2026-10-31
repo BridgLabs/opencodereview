@@ -507,6 +507,7 @@ pub(crate) fn run_adaptive_final(
     budget::with(inputs, |budget| budget.integrating());
     // Batches are independent by design, so they run side by side like chunks do.
     let (outputs, final_usage) = run_side_by_side(
+        "final",
         stages.len(),
         chunk_worker_count(inputs, stages.len()),
         cancel,
@@ -569,7 +570,7 @@ pub(crate) fn run_adaptive_final(
 }
 
 enum BatchEvent<T> {
-    Progress(String, String),
+    Progress(usize, String, String),
     Done(usize, Result<T, String>, Option<RunUsage>),
 }
 
@@ -577,7 +578,10 @@ type BatchRun<T> = (Result<T, String>, Option<RunUsage>);
 
 /// Runs `count` independent executions, `workers` at a time, and returns their outputs in index
 /// order with the usage of those that ran. The first failure cancels the rest and is the error.
+/// While one execution runs, another reporting phase `phase_id` as queued (it waits for a runner)
+/// leaves the shown phase as it was, so the review never looks idle while work is in progress.
 pub(crate) fn run_side_by_side<T: Send>(
+    phase_id: &str,
     count: usize,
     workers: usize,
     cancel: &AtomicBool,
@@ -598,7 +602,7 @@ pub(crate) fn run_side_by_side<T: Send>(
                     break;
                 }
                 let mut batch_progress = |phase: &str, tail: &str| {
-                    let _ = tx.send(BatchEvent::Progress(phase.to_string(), tail.to_string()));
+                    let _ = tx.send(BatchEvent::Progress(index, phase.to_string(), tail.to_string()));
                 };
                 let (result, usage) = if batch_cancel.load(Ordering::Relaxed) {
                     (Err("cancelled".into()), None)
@@ -614,13 +618,32 @@ pub(crate) fn run_side_by_side<T: Send>(
             });
         }
         drop(tx);
+        let mut running = std::collections::BTreeSet::new();
+        let mut shown: Option<String> = None;
         while finished.len() < count {
             if cancel.load(Ordering::Relaxed) {
                 batch_cancel.store(true, Ordering::Relaxed);
             }
             match rx.recv_timeout(Duration::from_millis(500)) {
-                Ok(BatchEvent::Progress(phase, tail)) => progress(&phase, &tail),
+                Ok(BatchEvent::Progress(index, phase, tail)) => {
+                    let status = serde_json::from_str::<Vec<serde_json::Value>>(&phase)
+                        .ok()
+                        .and_then(|phases| phases.into_iter().find(|item| item["id"] == phase_id))
+                        .and_then(|item| item["status"].as_str().map(str::to_string));
+                    if status.as_deref() == Some("queued") && running.iter().any(|other| *other != index) {
+                        if let Some(shown) = &shown {
+                            progress(shown, &tail);
+                            continue;
+                        }
+                    }
+                    if matches!(status.as_deref(), Some("running" | "validating")) {
+                        running.insert(index);
+                    }
+                    progress(&phase, &tail);
+                    shown = Some(phase);
+                }
                 Ok(BatchEvent::Done(index, result, usage)) => {
+                    running.remove(&index);
                     finished.insert(index, (result, usage));
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}

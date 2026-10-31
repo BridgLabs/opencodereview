@@ -539,6 +539,7 @@ fn side_by_side_batches_overlap_and_return_outputs_in_order() {
     let peak = AtomicUsize::new(0);
     let mut messages = Vec::new();
     let (outputs, usages) = super::run_side_by_side(
+        "final",
         4,
         3,
         &AtomicBool::new(false),
@@ -563,18 +564,25 @@ fn side_by_side_batches_overlap_and_return_outputs_in_order() {
 #[test]
 fn a_failed_side_by_side_batch_cancels_the_others_and_reports_its_error() {
     use std::sync::atomic::{AtomicBool, Ordering};
-    let result = super::run_side_by_side(5, 2, &AtomicBool::new(false), &mut |_, _| {}, |index, cancel, _| {
-        if index == 1 {
-            return (Err::<usize, _>("batch output invalid".into()), None);
-        }
-        while index == 0 && !cancel.load(Ordering::Relaxed) {
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
-        if cancel.load(Ordering::Relaxed) {
-            return (Err("cancelled".into()), None);
-        }
-        (Ok(index), None)
-    });
+    let result = super::run_side_by_side(
+        "final",
+        5,
+        2,
+        &AtomicBool::new(false),
+        &mut |_, _| {},
+        |index, cancel, _| {
+            if index == 1 {
+                return (Err::<usize, _>("batch output invalid".into()), None);
+            }
+            while index == 0 && !cancel.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            if cancel.load(Ordering::Relaxed) {
+                return (Err("cancelled".into()), None);
+            }
+            (Ok(index), None)
+        },
+    );
     assert_eq!(result.unwrap_err(), "batch output invalid");
 }
 
@@ -582,11 +590,51 @@ fn a_failed_side_by_side_batch_cancels_the_others_and_reports_its_error() {
 fn cancelling_the_review_cancels_side_by_side_batches() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let cancel = AtomicBool::new(true);
-    let result = super::run_side_by_side(2, 2, &cancel, &mut |_, _| {}, |_, batch_cancel, _| {
+    let result = super::run_side_by_side("final", 2, 2, &cancel, &mut |_, _| {}, |_, batch_cancel, _| {
         while !batch_cancel.load(Ordering::Relaxed) {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         (Err::<usize, _>("cancelled".into()), None)
     });
     assert_eq!(result.unwrap_err(), "cancelled");
+}
+
+#[test]
+fn a_waiting_batch_does_not_show_the_final_phase_as_queued_while_another_runs() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let started = AtomicUsize::new(0);
+    let mut shown = Vec::new();
+    super::run_side_by_side(
+        "final",
+        2,
+        2,
+        &AtomicBool::new(false),
+        &mut |phase, _| shown.push(phase.to_string()),
+        |index, _, progress| {
+            if index == 0 {
+                progress(&super::sharded_phase_json("final", "running"), "batch 0");
+                started.store(1, Ordering::SeqCst);
+                while started.load(Ordering::SeqCst) < 2 {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            } else {
+                while started.load(Ordering::SeqCst) < 1 {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                // Let batch 0's running status reach the collector before this one waits.
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                progress(&super::sharded_phase_json("final", "queued"), "batch 1 waits");
+                started.store(2, Ordering::SeqCst);
+            }
+            (Ok(index), None)
+        },
+    )
+    .unwrap();
+    assert_eq!(shown.len(), 2);
+    assert!(
+        shown
+            .iter()
+            .all(|phase| phase.contains(r#""id":"final","label":"Final integration","status":"running""#)),
+        "{shown:?}"
+    );
 }
