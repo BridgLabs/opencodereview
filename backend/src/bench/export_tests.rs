@@ -37,6 +37,28 @@ fn body(kind: &str, title: &str, detail: &str, action: &str) -> String {
 }
 
 #[test]
+fn points_read_comments_posted_before_the_detail_was_shown_once() {
+    // Comments posted earlier repeat the explanation inside Details, before `Why:`.
+    let old = body(
+        "Finding",
+        "Race on `conns`",
+        "conns is read without the mutex.",
+        "Hold the lock.",
+    )
+    .replacen(
+        "<summary>\u{1f50e} Details</summary>\n\n",
+        "<summary>\u{1f50e} Details</summary>\n\nconns is read without the mutex.\n\n",
+        1,
+    );
+    assert_eq!(old.matches("conns is read without the mutex.").count(), 2);
+    let comments = serde_json::json!({"comments": [{"path": "src/pool.rs", "line": 6, "side": "RIGHT", "body": old}]});
+    let points = points(&comments.to_string(), DIFF).unwrap();
+    assert_eq!(points.len(), 1);
+    assert_eq!(points[0].detail, "conns is read without the mutex.");
+    assert_eq!(points[0].action, "Hold the lock.");
+}
+
+#[test]
 fn head_line_keeps_context_lines_and_moves_deleted_ones_to_their_place_in_head() {
     assert_eq!(head_line(DIFF, "src/pool.rs", 1), Some(1));
     assert_eq!(head_line(DIFF, "src/pool.rs", 4), Some(4));
