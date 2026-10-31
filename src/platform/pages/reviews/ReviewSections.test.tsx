@@ -56,8 +56,9 @@ it("keeps what is collapsed during a search out of the saved sections", async ()
 
 describe("labelCard", () => {
   it("says a published review had only suggestions", () => {
-    expect(labelCard({ lane: "auto_posted", suggestionsOnly: true })).toBe("Suggestions posted");
-    expect(labelCard({ lane: "posted", suggestionsOnly: false })).toBe("Findings posted");
-    expect(labelCard({ lane: "ready", suggestionsOnly: true })).toBe("Ready to post");
+    expect(labelCard({ lane: "auto_posted", suggestionsOnly: true, questionsOnly: false })).toBe("Suggestions posted");
+    expect(labelCard({ lane: "posted", suggestionsOnly: false, questionsOnly: false })).toBe("Findings posted");
+    expect(labelCard({ lane: "posted", suggestionsOnly: false, questionsOnly: true })).toBe("Questions posted");
+    expect(labelCard({ lane: "ready", suggestionsOnly: true, questionsOnly: true })).toBe("Ready to post");
   });
 });

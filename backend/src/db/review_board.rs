@@ -90,6 +90,10 @@ impl Database {
                         row.get::<_, Option<String>>(27)?.as_deref(),
                         row.get::<_, Option<String>>(26)?.as_deref(),
                     ),
+                    questions_only: crate::review::findings::questions_only(
+                        row.get::<_, Option<String>>(27)?.as_deref(),
+                        row.get::<_, Option<String>>(26)?.as_deref(),
+                    ),
                     result_inherited: row.get::<_, Option<String>>(20)?.as_deref() == Some("no_new_changes"),
                 })
             })

@@ -29,6 +29,8 @@ export interface ReviewCard {
   resultInherited: boolean;
   /** The latest review has nothing but summary suggestions. */
   suggestionsOnly: boolean;
+  /** The latest review asks questions and reports no finding. */
+  questionsOnly: boolean;
 }
 
 export interface ReviewBoardGroup {
