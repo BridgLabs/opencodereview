@@ -43,7 +43,7 @@ The first build compiles the Rust backend and can take several minutes. To skip 
 docker compose -f docker-compose.yml -f docker-compose.images.yml up -d
 ```
 
-Set `OCR_VERSION` (for example `OCR_VERSION=0.2.0`) to stay on one release; the default is the newest.
+Set `OCR_VERSION` (for example `OCR_VERSION=0.1.0`) to stay on one release; the default is the newest.
 
 ## Requirements
 

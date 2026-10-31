@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - First public release of OpenCodeReview: AI code review for GitHub pull requests that runs locally in Docker.
-- Reviews with the Claude Code CLI, the Codex CLI or the Gemini CLI, signed in with your own Claude, ChatGPT or Google account, or with OpenCode on its free models or your OpenCode Go key.
+- Reviews with the Claude Code CLI or the Codex CLI, signed in with your own Claude or ChatGPT account.
 - Multiple accounts with priority order, automatic failover on usage limits and remaining-usage display.
 - Codebase indexing: files, package and import graph, lightweight symbols.
 - Editable, versioned review skills.

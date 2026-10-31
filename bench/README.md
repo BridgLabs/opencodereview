@@ -36,7 +36,7 @@ Configuration, read from the contract's `RB_CONFIG_*` variables:
 | Variable | Default | Meaning |
 |---|---|---|
 | `RB_CONFIG_PROVIDER` | `claude` | `claude` or `codex`. It seeds the run's only account, so a review never fails over to another provider. |
-| `RB_CONFIG_MODEL`, `RB_CONFIG_EFFORT` | the product defaults | Same choices as Settings → Review engine |
+| `RB_CONFIG_MODEL`, `RB_CONFIG_EFFORT` | the product defaults | Overrides the product's fixed model and effort, for benchmark runs only |
 | `RB_CONFIG_DEADLINE_SECS` | 1500 | After this many seconds the review is cancelled. Two minutes before it, the review's time budget ends: the lens, output repairs and final integration batches start only while the chunk reviews and integration still required fit. Without time, a repair's invalid findings are dropped and a final batch keeps its chunk-validated findings, marked unconfirmed. The manifests set 3300 against ReviewBench's 60-minute limit. |
 | `RB_CONFIG_MAX_FILES` | 800 | Settings → Review → maximum files. The product defaults to 100; a pull request it declines scores nothing, so the benchmark allows more. |
 | `RB_CONFIG_FOCUS_FILES` | 100 | The `review_focus_files` setting, which has no Settings screen yet. Above it, the review covers the highest-priority files (source code first, then the most changed lines) and lists the rest as not reviewed. `0` reviews every file; the product default is `0`. |
@@ -121,26 +121,3 @@ python3 bench/report.py \
   --martian-evaluations ../code-review-benchmark/offline/results/<judge>/evaluations.json \
   --aacr-metrics opencodereview-claude=../aacr-bench/evaluation/metrics/aacr_bench/ocr/opencodereview-claude/<metrics>.json
 ```
-
-## Leaderboards
-
-- **ReviewBench.**
-  1. Push the amd64 image to a registry.
-  2. Put its digest in `manifests/opencodereview-<provider>.json`.
-  3. Register through ReviewBench's onboarding form.
-  4. Pass a portal test run on the test set.
-  5. Request the final run (3 rounds over 219 PRs).
-- **Martian.** The leaderboard only lists tools that commented on real GitHub pull requests. The route is:
-  1. Fork the 50 PRs into a dedicated org with their `step0_fork_prs`.
-  2. Point a separate OpenCodeReview stack at that org. It needs its own volumes and must never be your workspace. Use default comment posting.
-  3. Collect the comments with `step1_download_prs`.
-  4. Meet their inclusion criteria.
-
-## Phases
-
-| Phase | Scope | Done when |
-|---|---|---|
-| 0 | Smoke test with the fake CLI; then `reviewbench.py --pr 0`; then the 25-PR test set; then a portal test run | 25/25 accepted |
-| 1 | Martian, 50 PRs, offline | Scored next to the published tools |
-| 2 | AACR-Bench, 50-sample subset (`--seed 42`) | Precision/recall table against its Claude Code and Codex baselines |
-| 3 | ReviewBench final run, per provider | Listed on the leaderboard |
