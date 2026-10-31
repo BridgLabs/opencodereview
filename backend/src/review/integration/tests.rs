@@ -1660,9 +1660,14 @@ fn prepared_prompt_budget_includes_snapshot_read_instructions() {
             format!("{prefix}{}.rs", "x".repeat(length - prefix.len() - ".rs".len()))
         })
         .collect::<Vec<_>>();
+    let seed_root_text = seed_root.to_string_lossy().into_owned();
     fs::remove_dir_all(seed_root).unwrap();
     let inputs = frozen_inputs(&files.iter().map(|path| (path.clone(), LINE.into())).collect::<Vec<_>>());
     let (root, context, map, diff) = fixture(-228511, &inputs, &files);
+    // The run directory's name carries a process-wide counter, so this one can be a digit longer
+    // than the seed's, and the prompt repeats it.
+    let shift = seed_prompt.matches(seed_root_text.as_str()).count() as isize
+        * (root.to_string_lossy().len() as isize - seed_root_text.len() as isize);
     let stages = prepare(
         &inputs,
         &context,
@@ -1678,7 +1683,7 @@ fn prepared_prompt_budget_includes_snapshot_read_instructions() {
     let stage = &stages[0];
     assert_eq!(stage.files, files);
     let prepared = fs::read_to_string(&stage.prompt).unwrap();
-    assert_eq!(prepared.len(), target);
+    assert_eq!(prepared.len() as isize, target as isize + shift);
     validate_review_stage_inputs(&stage.context, Some(&stage.directory), &stage.prompt).unwrap();
     let request = crate::sandbox::runner::stage_request(
         &inputs.model,

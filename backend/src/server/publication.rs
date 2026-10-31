@@ -1152,7 +1152,7 @@ pub(crate) fn posted_findings_review_body(full_name: &str, head_sha: &str, comme
     if comments.is_empty() {
         return format!("### ⚠️ OpenCodeReview posted findings\n\n{reviewed} The details are in this review.");
     }
-    let rows = comments
+    let mut rows = comments
         .iter()
         .map(|comment| {
             let (question, title) = summary_row_title(comment["body"].as_str().unwrap_or_default());
@@ -1164,11 +1164,23 @@ pub(crate) fn posted_findings_review_body(full_name: &str, head_sha: &str, comme
                 (Some(path), None) => format!("`{}`", table_cell(path, 200)),
                 (None, _) => "General".to_string(),
             };
-            (
+            // Most severe first, questions last; a comment without a severity reads as medium.
+            let (rank, icon) = match (
                 question,
-                format!("| {} | {title} | {place} |", if question { "❓" } else { "⚠️" }),
-            )
+                crate::review::evidence::comment_severity(comment["body"].as_str().unwrap_or_default()),
+            ) {
+                (true, _) => (3, "❓"),
+                (false, Some("high")) => (0, "🔴"),
+                (false, Some("low")) => (2, "🟡"),
+                (false, _) => (1, "🟠"),
+            };
+            (rank, question, format!("| {icon} | {title} | {place} |"))
         })
+        .collect::<Vec<_>>();
+    rows.sort_by_key(|(rank, _, _)| *rank);
+    let rows = rows
+        .into_iter()
+        .map(|(_, question, row)| (question, row))
         .collect::<Vec<_>>();
     let questions = rows.iter().filter(|(question, _)| *question).count();
     let issues = rows.len() - questions;
