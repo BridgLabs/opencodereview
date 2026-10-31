@@ -245,20 +245,29 @@ pub(crate) fn contains_positive_finding_signal(lower: &str) -> bool {
         || lower.contains("hide an untemplated")
 }
 
-/// Heading of the summary section that lists lower-priority suggestions instead of posting them
-/// inline. It never contains a [Finding]/[Question] marker, so suggestions never count as findings.
-pub(crate) const SUGGESTIONS_HEADING: &str = "### 💡 Suggestions";
+/// Start of the summary section that lists lower-priority suggestions instead of posting them
+/// inline: a collapsed `<details>` block whose summary is `💡 Suggestions (n)`, so the review shows
+/// one line until the reader opens it. It never contains a [Finding]/[Question] marker, so
+/// suggestions never count as findings.
+pub(crate) const SUGGESTIONS_HEADING: &str = "<details>\n<summary>💡 Suggestions";
+/// The heading reviews used before the section was collapsed; stored reviews still carry it.
+const LEGACY_SUGGESTIONS_HEADING: &str = "### 💡 Suggestions";
 pub(crate) const SUGGESTIONS_INTRO: &str =
     "Lower-priority points, such as test gaps, stale names or docs, and duplication. They are not posted as inline comments.";
 
 /// `body` split before its suggestions section: the review points, then the section (empty when
 /// there is none).
 pub(crate) fn split_suggestions(body: &str) -> (&str, &str) {
-    let start = if body.starts_with(SUGGESTIONS_HEADING) {
-        Some(0)
-    } else {
-        body.find(&format!("\n{SUGGESTIONS_HEADING}")).map(|at| at + 1)
-    };
+    let start = [SUGGESTIONS_HEADING, LEGACY_SUGGESTIONS_HEADING]
+        .into_iter()
+        .filter_map(|heading| {
+            if body.starts_with(heading) {
+                Some(0)
+            } else {
+                body.find(&format!("\n{heading}")).map(|at| at + 1)
+            }
+        })
+        .min();
     match start {
         Some(at) => (&body[..at], &body[at..]),
         None => (body, ""),

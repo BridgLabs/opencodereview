@@ -910,11 +910,10 @@ fn relocated_selected_findings_survive_comment_publication() {
 
 #[test]
 fn suggestions_post_with_the_review_but_never_on_their_own_after_duplicates() {
-    let suggestions = format!(
-        "{}\n\n{}\n\n- `a.rs:3` **Stale test name**. Detail Suggested change: Rename it",
-        crate::review::SUGGESTIONS_HEADING,
-        crate::review::SUGGESTIONS_INTRO
-    );
+    // As the review writes it: a collapsed block, not just its opening.
+    let suggestions = crate::review::evidence::suggestions_section(&[serde_json::json!(
+        {"path":"a.rs","line":3,"title":"Stale test name","detail":"Detail","action":"Rename it"}
+    )]);
     let dedupe = |comments: serde_json::Value, suppressed| github::DedupeResult {
         post_comments: comments,
         annotated_comments_json: "{\"comments\":[]}".into(),
@@ -934,7 +933,9 @@ fn suggestions_post_with_the_review_but_never_on_their_own_after_duplicates() {
     ));
     for event in ["COMMENT", "APPROVE"] {
         let draft = finish_review_post(&only, event, false, dedupe(serde_json::json!([]), 0), "");
-        assert!(draft.body.contains("**Stale test name**"), "{event}");
+        // The collapsed block arrives whole, closed, as the review wrote it.
+        assert!(draft.body.contains(suggestions.trim()), "{event}: {}", draft.body);
+        assert!(draft.body.contains("</details>"), "{event}");
         assert!(!draft.body.contains("No findings."), "{event}");
     }
     let inline = review_run(
@@ -953,9 +954,19 @@ fn suggestions_post_with_the_review_but_never_on_their_own_after_duplicates() {
         ),
         "",
     );
-    assert!(draft.body.contains("**Stale test name**"));
+    assert!(draft.body.contains(suggestions.trim()), "{}", draft.body);
     let draft = finish_review_post(&inline, "COMMENT", false, dedupe(serde_json::json!([]), 1), "");
     assert!(draft.body.is_empty());
+    // A review stored before the section was collapsed still posts its suggestions.
+    let legacy = review_run(
+        Some(
+            "No findings.\n\n### 💡 Suggestions\n\n- `a.rs:3` **Stale test name**. Detail Suggested change: Rename it",
+        ),
+        Some(r#"{"comments":[]}"#),
+    );
+    let draft = finish_review_post(&legacy, "COMMENT", false, dedupe(serde_json::json!([]), 0), "");
+    assert!(draft.body.contains("### 💡 Suggestions"), "{}", draft.body);
+    assert!(draft.body.contains("**Stale test name**"));
 }
 
 #[test]

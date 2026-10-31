@@ -248,4 +248,11 @@ describe("reviewBodySuggestions", () => {
     expect(reviewBodySuggestions(null)).toBe("");
     expect(reviewBodyHasPostableFinding(section)).toBe(false);
   });
+
+  it("shows a section collapsed for GitHub as a heading", () => {
+    const items = "Lower-priority points.\n\n- `a.rs:3` **Stale test name**. Rename it";
+    const collapsed = `<details>\n<summary>💡 Suggestions (1)</summary>\n\n${items}\n\n</details>`;
+    expect(reviewBodySuggestions(`No findings.\n\n${collapsed}`)).toBe(`### 💡 Suggestions (1)\n\n${items}`);
+    expect(reviewBodyHasPostableFinding(collapsed)).toBe(false);
+  });
 });

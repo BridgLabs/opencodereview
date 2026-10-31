@@ -171,12 +171,21 @@ export function reviewBodyHasPostableFinding(body: string | null) {
   );
 }
 
-/** Heading of the review summary section that lists lower-priority suggestions (backend `SUGGESTIONS_HEADING`). */
-const SUGGESTIONS_HEADING = "### 💡 Suggestions";
+/** Start of the review summary section that lists lower-priority suggestions (backend `SUGGESTIONS_HEADING`):
+ * a collapsed `<details>` block on GitHub, or the heading reviews used before it was collapsed. */
+const SUGGESTIONS_STARTS = ["<details>\n<summary>💡 Suggestions", "### 💡 Suggestions"];
 
-/** The suggestions section of a review body, or "" when it has none. */
+/** The suggestions section of a review body as Markdown, or "" when it has none. A collapsed block is
+ * shown as a heading: the app's Markdown view renders no HTML. */
 export function reviewBodySuggestions(body: string | null) {
   if (!body) return "";
-  const start = body.startsWith(SUGGESTIONS_HEADING) ? 0 : body.indexOf(`\n${SUGGESTIONS_HEADING}`);
-  return start < 0 ? "" : body.slice(start).trim();
+  const starts = SUGGESTIONS_STARTS.map((heading) =>
+    body.startsWith(heading) ? 0 : body.indexOf(`\n${heading}`),
+  ).filter((start) => start >= 0);
+  if (starts.length === 0) return "";
+  return body
+    .slice(Math.min(...starts))
+    .trim()
+    .replace(/^<details>\n<summary>(.*?)<\/summary>/, "### $1")
+    .replace(/\n*<\/details>$/, "");
 }
