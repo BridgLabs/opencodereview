@@ -12,6 +12,7 @@ import {
   reviewBodySuggestions,
   reviewPointKind,
   selectedFindingIds,
+  storedPointCounts,
 } from "./findings";
 
 const candidate = (id: string, selected: boolean, blockedReason: string | null = null): FindingCandidate => ({
@@ -254,5 +255,22 @@ describe("reviewBodySuggestions", () => {
     const collapsed = `<details>\n<summary>💡 Suggestions (1)</summary>\n\n${items}\n\n</details>`;
     expect(reviewBodySuggestions(`No findings.\n\n${collapsed}`)).toBe(`### 💡 Suggestions (1)\n\n${items}`);
     expect(reviewBodyHasPostableFinding(collapsed)).toBe(false);
+  });
+});
+
+describe("storedPointCounts", () => {
+  it("counts like the backend: a mixed comment as both, an unmarked one as a finding, and body points", () => {
+    expect(storedPointCounts(["**[Question] Checked?**"], "1 review comments selected for publication.")).toEqual({
+      findings: 0,
+      questions: 1,
+    });
+    expect(storedPointCounts(["**[Finding] Bug**\n\n**[Question] Intended?**", "Plain note"], null)).toEqual({
+      findings: 2,
+      questions: 1,
+    });
+    expect(storedPointCounts([], "**[Question] Checked?**\n\n```\n[Finding] not a title\n```")).toEqual({
+      findings: 0,
+      questions: 1,
+    });
   });
 });

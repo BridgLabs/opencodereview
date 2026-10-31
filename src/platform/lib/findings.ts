@@ -63,21 +63,39 @@ export async function prepareEmptyFindingDecision(
   return saved;
 }
 
-export function reviewPointKind(body: string): "finding" | "question" | "mixed" | "unknown" {
+/** The `[Finding]` and `[Question]` titles in a body, outside code fences. */
+function pointTitles(body: string) {
   let fence = false;
-  let finding = false;
-  let question = false;
+  const titles: string[] = [];
   for (const line of body.split("\n")) {
     if (/^\s*(```|~~~)/.test(line)) {
       fence = !fence;
       continue;
     }
-    if (fence) continue;
-    const match = line.replace(/^[\s*_>#-]+/, "").match(/^\[(Finding|Question)\]/);
-    finding ||= match?.[1] === "Finding";
-    question ||= match?.[1] === "Question";
+    const match = fence ? null : line.replace(/^[\s*_>#-]+/, "").match(/^\[(Finding|Question)\]/);
+    if (match) titles.push(match[1]);
   }
+  return titles;
+}
+
+export function reviewPointKind(body: string): "finding" | "question" | "mixed" | "unknown" {
+  const titles = pointTitles(body);
+  const finding = titles.includes("Finding");
+  const question = titles.includes("Question");
   return finding && question ? "mixed" : finding ? "finding" : question ? "question" : "unknown";
+}
+
+/** Findings and questions a stored review holds, like the backend's `point_counts`: an inline comment
+ * that is both counts as both and one without a marker as a finding; the body adds each point it lists. */
+export function storedPointCounts(commentBodies: string[], reviewBody: string | null) {
+  const counts = { findings: 0, questions: 0 };
+  for (const body of commentBodies) {
+    const kind = reviewPointKind(body);
+    if (kind !== "question") counts.findings += 1;
+    if (kind === "question" || kind === "mixed") counts.questions += 1;
+  }
+  for (const title of pointTitles(reviewBody ?? "")) counts[title === "Finding" ? "findings" : "questions"] += 1;
+  return counts;
 }
 
 export const candidateKind = (candidate: FindingCandidate) => candidate.kind ?? reviewPointKind(candidate.body);
