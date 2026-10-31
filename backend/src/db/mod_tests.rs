@@ -853,6 +853,9 @@ fn review_suggestions_setting_is_off_by_default_and_round_trips() {
             .review_suggestions_enabled
     );
     assert!(db.settings().unwrap().review_suggestions_enabled);
+    // A rejected value leaves the stored one as it was.
+    assert!(db.save_setting("review_suggestions_enabled", "yes").is_err());
+    assert!(db.settings().unwrap().review_suggestions_enabled);
     let update: SettingsUpdate =
         serde_json::from_value(serde_json::json!({"settings": {"review_suggestions_enabled": "false"}})).unwrap();
     assert!(
@@ -861,7 +864,6 @@ fn review_suggestions_setting_is_off_by_default_and_round_trips() {
             .settings
             .review_suggestions_enabled
     );
-    assert!(db.save_setting("review_suggestions_enabled", "yes").is_err());
     assert!(!db.settings().unwrap().review_suggestions_enabled);
 }
 
