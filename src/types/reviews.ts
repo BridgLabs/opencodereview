@@ -27,6 +27,8 @@ export interface ReviewCard {
   resultPublicationStatus: "disabled" | "pending" | "posting" | "posted" | "failed" | "superseded" | null;
   resultError: string | null;
   resultInherited: boolean;
+  /** The latest review has nothing but summary suggestions. */
+  suggestionsOnly: boolean;
 }
 
 export interface ReviewBoardGroup {

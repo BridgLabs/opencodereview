@@ -172,6 +172,8 @@ pub struct ReviewCard {
     pub result_publication_status: Option<String>,
     pub result_error: Option<String>,
     pub result_inherited: bool,
+    /// The latest review has nothing but summary suggestions.
+    pub suggestions_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

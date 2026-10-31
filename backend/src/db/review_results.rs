@@ -199,6 +199,19 @@ impl Database {
         Ok(())
     }
 
+    /// Notes why automatic publication of a run's findings failed, on the result left awaiting a
+    /// decision, where the board shows it; polling never rewrites it and the next result clears it.
+    pub fn note_auto_post_failure(&self, run_id: i64, reason: &str) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE review_results SET error_message = $1, updated_at = $2
+                 WHERE run_id = $3 AND effective_state = 'awaiting_action'",
+                params![reason, now_millis(), run_id],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
     pub fn fail_review_result_publication(&self, result_id: i64, error: &str) -> Result<bool, String> {
         let pr_id: i64 = self
             .conn

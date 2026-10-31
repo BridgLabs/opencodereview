@@ -2250,3 +2250,96 @@ fn a_repository_leaving_the_workspace_keeps_its_review_history() {
         .unwrap();
     assert!(removed.is_none());
 }
+
+#[test]
+fn the_board_carries_an_auto_post_failure_and_a_suggestions_only_mark_until_the_next_review() {
+    let db = Db::for_test().open().unwrap();
+    db.conn.execute("INSERT INTO repos (owner,name,full_name,is_private,created_at,updated_at) VALUES ('acme','api','acme/api',1,1,1)", []).unwrap();
+    let repo = db.conn.last_insert_rowid();
+    db.save_repo_subscription(repo, true, "manual", false, false).unwrap();
+    db.conn.execute("INSERT INTO pull_requests (repo_id,number,title,author,head_sha,review_lane,status_reason,last_synced_at,created_at,updated_at) VALUES ($1,1,'PR','a','head','ready','Stacked PR: reviewing a → b',1,1,1)", [repo]).unwrap();
+    let pr = db.conn.last_insert_rowid();
+    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,created_at,updated_at) VALUES ($1,'head','preview','**[Finding] Bug**',1,1)", [pr]).unwrap();
+    let run = db.conn.last_insert_rowid();
+    let input = ReviewResultInput {
+        pr_id: pr,
+        run_id: run,
+        actionable_run_id: Some(run),
+        observed_head_sha: "head",
+        reviewed_head_sha: "head",
+        prior_result_state: None,
+        prior_result_head_sha: None,
+        observation: "findings",
+        effective_state: "awaiting_action",
+        publication_status: "disabled",
+        body: None,
+        github_review_id: None,
+        github_review_url: None,
+        reviewer_version: "fixture",
+        skill_version: "fixture",
+    };
+    db.reserve_review_result(&input).unwrap();
+    let card = |db: &Database| {
+        db.list_review_board()
+            .unwrap()
+            .into_iter()
+            .flat_map(|group| group.items)
+            .find(|card| card.id == pr)
+            .unwrap()
+    };
+    // Only the run's own result left awaiting a decision takes the reason.
+    db.note_auto_post_failure(run + 1000, "Auto-post failed: another run")
+        .unwrap();
+    assert_eq!(card(&db).result_error, None);
+    db.conn
+        .execute(
+            "UPDATE review_results SET effective_state = 'findings_posted' WHERE run_id = $1",
+            [run],
+        )
+        .unwrap();
+    db.note_auto_post_failure(run, "Auto-post failed: already posted")
+        .unwrap();
+    assert_eq!(card(&db).result_error, None);
+    db.conn
+        .execute(
+            "UPDATE review_results SET effective_state = 'awaiting_action' WHERE run_id = $1",
+            [run],
+        )
+        .unwrap();
+    db.note_auto_post_failure(run, "Auto-post failed: PR base/diff scope changed")
+        .unwrap();
+    // The board shows its own text in status_reason for a run awaiting a decision; the failure
+    // travels on the result instead.
+    assert_eq!(
+        card(&db).result_error.as_deref(),
+        Some("Auto-post failed: PR base/diff scope changed")
+    );
+    assert!(!card(&db).suggestions_only);
+    // A review whose only points are summary suggestions is marked so on the board.
+    let section = crate::review::evidence::suggestions_section(&[serde_json::json!(
+        {"path":"src/a.rs","line":2,"title":"Stale test name","detail":"Detail","action":"Rename it"}
+    )]);
+    db.conn
+        .execute(
+            "UPDATE review_runs SET review_body = $1, comments_json = $2 WHERE id = $3",
+            params![
+                format!("0 review comments selected for publication.\n\n{section}"),
+                r#"{"comments":[]}"#,
+                run
+            ],
+        )
+        .unwrap();
+    assert!(card(&db).suggestions_only);
+    // The next review's result clears the failure, and its findings clear the suggestions-only mark.
+    // It keeps its suggestions, so only its finding can clear the mark.
+    db.conn.execute("INSERT INTO review_runs (pr_id,head_sha,status,review_body,created_at,updated_at) VALUES ($1,'head','preview',$2,2,2)", params![pr, format!("**[Finding] Bug**\n\n{section}")]).unwrap();
+    let next = db.conn.last_insert_rowid();
+    db.reserve_review_result(&ReviewResultInput {
+        run_id: next,
+        actionable_run_id: Some(next),
+        ..input
+    })
+    .unwrap();
+    assert_eq!(card(&db).result_error, None);
+    assert!(!card(&db).suggestions_only);
+}
