@@ -1026,6 +1026,59 @@ fn a_review_with_only_suggestions_keeps_its_summary_as_written() {
 }
 
 #[test]
+fn suggestions_section_drops_a_point_repeated_in_other_words() {
+    let item =
+        |path: &str, line: i64, title: &str| json!({"path":path,"line":line,"title":title,"detail":"d","action":"a"});
+    let section = suggestions_section(&[
+        item(
+            "port.go",
+            37,
+            "Doc comment names ServerConfigsProvider but the function is NewServerConfigs",
+        ),
+        // The same point from another stage, in other words, on the same line.
+        item(
+            "port.go",
+            37,
+            "The doc comment names ServerConfigsProvider, but the function is NewServerConfigs",
+        ),
+        item(
+            "main_test.go",
+            157,
+            "REDIS_PORT set to the metrics port in TestRedisHandler",
+        ),
+        item(
+            "main_test.go",
+            158,
+            "TestRedisHandler passes the metrics port as REDIS_PORT",
+        ),
+        // Same title in another file, and a different point on a nearby line, stay.
+        item(
+            "other.go",
+            37,
+            "Doc comment names ServerConfigsProvider but the function is NewServerConfigs",
+        ),
+        item("main_test.go", 157, "No test covers the new Redis handler"),
+        // Titles that differ only in the name they point at are different points.
+        item("parser.rs", 10, "No test covers parse_header"),
+        item("parser.rs", 12, "No test covers parse_body"),
+        // Same words, but far from the first one: another place, listed again.
+        item(
+            "main_test.go",
+            300,
+            "TestRedisHandler passes the metrics port as REDIS_PORT",
+        ),
+    ]);
+    assert!(section.contains(" (7)</summary>"), "{section}");
+    assert!(section.contains("parse_body"), "{section}");
+    assert!(!section.contains("The doc comment names"), "{section}");
+    assert!(!section.contains("`main_test.go:158`"), "{section}");
+    assert!(
+        section.contains("`other.go:37`") && section.contains("`main_test.go:300`"),
+        "{section}"
+    );
+}
+
+#[test]
 fn findings_carry_their_severity_and_questions_none() {
     let point = |kind: &str, severity: Option<&str>| Point {
         kind: kind.into(),
