@@ -167,6 +167,34 @@ section { padding: 140px 0 0; }
 .copy.copied { color: var(--success); }
 .copy svg { width: 15px; height: 15px; }
 
+/* Comparison: our column is a lifted card, the others sit on the page */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.compare { margin-top: 64px; overflow-x: auto; padding: 4px 2px 12px; }
+.compare:focus-visible { outline: 2px solid var(--mascot); outline-offset: 4px; border-radius: 22px; }
+.compare table { width: 100%; min-width: 560px; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+.compare th, .compare td { padding: 22px 24px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+.compare thead th { padding-top: 26px; border-bottom-color: var(--line-strong); font-size: 17px; font-weight: 600; letter-spacing: -.01em; color: var(--fg-muted); }
+.compare thead th:first-child { width: 24%; }
+.compare tbody th { font-size: 14px; font-weight: 500; color: var(--fg-subtle); }
+.compare b { display: block; font-size: 18px; font-weight: 600; letter-spacing: -.015em; color: var(--fg-muted); }
+.compare small { display: block; margin-top: 4px; font-size: 14px; line-height: 1.45; color: var(--fg-subtle); }
+.compare .us { position: relative; border-inline: 1px solid rgba(143, 179, 255, .35); background: rgba(143, 179, 255, .07); }
+.compare thead .us { border-top: 1px solid rgba(143, 179, 255, .35); border-radius: 20px 20px 0 0; color: var(--fg); }
+.compare tbody tr:last-child > * { border-bottom: 0; }
+.compare tbody tr:last-child .us { border-bottom: 1px solid rgba(143, 179, 255, .35); border-radius: 0 0 20px 20px; }
+.compare td.us { display: table-cell; }
+.compare td.us > div { display: inline-block; vertical-align: top; width: calc(100% - 34px); }
+.compare td.us b { color: var(--fg); }
+.compare td.us small { color: var(--fg-muted); }
+.compare tbody tr:first-child td.us b { color: var(--success); font-size: 28px; letter-spacing: -.03em; }
+.us-name { display: inline-flex; align-items: center; gap: 10px; }
+.us-name svg { width: 26px; height: 26px; }
+.tick { display: inline-block; vertical-align: top; width: 22px; height: 22px; margin: 1px 12px 0 0; padding: 4px; border-radius: 50%; background: rgba(74, 222, 128, .14); fill: none; stroke: var(--success); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.compare tbody tr:first-child .tick { margin-top: 7px; }
+.compare-note { margin-top: 28px; text-align: center; }
+.compare-note p { font-size: 16px; color: var(--fg-muted); }
+.section-lede { text-wrap: balance; }
+
 /* Price */
 .price { display: grid; grid-template-columns: 1fr minmax(320px, 460px); gap: 64px; align-items: center; }
 .price-note { margin-top: 28px; max-width: 520px; font-size: 15px; color: var(--fg-subtle); }

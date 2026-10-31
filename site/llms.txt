@@ -8,7 +8,7 @@
 - Your code stays on the machine that runs OpenCodeReview; reviews call your AI provider with your own sign-in.
 - Supported plans: Claude Pro, Max or Team (Claude Code), ChatGPT plans that include Codex. Local models are not supported.
 - Several accounts can be connected; when one hits its usage limit, the review continues on the next.
-- Compared with hosted reviewers such as CodeRabbit or Greptile, which are billed per developer and run your code in their cloud, OpenCodeReview is self-hosted and uses the AI plan you already have.
+- Compared with hosted AI code reviewers, which are billed per developer or per review and run your code in their cloud, OpenCodeReview is self-hosted and uses the AI plan you already have.
 
 ## Docs
 
