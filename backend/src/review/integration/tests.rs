@@ -1997,3 +1997,31 @@ fn an_unchanged_keep_without_a_reason_stays_unconfirmed() {
         .all(|warning| warning.reason == "unconfirmed_candidate"));
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn an_unchanged_keep_with_an_index_keeps_the_rewritten_finding_once() {
+    let (inputs, root, _, _, payload, stages) = unchanged_fixture(-1213);
+    let stage = &stages[0];
+    final_keeping_unchanged(&inputs, stage, &payload, true, "Verified; the chunk comment stands");
+    // Reword the rewritten finding and mark its keep unchanged as well, contradicting the index.
+    let path = stage.directory.join("report.json");
+    let mut report: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    report["findings"][0]["title"] = json!("Issue reworded by the final pass");
+    fs::write(&path, report.to_string()).unwrap();
+    let path = stage.directory.join("finding_decisions.json");
+    let mut decisions: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    decisions["decisions"][0]["unchanged"] = json!(true);
+    fs::write(&path, decisions.to_string()).unwrap();
+    let output = validate_output(&inputs, stage, &payload, HEAD).unwrap();
+    assert_eq!(
+        output.comments.len(),
+        stage.candidate_ids.len(),
+        "no orphan comment is posted"
+    );
+    let first = &output.comments[output.decisions[0]["commentIndex"].as_u64().unwrap() as usize];
+    assert!(first["body"]
+        .as_str()
+        .unwrap()
+        .contains("Issue reworded by the final pass"));
+    fs::remove_dir_all(root).unwrap();
+}

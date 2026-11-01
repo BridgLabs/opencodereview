@@ -128,6 +128,8 @@ pub(crate) fn complete_decisions(
             entry["candidateId"] == *id
                 && entry["decision"] == "keep"
                 && entry["unchanged"] == true
+                // A keep that also points at a report finding means that finding: the rewrite wins.
+                && entry["commentIndex"].is_null()
                 && entry["reason"].as_str().is_some_and(|reason| !reason.trim().is_empty())
         });
         if let Some(entry) = unchanged.filter(|_| !comment.is_null()) {
