@@ -146,7 +146,12 @@ fn mechanical_fixes(original: &Value, repaired: &Value) -> Option<Value> {
 /// when a correction names something that does not exist.
 fn apply_corrections(original: &Value, decisions: Option<&Value>, repair: &Value) -> Option<(Value, Option<Value>)> {
     let mut merged = original.clone();
-    for correction in repair.get("corrections")?.as_array()? {
+    // A repair that only corrects decisions may leave the corrections list out.
+    for correction in repair
+        .get("corrections")
+        .map(Value::as_array)
+        .unwrap_or(Some(&Vec::new()))?
+    {
         let field = correction.get("field")?.as_str()?;
         if !matches!(field, "findings" | "questions" | "suggestions") {
             return None;
@@ -435,7 +440,10 @@ pub(super) fn run<T>(
         }
         let original = crate::review::evidence::schema_report_fields(report);
         let mut repaired = read_json(&report_path)?;
-        if repaired.get("corrections").is_some() {
+        // A narrow answer holds corrections, decision corrections or both, never a report's findings.
+        if repaired.get("findings").is_none()
+            && (repaired.get("corrections").is_some() || repaired.get("decisions").is_some())
+        {
             let (merged, corrected) = apply_corrections(&original, decisions.as_ref(), &repaired)
                 .ok_or("Incomplete review: output repair named a point or reference that does not exist")?;
             if let Some(corrected) = &corrected {

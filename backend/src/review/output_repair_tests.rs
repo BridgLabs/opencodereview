@@ -974,3 +974,14 @@ fn decision_corrections_change_only_counter_evidence_lines_and_quotes() {
     let unknown = json!({"corrections":[],"decisions":[{"candidateId":"c9","counterEvidence":[{"index":0,"line":1}]}]});
     assert!(apply_corrections(&report, Some(&decisions), &unknown).is_none());
 }
+
+#[test]
+fn a_narrow_answer_with_only_decision_corrections_is_applied() {
+    let reference = json!({"path":"code.rs","revision":"a".repeat(40),"line":2,"quote":"wrong"});
+    let decisions = json!({"decisions":[{"candidateId":"c1","decision":"discard","reason":"Guarded","counterEvidence":[reference]}]});
+    let report = json!({"findings":[]});
+    let repair = json!({"decisions":[{"candidateId":"c1","counterEvidence":[{"index":0,"line":1,"quote":"call();"}]}]});
+    let (merged, fixed) = apply_corrections(&report, Some(&decisions), &repair).unwrap();
+    assert_eq!(merged, report);
+    assert_eq!(fixed.unwrap()["decisions"][0]["counterEvidence"][0]["quote"], "call();");
+}
