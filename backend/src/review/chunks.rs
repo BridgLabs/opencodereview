@@ -619,6 +619,8 @@ pub(crate) fn run_side_by_side<T: Send>(
         }
         drop(tx);
         let mut running = std::collections::BTreeSet::new();
+        // The last waiting report of each batch whose wait was not shown because another ran.
+        let mut waiting: BTreeMap<usize, (String, String)> = BTreeMap::new();
         let mut shown: Option<String> = None;
         while finished.len() < count {
             if cancel.load(Ordering::Relaxed) {
@@ -634,9 +636,11 @@ pub(crate) fn run_side_by_side<T: Send>(
                     if status.as_deref() == Some("queued") {
                         running.remove(&index);
                     }
+                    waiting.remove(&index);
                     if status.as_deref() == Some("queued") && !running.is_empty() {
                         if let Some(shown) = &shown {
                             progress(shown, &tail);
+                            waiting.insert(index, (phase, tail));
                             continue;
                         }
                     }
@@ -648,7 +652,16 @@ pub(crate) fn run_side_by_side<T: Send>(
                 }
                 Ok(BatchEvent::Done(index, result, usage)) => {
                     running.remove(&index);
+                    waiting.remove(&index);
                     finished.insert(index, (result, usage));
+                    // The last running batch finished while others still wait: show that they wait.
+                    if running.is_empty() {
+                        if let Some((phase, tail)) = waiting.values().next_back().cloned() {
+                            progress(&phase, &tail);
+                            shown = Some(phase);
+                            waiting.clear();
+                        }
+                    }
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,

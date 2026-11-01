@@ -689,3 +689,43 @@ fn a_batch_waiting_again_no_longer_counts_as_running() {
         "every batch waits, so the phase shows queued: {shown:?}"
     );
 }
+
+#[test]
+fn the_final_phase_shows_queued_once_the_last_running_batch_finishes() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let step = AtomicUsize::new(0);
+    let wait_for = |at: usize| {
+        while step.load(Ordering::SeqCst) < at {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    };
+    let mut shown = Vec::new();
+    super::run_side_by_side(
+        "final",
+        2,
+        2,
+        &AtomicBool::new(false),
+        &mut |phase, tail| shown.push((tail.to_string(), phase.to_string())),
+        |index, _, progress| {
+            if index == 0 {
+                progress(&super::sharded_phase_json("final", "running"), "0 runs");
+                step.store(1, Ordering::SeqCst);
+                wait_for(2);
+            } else {
+                wait_for(1);
+                progress(&super::sharded_phase_json("final", "queued"), "1 waits");
+                step.store(2, Ordering::SeqCst);
+                // Still waiting well after batch 0 finished.
+                std::thread::sleep(std::time::Duration::from_millis(150));
+            }
+            (Ok(index), None)
+        },
+    )
+    .unwrap();
+    let queued = r#""id":"final","label":"Final integration","status":"queued""#;
+    assert!(!shown[1].1.contains(queued), "hidden while batch 0 runs: {shown:?}");
+    let (tail, phase) = shown.last().unwrap();
+    assert_eq!(tail, "1 waits");
+    assert!(phase.contains(queued), "shown once nothing runs: {shown:?}");
+}
