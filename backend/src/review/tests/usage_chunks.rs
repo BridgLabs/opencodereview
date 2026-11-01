@@ -609,7 +609,7 @@ fn a_waiting_batch_does_not_show_the_final_phase_as_queued_while_another_runs() 
         2,
         2,
         &AtomicBool::new(false),
-        &mut |phase, _| shown.push(phase.to_string()),
+        &mut |phase, tail| shown.push((tail.to_string(), phase.to_string())),
         |index, _, progress| {
             if index == 0 {
                 progress(&super::sharded_phase_json("final", "running"), "batch 0");
@@ -630,11 +630,11 @@ fn a_waiting_batch_does_not_show_the_final_phase_as_queued_while_another_runs() 
         },
     )
     .unwrap();
-    assert_eq!(shown.len(), 2);
+    // Batch 1's wait reaches the collector before batch 0 finishes (batch 0 waits for it), so it is
+    // hidden behind batch 0's running phase. What follows depends on which Done arrives first.
+    let (_, phase) = shown.iter().find(|(tail, _)| tail == "batch 1 waits").unwrap();
     assert!(
-        shown
-            .iter()
-            .all(|phase| phase.contains(r#""id":"final","label":"Final integration","status":"running""#)),
+        phase.contains(r#""id":"final","label":"Final integration","status":"running""#),
         "{shown:?}"
     );
 }
