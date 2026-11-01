@@ -8,6 +8,8 @@ struct Fixture {
     archive: Archive,
     report: Value,
     diff: String,
+    /// Set for a narrow repair (corrections only); None keeps the full-report repair.
+    brief: Option<&'static str>,
 }
 
 impl Fixture {
@@ -61,6 +63,7 @@ impl Fixture {
             archive,
             report,
             diff,
+            brief: None,
         }
     }
 
@@ -88,6 +91,7 @@ impl Fixture {
             cancel,
             false,
             true,
+            self.brief,
             || self.validate(),
             launch,
         )
@@ -347,6 +351,7 @@ fn repair_runs_beside_missing_evidence_but_never_changes_it() {
             &AtomicBool::new(false),
             false,
             true,
+            None,
             validate,
             |_| {
                 launched = true;
@@ -710,6 +715,7 @@ fn without_time_for_a_repair_invalid_findings_are_dropped_instead() {
         &AtomicBool::new(false),
         false,
         false,
+        None,
         || fixture.validate(),
         |_| panic!("the budget left no time for a repair"),
     )
@@ -770,6 +776,7 @@ fn without_time_for_a_repair_the_repair_gets_the_error_of_the_point_left() {
         &AtomicBool::new(false),
         false,
         false,
+        None,
         || fixture.validate(),
         |text| {
             diagnostic = text.to_string();
@@ -829,4 +836,141 @@ fn a_repair_that_changes_the_frozen_context_fails_without_a_fallback() {
         "{error}"
     );
     assert!(!fixture.directory.join(DROPPED).exists());
+}
+
+const BRIEF: &str = "Frozen source files are at /evidence/snapshot/trees/<revision>/<repository-path>.";
+
+fn narrow() -> Fixture {
+    let mut fixture = Fixture::new();
+    fixture.brief = Some(BRIEF);
+    fixture
+}
+
+fn prompt_during_repair(fixture: &Fixture) -> String {
+    fs::read_to_string(fixture.directory.join("prompt.md")).unwrap()
+}
+
+#[test]
+fn a_narrow_repair_applies_only_its_corrections() {
+    let fixture = narrow();
+    let mut invalid = fixture.report.clone();
+    invalid["findings"][0]["evidence"][0]["quote"] = json!("invented();");
+    fixture.write(&invalid);
+    let mut prompt = String::new();
+    fixture
+        .run(&AtomicBool::new(false), |_| {
+            prompt = prompt_during_repair(&fixture);
+            // The title is not a field a correction may set, so it is ignored.
+            fixture.write(&json!({"corrections":[{"field":"findings","index":0,"title":"Reworded",
+                "evidence":[{"index":0,"line":1,"quote":"call();"}]}]}));
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        prompt.starts_with("Output repair of a finished review stage"),
+        "{prompt}"
+    );
+    assert!(prompt.contains(BRIEF) && prompt.contains("quote does not match"));
+    assert!(
+        !prompt.contains("Read "),
+        "the stage prompt is not sent again: {prompt}"
+    );
+    let report: Value =
+        serde_json::from_str(&fs::read_to_string(fixture.directory.join("report.json")).unwrap()).unwrap();
+    assert_eq!(report["findings"][0]["title"], "Fixture boundary");
+    assert_eq!(report["findings"][0]["evidence"][0]["quote"], "call();");
+    assert_eq!(
+        prompt_during_repair(&fixture),
+        format!(
+            "Read {} and write {}",
+            fixture.context.display(),
+            fixture.directory.join("report.json").display()
+        )
+    );
+}
+
+#[test]
+fn a_narrow_repair_fills_empty_counter_evidence() {
+    let fixture = narrow();
+    let mut original = fixture.report.clone();
+    original["findings"][0]["counterEvidence"] = json!([]);
+    fixture.write(&original);
+    fixture
+        .run(&AtomicBool::new(false), |_| {
+            fixture.write(&json!({"corrections":[{"field":"findings","index":0,"counterEvidence":[
+                {"path":"code.rs","revision":"a".repeat(40),"line":1,"quote":"call();"}]}]}));
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn a_narrow_repair_naming_a_missing_point_fails_safely() {
+    let fixture = narrow();
+    let mut invalid = fixture.report.clone();
+    invalid["findings"][0]["evidence"][0]["quote"] = json!("invented();");
+    fixture.write(&invalid);
+    let error = fixture
+        .run(&AtomicBool::new(false), |_| {
+            fixture.write(&json!({"corrections":[{"field":"findings","index":3,"line":1}]}));
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(
+        error.contains("Repair unsuccessful") && error.contains("does not exist"),
+        "{error}"
+    );
+    assert!(!fixture.directory.join("comments.json").exists());
+}
+
+#[test]
+fn a_narrow_repair_answered_with_a_full_report_is_still_accepted() {
+    let fixture = narrow();
+    let mut invalid = fixture.report.clone();
+    invalid["findings"][0]["evidence"][0]["quote"] = json!("invented();");
+    fixture.write(&invalid);
+    fixture
+        .run(&AtomicBool::new(false), |_| {
+            fixture.write(&fixture.report);
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn a_schema_error_keeps_the_full_report_repair() {
+    let fixture = narrow();
+    let mut invalid = fixture.report.clone();
+    invalid["findings"][0]["confidence"] = json!("high");
+    fixture.write(&invalid);
+    let mut prompt = String::new();
+    fixture
+        .run(&AtomicBool::new(false), |_| {
+            prompt = prompt_during_repair(&fixture);
+            fixture.write(&fixture.report);
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        prompt.starts_with("Read ") && prompt.contains("documented report schema"),
+        "{prompt}"
+    );
+}
+
+#[test]
+fn decision_corrections_change_only_counter_evidence_lines_and_quotes() {
+    let reference = json!({"path":"code.rs","revision":"a".repeat(40),"line":2,"quote":"wrong"});
+    let decisions = json!({"decisions":[{"candidateId":"c1","decision":"discard","reason":"Guarded","counterEvidence":[reference]}]});
+    let report = json!({"findings":[]});
+    let repair = json!({"corrections":[],"decisions":[{"candidateId":"c1","counterEvidence":[{"index":0,"line":1,"quote":"call();","path":"other.rs"}]}]});
+    let (_, fixed) = apply_corrections(&report, Some(&decisions), &repair).unwrap();
+    let fixed = fixed.unwrap();
+    assert_eq!(fixed["decisions"][0]["counterEvidence"][0]["line"], 1);
+    assert_eq!(fixed["decisions"][0]["counterEvidence"][0]["quote"], "call();");
+    assert_eq!(
+        fixed["decisions"][0]["counterEvidence"][0]["path"], "code.rs",
+        "only line and quote change"
+    );
+    let unknown = json!({"corrections":[],"decisions":[{"candidateId":"c9","counterEvidence":[{"index":0,"line":1}]}]});
+    assert!(apply_corrections(&report, Some(&decisions), &unknown).is_none());
 }
