@@ -61,7 +61,7 @@ body:
     id: version
     attributes:
       label: Version or commit
-      description: Output of `git rev-parse --short HEAD` in your clone.
+      description: The release you run (`OCR_VERSION` or the image tag, for example `0.1.0`), or `git rev-parse --short HEAD` if you build from source.
     validations:
       required: true
   - type: input

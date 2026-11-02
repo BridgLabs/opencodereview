@@ -14,8 +14,8 @@ OpenCodeReview watches the repositories you pick, reviews each pull request with
 
 ## Features
 
-- **Your own AI.** Reviews run on the Claude Code CLI (Claude Opus 5.5, medium effort) or the Codex CLI, signed in with your Claude or ChatGPT account. There is no OpenCodeReview account.
-- **Several accounts with failover.** Connect more than one account, of any provider, and order them. When an account hits its usage limit, the review continues on the next one, and the limited account comes back after its window resets. Settings shows how much of each Claude and ChatGPT plan is left.
+- **Your own AI.** Reviews run on the Claude Code CLI (Claude Opus 5.5 at medium effort by default) or the Codex CLI, signed in with your Claude or ChatGPT account. The top bar picks each provider's model and effort. There is no OpenCodeReview account.
+- **Several accounts with failover.** Connect more than one account, of any provider, and pick the one new reviews start on. When an account hits its usage limit, the review continues on the next account of the same provider, then the other provider, and the limited account comes back after its window resets. Settings shows how much of each Claude and ChatGPT plan is left.
 - **Codebase indexing.** Each selected repository is indexed locally: file metadata, a package and import graph, and lightweight symbols. Reviews get the callers, dependencies and tests of the changed code, plus your convention files (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `REVIEW.md` and others).
 - **Usage.** See the tokens reviews used by day, pull request, repository, model and account, with findings, time and cache reuse. A pull request opens into each of its runs.
 - **Review skills.** The review methodology is a Markdown skill you can edit, version and roll back in the app.
@@ -59,13 +59,15 @@ You do not need Node, pnpm or Rust on the host to run OpenCodeReview. Every AI C
 
 ## Configuration
 
-Everything else is configured in the app under **Settings** (accounts, repository access, PR selection, integrations). Docker Compose reads these variables from your shell or from a `.env` file next to `docker-compose.yml`:
+Everything else is configured in the app under **Settings** (providers, repository access, PR selection, integrations). Docker Compose reads these variables from your shell or from a `.env` file next to `docker-compose.yml`:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `OCR_GH_HOST` | empty (`github.com`) | GitHub Enterprise host, as a bare `host` or `host:port`. |
 | `OCR_WEB_APP_URL` | `http://localhost:1421` | The origin the UI is served from. Requests from other origins are rejected; change it when you open the UI from another address. |
-| `OCR_REVIEW_DEBUG_DIR` | empty | Directory where private review debug artifacts are written. Leave empty in normal use. |
+| `OCR_REVIEW_RUNNERS` | `20` | Review runner containers; idle ones use almost no memory. |
+| `OCR_VERSION` | `latest` | Image tag used with `docker-compose.images.yml`, for example `0.1.0`. |
+| `OCR_REVIEW_DEBUG_DIR` | empty | Path inside the server container (for example `/data/review-debug`) where private review debug artifacts, which contain pull request code, are written. Leave empty in normal use. |
 
 For example, with GitHub Enterprise:
 
@@ -95,9 +97,9 @@ A review fetches the live base and head of the pull request, selects the scope (
 ## Security and privacy
 
 - **Your code goes only to your AI provider.** The pull request evidence is sent to Anthropic or OpenAI with your own sign-in, the same way their CLIs work when you use them directly. OpenCodeReview has no servers and sends no telemetry.
-- **Sign-ins stay local.** GitHub credentials, AI sign-ins and keys are stored in the `ocr-data` Docker volume (AI sign-ins and keys with file mode `0600`). They are never logged or sent to the browser. **Sign out** in Settings deletes them.
+- **Sign-ins stay local.** GitHub credentials, AI sign-ins and keys are stored in the `ocr-data` Docker volume (AI sign-ins and keys with file mode `0600`). They are never logged or sent to the browser. **Sign out** (GitHub, in Integrations) and **Remove account** (AI accounts, in Providers) delete them.
 - **Runners are sandboxed.** Read-only root filesystem, no Linux capabilities beyond what supervision needs, an unprivileged user for the AI process, no access to the database or repository cache, and provider-only network access.
-- **The UI is meant for a trusted network.** The API is protected by an installation token that the web container injects into the UI, so anyone who can open the UI can use it. Do not expose port 1421 to the internet without an authenticated reverse proxy in front.
+- **The UI is meant for a trusted network.** The API is protected by an installation token that the web container injects into the UI, so anyone who can open the UI can use it. Compose publishes port 1421 on every network interface of the host, and Docker's port rules bypass host firewalls such as ufw. On a shared network or a VPS, change the mapping to `127.0.0.1:1421:1421` and reach it through an SSH tunnel, or put an authenticated reverse proxy in front.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 

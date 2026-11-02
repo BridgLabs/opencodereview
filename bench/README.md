@@ -36,9 +36,9 @@ Configuration, read from the contract's `RB_CONFIG_*` variables:
 | Variable | Default | Meaning |
 |---|---|---|
 | `RB_CONFIG_PROVIDER` | `claude` | `claude` or `codex`. It seeds the run's only account, so a review never fails over to another provider. |
-| `RB_CONFIG_MODEL`, `RB_CONFIG_EFFORT` | the product defaults | Overrides the product's fixed model and effort, for benchmark runs only |
+| `RB_CONFIG_MODEL`, `RB_CONFIG_EFFORT` | the product defaults | Overrides the provider's engine choice for benchmark runs; must be a model and effort listed in `backend/src/providers/engines.rs` |
 | `RB_CONFIG_DEADLINE_SECS` | 1500 | After this many seconds the review is cancelled. Two minutes before it, the review's time budget ends: the lens, output repairs and final integration batches start only while the chunk reviews and integration still required fit. Without time, a repair's invalid findings are dropped and a final batch keeps its chunk-validated findings, marked unconfirmed. The manifests set 3300 against ReviewBench's 60-minute limit. |
-| `RB_CONFIG_MAX_FILES` | 800 | Settings → Review → maximum files. The product defaults to 100; a pull request it declines scores nothing, so the benchmark allows more. |
+| `RB_CONFIG_MAX_FILES` | 800 | Settings → PR selection → Maximum PR files. The product defaults to 100; a pull request it declines scores nothing, so the benchmark allows more. |
 | `RB_CONFIG_FOCUS_FILES` | 100 | The `review_focus_files` setting, which has no Settings screen yet. Above it, the review covers the highest-priority files (source code first, then the most changed lines) and lists the rest as not reviewed. `0` reviews every file; the product default is `0`. |
 | `RB_CONFIG_LENS_PASS` | `true` | The `review_lens_pass` setting, which has no Settings screen yet. Each review stage gets one more execution that looks for what a first pass usually leaves out (tests, docs, maintainability, API shape, small slips) and adds only new findings; if it fails, the first report stands. It costs roughly one more execution per stage. The product default is `false`. |
 | `RB_CONFIG_SUGGESTIONS` | `false` | Settings → PR selection → Review comments → Post suggestions (`review_suggestions_enabled`), with the product's default. `true` keeps the review's lower-priority suggestions, which the export then lists after the inline findings. |

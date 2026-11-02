@@ -1,7 +1,7 @@
 name: Site
 
 # Publishes site/ as Cloudflare Workers static assets (the opencodereview-site Worker, served at
-# opencodereview.run; see site/wrangler.jsonc) whenever main changes the landing page or the docs that
+# opencodereview.run; see site/wrangler.jsonc) whenever main changes the landing page or the README that
 # site/llms-full.txt is built from. Needs the
 # CLOUDFLARE_API_TOKEN ("Edit Cloudflare Workers" template) and CLOUDFLARE_ACCOUNT_ID secrets.
 on:

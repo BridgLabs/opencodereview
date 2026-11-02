@@ -97,7 +97,7 @@ Do not add AI tool attribution (such as `Generated with` footers or AI `Co-Autho
 ## Code guidelines
 
 - Match the existing architecture and naming; read [AGENTS.md](AGENTS.md) for the project rules.
-- Frontend source files stay under 800 lines and Rust files under 2,500 lines.
+- Frontend source files stay at or under 800 lines and Rust files at or under 2,500 lines.
 - Keep changes focused. Unrelated refactors belong in separate pull requests.
 - Add or update tests for behavior changes.
 - Write release notes for user-visible changes in `changelog.d/<branch>.md` (see [changelog.d/README.md](changelog.d/README.md)), not in `CHANGELOG.md`. A pull request with no user-visible change gets the `no-changelog` label.

@@ -125,7 +125,7 @@
             "name": "Where does my code go?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "It stays on the machine that runs OpenCodeReview. Reviews call your AI provider with your own sign-in, the same way its CLI does when you use it yourself."
+              "text": "Only to your AI provider. OpenCodeReview runs on your machine and sends the pull request's code to Anthropic or OpenAI with your own sign-in, the same way their CLIs do when you use them yourself. There are no OpenCodeReview servers and no telemetry."
             }
           },
           {
@@ -363,7 +363,7 @@
           <details><summary>I push straight to main. Does it still work?</summary><p>It reviews pull requests. Open a branch and a pull request for each change, even if you merge it yourself ten minutes later. The review lands before you merge.</p></details>
           <details><summary>Is OpenCodeReview really free?</summary><p>For individuals and companies under 100 people and $1M in yearly revenue, yes, including commercial use. Larger companies need a commercial license: write to <a href="mailto:contato@bridglabs.com">contato@bridglabs.com</a>. Reviews run on your own Claude or ChatGPT account, so the only cost is what you already pay your AI provider.</p></details>
           <details><summary>Which plans work?</summary><p>Claude Pro, Max, Team or Enterprise through Claude Code, and ChatGPT plans that include Codex. Local models are not supported. You can connect several accounts; when one hits its usage limit, the review continues on the next.</p></details>
-          <details><summary>Where does my code go?</summary><p>It stays on the machine that runs OpenCodeReview. Reviews call your AI provider with your own sign-in, the same way its CLI does when you use it yourself.</p></details>
+          <details><summary>Where does my code go?</summary><p>Only to your AI provider. OpenCodeReview runs on your machine and sends the pull request's code to Anthropic or OpenAI with your own sign-in, the same way their CLIs do when you use them yourself. There are no OpenCodeReview servers and no telemetry.</p></details>
           <details><summary>How is it different from hosted AI reviewers?</summary><p>They run in their own cloud and bill per developer or per review. OpenCodeReview runs on your own machine, its code is on GitHub, and it reviews with the AI plan you already pay for.</p></details>
           <details><summary>Does my laptop need to stay on?</summary><p>Reviews run while OpenCodeReview is running. For reviews around the clock, run it on any always-on machine with Docker, such as a small VPS or a home server.</p></details>
         </div>

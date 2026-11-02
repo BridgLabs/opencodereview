@@ -17,7 +17,7 @@ concurrency:
 jobs:
   notes:
     name: Release notes
-    # Dependabot and draft pull requests skip CI to save Actions minutes.
+    # Dependabot and draft pull requests skip this check, as they skip CI.
     if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
     runs-on: ubuntu-24.04
     timeout-minutes: 5

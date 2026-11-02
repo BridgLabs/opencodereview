@@ -5,7 +5,7 @@
 - Runs on your own machine or server with one Docker command: `git clone https://github.com/BridgLabs/opencodereview && cd opencodereview && docker compose up --build`, then open http://localhost:1421.
 - Free for individuals and companies under 100 people and USD 1M in yearly revenue, including commercial use, under the PolyForm Small Business License 1.0.0. Larger companies need a commercial license from BRIDG LABS LTDA (contato@bridglabs.com).
 - There is no OpenCodeReview account and no per-seat price. The only cost is the AI plan you already pay for.
-- Your code stays on the machine that runs OpenCodeReview; reviews call your AI provider with your own sign-in.
+- Your code goes only to your AI provider (Anthropic or OpenAI), with your own sign-in; OpenCodeReview has no servers and no telemetry.
 - Supported plans: Claude Pro, Max, Team or Enterprise (Claude Code), ChatGPT plans that include Codex. Local models are not supported.
 - Several accounts can be connected; when one hits its usage limit, the review continues on the next.
 - Compared with hosted AI code reviewers, which are billed per developer or per review and run your code in their cloud, OpenCodeReview is self-hosted and uses the AI plan you already have.
