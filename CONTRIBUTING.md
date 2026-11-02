@@ -17,7 +17,7 @@ By participating you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). 
 - passes the required `check` status in CI,
 - has one approving review from a code owner,
 - has all review conversations resolved,
-- is squash-merged, so the pull request title becomes the commit on `main`.
+- is squash-merged, so the pull request title becomes the commit on `main` and, with your name, its line on the release page.
 
 Steps:
 
@@ -90,7 +90,7 @@ Do not include real AI calls in tests. Never commit credentials, tokens, `.env` 
 <type>(<scope>): <summary>
 ```
 
-Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`, `revert`. Write the summary in the imperative mood without a trailing period, for example `fix(indexing): resolve tsconfig path aliases`. Mark breaking changes with `!` and a `BREAKING CHANGE:` footer. Because pull requests are squash-merged, the pull request title must follow the same format.
+Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`, `revert`. Write the summary in the imperative mood without a trailing period, for example `fix(indexing): resolve tsconfig path aliases`. Mark breaking changes with `!` and a `BREAKING CHANGE:` footer. Because pull requests are squash-merged, the pull request title must follow the same format; the required `PR title` check enforces it.
 
 Do not add AI tool attribution (such as `Generated with` footers or AI `Co-Authored-By` trailers) to commits or pull requests.
 

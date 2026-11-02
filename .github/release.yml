@@ -1,0 +1,9 @@
+# Generated release notes (the Release workflow and "Generate release notes" in the UI): one line per
+# pull request with its author, without bots.
+changelog:
+  exclude:
+    authors:
+      - dependabot
+      - dependabot[bot]
+      - github-actions[bot]
+      - blacksmith-sh[bot]
