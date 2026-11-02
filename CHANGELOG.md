@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-02
+
 ### Added
 
 - First public release of OpenCodeReview: AI code review for GitHub pull requests that runs locally in Docker.
@@ -37,4 +39,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Source-available project files: PolyForm Small Business 1.0.0 license, NOTICE, contributing guide, code of
   conduct, security policy, issue and pull request templates.
 
-[Unreleased]: https://github.com/BridgLabs/opencodereview/commits/main
+[Unreleased]: https://github.com/BridgLabs/opencodereview/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/BridgLabs/opencodereview/releases/tag/v0.1.0
