@@ -17,7 +17,7 @@ By participating you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). 
 - passes the required `check` status in CI,
 - has one approving review from a code owner,
 - has all review conversations resolved,
-- is squash-merged, so the pull request title becomes the commit on `main`.
+- is squash-merged, so the pull request title becomes the commit on `main` and, with your name, its line on the release page.
 
 Steps:
 

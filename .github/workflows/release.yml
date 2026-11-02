@@ -10,8 +10,8 @@ name: Release
 #   3. The server, runner and web images are built from that commit for amd64 and arm64.
 #   4. Only once every image built, the commit moves main forward and is tagged vX.Y.Z, pushed with
 #      the RELEASE_DEPLOY_KEY deploy key, which the ruleset lets bypass the pull request rule. The
-#      images are published as X.Y.Z and latest, and the GitHub release takes the version's
-#      CHANGELOG.md section. A failed build leaves main and the tags untouched.
+#      images are published as X.Y.Z and latest, and the GitHub release lists the pull requests
+#      since the previous tag with their authors. A failed build leaves main and the tags untouched.
 # Turn dry-run on to see the next version and build the server and web images without publishing.
 on:
   workflow_dispatch:
@@ -224,17 +224,17 @@ jobs:
               "$name:$TAG-amd64" "$name:$TAG-arm64"
           done
 
-      # The release notes are the version's section of CHANGELOG.md.
+      # The release page lists the pull requests since the previous tag with their authors, as
+      # GitHub generates it (.github/release.yml leaves bots out). CHANGELOG.md keeps the notes
+      # written for users.
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          awk -v heading="## [$VERSION]" '
-            index($0, heading) == 1 { found = 1; next }
-            found && /^## \[/ { exit }
-            found && /^\[[^]]+\]: / { exit }
-            found { print }
-          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          fields=(-f tag_name="$TAG")
+          previous=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "$TAG^" 2>/dev/null || true)
+          [ -n "$previous" ] && fields+=(-f previous_tag_name="$previous")
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" "${fields[@]}" --jq .body > "$RUNNER_TEMP/notes.md"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --latest
           else
