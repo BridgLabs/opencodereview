@@ -17,13 +17,13 @@ concurrency:
 jobs:
   notes:
     name: Release notes
-    # Dependabot and draft pull requests skip CI to save Actions minutes.
+    # Dependabot and draft pull requests skip this check, as they skip CI.
     if: github.actor != 'dependabot[bot]' && !github.event.pull_request.draft
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1.8.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The merge commit and its first parent, the base branch.
           fetch-depth: 2

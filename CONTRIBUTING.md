@@ -40,7 +40,7 @@ docker compose up --build          # full stack on http://localhost:1421
 pnpm debug:web                     # optional: hot-reload frontend against the Docker backend
 ```
 
-Use pnpm only. Do not commit `package-lock.json`, `yarn.lock` or `bun.lock`. More detail is in [docs/development.md](docs/development.md).
+Use pnpm only. Do not commit `package-lock.json`, `yarn.lock` or `bun.lock`.
 
 `pnpm install` turns on the hooks in `.githooks/`. On each commit, pre-commit formats the staged files with Biome and rustfmt, validates staged release notes, and type-checks when TypeScript is staged. On each push, pre-push warns when the branch has no release notes in `changelog.d/`, which the Changelog workflow requires. CI runs everything else.
 
@@ -73,6 +73,13 @@ python3 -B docker/test_diagnostics.py
 python3 -B docker/test-web-proxy.py
 ```
 
+Rust tests need a Postgres where their role may create databases; each test gets its own, cloned from a migrated template:
+
+```bash
+docker run -d --name ocr-pg-dev -e POSTGRES_USER=ocr -e POSTGRES_PASSWORD=dev -p 127.0.0.1:55432:5432 postgres:17
+export OCR_TEST_DATABASE_URL=postgres://ocr:dev@127.0.0.1:55432/postgres
+```
+
 If you changed the runner, egress or Dockerfiles, build the images and run `python3 -u docker/runner-smoke.py` (fake inference, no credentials needed).
 
 Do not include real AI calls in tests. Never commit credentials, tokens, `.env` files or database files and dumps, and keep test fixtures free of real customer or repository data.
@@ -90,7 +97,7 @@ Do not add AI tool attribution (such as `Generated with` footers or AI `Co-Autho
 ## Code guidelines
 
 - Match the existing architecture and naming; read [AGENTS.md](AGENTS.md) for the project rules.
-- Frontend source files stay under 800 lines and Rust files under 2,500 lines.
+- Frontend source files stay at or under 800 lines and Rust files at or under 2,500 lines.
 - Keep changes focused. Unrelated refactors belong in separate pull requests.
 - Add or update tests for behavior changes.
 - Write release notes for user-visible changes in `changelog.d/<branch>.md` (see [changelog.d/README.md](changelog.d/README.md)), not in `CHANGELOG.md`. A pull request with no user-visible change gets the `no-changelog` label.

@@ -1,9 +1,9 @@
 // Writes the generated parts of the landing page from the files they describe, so they never drift:
 //   - the JSON-LD block in site/index.html (its FAQPage comes from the page's own FAQ section)
-//   - site/llms-full.txt, the README and docs as one Markdown file for language models (not committed)
+//   - site/llms-full.txt, the README as one Markdown file for language models (not committed)
 //   - the lastmod date in site/sitemap.xml
 // The Site workflow runs it before every deploy. `--check` only verifies the committed JSON-LD, so a
-// docs change never needs a site rebuild in its pull request.
+// README change never needs a site rebuild in its pull request.
 // Usage: node scripts/site/build.mjs [--check]
 import { execFileSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
@@ -13,7 +13,6 @@ import { fileURLToPath } from "node:url";
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const origin = "https://opencodereview.run";
 const repo = "https://github.com/BridgLabs/opencodereview";
-const docs = ["architecture", "configuration", "reviews", "indexing", "skills", "upgrading", "development"];
 
 const decode = (text) =>
   text
@@ -113,9 +112,9 @@ async function llmsFull() {
   const parts = [
     "# OpenCodeReview — full documentation",
     "",
-    `> The README and the documentation of OpenCodeReview (${repo}), joined into one Markdown file for language models. Summary and links: ${origin}/llms.txt`,
+    `> The README of OpenCodeReview (${repo}) as one Markdown file for language models. Summary and links: ${origin}/llms.txt`,
   ];
-  for (const file of ["README.md", ...docs.map((name) => `docs/${name}.md`)]) {
+  for (const file of ["README.md"]) {
     // The README opens with a centred HTML logo, which says nothing in plain text.
     const markdown = (await readFile(path.join(root, file), "utf8")).replace(/^<p align="center">[\s\S]*?<\/p>\s*/, "");
     parts.push("", "---", "", `Source: ${repo}/blob/main/${file}`, "", absoluteLinks(markdown, file).trim());

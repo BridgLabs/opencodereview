@@ -6,7 +6,7 @@ OpenCodeReview reviews its own pull requests: the maintainer's install monitors 
 
 Report, as the highest severity, a change that:
 
-- mounts `ocr-data`, a repository, the SQLite database or a writable credential path into a runner, or adds a path from a runner to the server;
+- mounts `ocr-data`, a repository, the Postgres database or its secrets, or a writable credential path into a runner, or adds a path from a runner to the server;
 - adds a tool to `RUNNER_TOOLS`, removes one from the deny list, or calls the AI CLI without the `ocr-sandbox tool-guard` hook;
 - adds a host to the egress allowlist in `backend/src/sandbox/egress.rs` that is not an AI provider's API;
 - lets credential bytes, tokens or `auth.json` contents reach a log, an HTTP response, an IPC result or the browser;
@@ -16,13 +16,13 @@ Report, as the highest severity, a change that:
 ## Review pipeline
 
 - Scope must use the live base, head and merge-base. Report a fallback to stale refs or to the default branch after a failed fetch.
-- A report that fails validation must fail the stage. Report code that relabels it clean, drops invalid findings silently, or allows more than one repair execution per stage.
+- After the one output repair, a point that still fails validation is dropped and reported as a warning, and a review with a dropped point is never treated as clean. Report code that relabels an invalid report clean, drops a point without a warning, or allows more than one repair execution per stage.
 - Publication must stay idempotent and bound to the validated selection. Report anything that approves a pull request or posts without the `<!-- ocr-... -->` markers.
 - Report a change to the default skill (`backend/src/assets/review-skill.md`) that asks the AI to reach the network, run Git, call GitHub or post comments.
 
 ## Database
 
-- Report an edit to a migration that has already shipped; changes go in a new migration at the end of `backend/src/db/migrations.rs`.
+- Report an edit to a migration that has already shipped; changes go in a new SQL file in `backend/src/db/pg/`, appended to `MIGRATIONS` in `backend/src/db/pg/migrate.rs`.
 - A new migration needs a test that opens a database at the previous version and upgrades it. A schema change without one is a finding.
 - Report a deletion of review results, audits, Git data or coverage in archive retention.
 

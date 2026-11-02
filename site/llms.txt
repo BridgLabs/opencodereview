@@ -5,24 +5,17 @@
 - Runs on your own machine or server with one Docker command: `git clone https://github.com/BridgLabs/opencodereview && cd opencodereview && docker compose up --build`, then open http://localhost:1421.
 - Free for individuals and companies under 100 people and USD 1M in yearly revenue, including commercial use, under the PolyForm Small Business License 1.0.0. Larger companies need a commercial license from BRIDG LABS LTDA (contato@bridglabs.com).
 - There is no OpenCodeReview account and no per-seat price. The only cost is the AI plan you already pay for.
-- Your code stays on the machine that runs OpenCodeReview; reviews call your AI provider with your own sign-in.
-- Supported plans: Claude Pro, Max or Team (Claude Code), ChatGPT plans that include Codex. Local models are not supported.
+- Your code goes only to your AI provider (Anthropic or OpenAI), with your own sign-in; OpenCodeReview has no servers and no telemetry.
+- Supported plans: Claude Pro, Max, Team or Enterprise (Claude Code), ChatGPT plans that include Codex. Local models are not supported.
 - Several accounts can be connected; when one hits its usage limit, the review continues on the next.
 - Compared with hosted AI code reviewers, which are billed per developer or per review and run your code in their cloud, OpenCodeReview is self-hosted and uses the AI plan you already have.
 
 ## Docs
 
 - [README](https://github.com/BridgLabs/opencodereview/blob/main/README.md): features, quick start and requirements
-- [Pull request reviews](https://github.com/BridgLabs/opencodereview/blob/main/docs/reviews.md): when a review starts, scope, context, validation and how results are published on GitHub
-- [Configuration](https://github.com/BridgLabs/opencodereview/blob/main/docs/configuration.md): settings, environment variables, remote access and ports
-- [Architecture](https://github.com/BridgLabs/opencodereview/blob/main/docs/architecture.md): services, isolated review runners, account failover and credentials
-- [Repository indexing](https://github.com/BridgLabs/opencodereview/blob/main/docs/indexing.md): packages, imports and symbols given to each review
-- [Review skills](https://github.com/BridgLabs/opencodereview/blob/main/docs/skills.md): the editable Markdown methodology reviews follow
-- [Upgrading](https://github.com/BridgLabs/opencodereview/blob/main/docs/upgrading.md): moving between versions and running on your own Postgres
 
 ## Optional
 
-- [Full documentation in one file](https://opencodereview.run/llms-full.txt): the README and every doc above as Markdown
-- [Development](https://github.com/BridgLabs/opencodereview/blob/main/docs/development.md): toolchain, checks and repository layout for contributors
+- [README in one file](https://opencodereview.run/llms-full.txt): the README as plain Markdown
 - [Source code](https://github.com/BridgLabs/opencodereview)
 - [License](https://github.com/BridgLabs/opencodereview/blob/main/LICENSE)
