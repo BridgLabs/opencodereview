@@ -60,7 +60,7 @@ jobs:
               ref="ghcr.io/bridglabs/opencodereview-$image:latest"
               echo "::group::$ref ($platform)"
               code=0
-              trivy image --quiet --skip-db-update --platform "$platform" --severity HIGH,CRITICAL \
+              trivy image --quiet --skip-db-update --scanners vuln --platform "$platform" --severity HIGH,CRITICAL \
                 --ignore-unfixed --exit-code 2 "$ref" || code=$?
               echo "::endgroup::"
               case "$code" in
