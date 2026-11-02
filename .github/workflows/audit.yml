@@ -1,8 +1,8 @@
 name: Dependency audit
 
 # New advisories appear for dependencies that did not change, so CI's audit, which runs only when
-# a lockfile changes, cannot see them. This run checks main every day; GitHub emails the
-# maintainers when it fails.
+# a lockfile changes, cannot see them. This run checks main and the published images every day;
+# GitHub emails the maintainers when it fails.
 on:
   schedule:
     - cron: "41 7 * * *"
@@ -35,3 +35,23 @@ jobs:
 
       - name: npm dependencies
         run: pnpm audit --audit-level high
+
+  # The published images carry OS packages and CLIs that no lockfile lists. A high or critical
+  # vulnerability with a fix available fails the run: the next release rebuilds the images, and
+  # their Dockerfiles take the distribution's security updates at build time.
+  images:
+    name: Scan published images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Trivy
+        run: |
+          status=0
+          for image in server runner web; do
+            echo "::group::opencodereview-$image"
+            docker run --rm aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c \
+              image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+              "ghcr.io/bridglabs/opencodereview-$image:latest" || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
