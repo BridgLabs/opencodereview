@@ -652,7 +652,7 @@ pub(crate) fn run_inner(
     }
     progress(
         &phase_json("review", "queued"),
-        "Waiting for a free review runner. Reviews share 3 runners and start in turn.",
+        "Waiting for a free review runner. Reviews share the runners and start in turn.",
     );
 
     let summary_path = run_dir.join("summary.md");

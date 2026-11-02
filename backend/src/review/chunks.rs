@@ -504,120 +504,28 @@ pub(crate) fn run_adaptive_final(
         &sharded_phase_json("merge", "ok"),
         &format!("Prepared {} final integration batches", stages.len()),
     );
-    let mut outputs = Vec::new();
-    let mut final_usage = Vec::new();
     budget::with(inputs, |budget| budget.integrating());
-    for (index, stage) in stages.iter().enumerate() {
-        check_cancel(cancel)?;
-        if !budget::allows(inputs, budget::Step::FinalBatch) {
-            if let Ok(output) = integration::unconfirmed(stage, &payload, head) {
-                progress(
-                    &sharded_phase_json("final", "running"),
-                    &format!(
-                        "Final integration batch {}/{} skipped: the review's time ran short, so its findings stay as validated in their chunks",
-                        index + 1,
-                        stages.len()
-                    ),
-                );
-                outputs.push(output);
-                continue;
-            }
-        }
-        let integrating = Instant::now();
-        let transcript = stage.directory.join("transcript.json");
-        let fingerprint = context_fingerprint(&stage.context)?;
-        let started = now_millis();
-        progress(
-            &sharded_phase_json("final", "queued"),
-            &format!("Final integration batch {}/{}", index + 1, stages.len()),
-        );
-        let mut batch_progress = |phase: &str, tail: &str| {
-            progress(
-                phase,
-                &format!("Final integration batch {}/{}\n{tail}", index + 1, stages.len()),
-            )
-        };
-        let mut invalid = false;
-        let result = spawn_and_supervise(
-            inputs,
-            cancel,
-            &mut batch_progress,
-            &SpawnPaths {
-                config,
-                prompt: &stage.prompt,
-                transcript: &transcript,
-                stdout: &stage.directory.join("claude.stdout"),
-                stderr: &stage.directory.join("claude.stderr"),
-                progress_phase: "final",
-                sharded_progress: true,
-            },
-        )
-        .and_then(|()| {
-            if context_fingerprint(&stage.context)? != fingerprint {
-                return Err("Incomplete review: verifier modified the evidence snapshot.".into());
-            }
-            output_repair::validate(
+    // Batches are independent by design, so they run side by side like chunks do.
+    let (outputs, final_usage) = run_side_by_side(
+        "final",
+        stages.len(),
+        chunk_worker_count(inputs, stages.len()),
+        cancel,
+        progress,
+        |index, batch_cancel, batch_progress| {
+            run_final_batch(
                 inputs,
-                cancel,
-                &mut batch_progress,
-                &SpawnPaths {
-                    config,
-                    prompt: &stage.prompt,
-                    transcript: &transcript,
-                    stdout: &stage.directory.join("claude.stdout"),
-                    stderr: &stage.directory.join("claude.stderr"),
-                    progress_phase: "final",
-                    sharded_progress: true,
-                },
-                &stage.context,
-                || integration::validate_output(inputs, stage, &payload, head),
+                batch_cancel,
+                batch_progress,
+                &stages[index],
+                index,
+                stages.len(),
+                config,
+                &payload,
+                head,
             )
-            .inspect_err(|error| invalid = error != "cancelled")
-        });
-        let usage = parse_transcript_usage(&transcript);
-        record_stage(
-            inputs,
-            "final",
-            (stages.len() > 1).then_some((index + 1) as i64),
-            match &result {
-                Ok(_) => "done",
-                Err(error) if error == "cancelled" => "cancelled",
-                Err(_) => "failed",
-            },
-            None,
-            false,
-            &usage,
-            StageMetrics {
-                prompt_bytes: file_bytes(&stage.prompt),
-                diff_bytes: stage.diff.len() as i64,
-                context_bytes: dir_bytes(&stage.context),
-                file_count: stage.files.len() as i64,
-                related_file_count: 0,
-            },
-            started,
-            now_millis(),
-        );
-        budget::with(inputs, |budget| budget.batch_done(integrating.elapsed()));
-        final_usage.push(usage);
-        // A batch whose output never validates leaves its candidates as their chunks validated
-        // them, marked unconfirmed, as when the final pass leaves one undecided.
-        let result = match result {
-            Err(error) if invalid => integration::unconfirmed(stage, &payload, head)
-                .inspect(|_| {
-                    progress(
-                        &sharded_phase_json("final", "running"),
-                        &format!(
-                            "Final integration batch {}/{} did not validate, so its findings stay as validated in their chunks: {error}",
-                            index + 1,
-                            stages.len()
-                        ),
-                    )
-                })
-                .map_err(|_| error),
-            result => result,
-        };
-        outputs.push(result?);
-    }
+        },
+    )?;
     let (body, comments_json, final_warnings) = integration::combine(
         inputs,
         &payload,
@@ -659,6 +567,253 @@ pub(crate) fn run_adaptive_final(
         risk,
         no_new_changes: false,
     })
+}
+
+enum BatchEvent<T> {
+    Progress(usize, String, String),
+    Done(usize, Result<T, String>, Option<RunUsage>),
+}
+
+type BatchRun<T> = (Result<T, String>, Option<RunUsage>);
+
+/// Runs `count` independent executions, `workers` at a time, and returns their outputs in index
+/// order with the usage of those that ran. The first failure cancels the rest and is the error.
+/// While one execution runs, another reporting phase `phase_id` as queued (it waits for a runner)
+/// leaves the shown phase as it was, so the review never looks idle while work is in progress.
+pub(crate) fn run_side_by_side<T: Send>(
+    phase_id: &str,
+    count: usize,
+    workers: usize,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(&str, &str),
+    run: impl Fn(usize, &AtomicBool, &mut dyn FnMut(&str, &str)) -> BatchRun<T> + Sync,
+) -> Result<(Vec<T>, Vec<RunUsage>), String> {
+    let (tx, rx) = std::sync::mpsc::channel::<BatchEvent<T>>();
+    let batch_cancel = AtomicBool::new(false);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let mut finished: BTreeMap<usize, BatchRun<T>> = BTreeMap::new();
+    std::thread::scope(|scope| {
+        for _ in 0..workers.clamp(1, count.max(1)) {
+            let tx = tx.clone();
+            let (batch_cancel, next, run) = (&batch_cancel, &next, &run);
+            scope.spawn(move || loop {
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                if index >= count {
+                    break;
+                }
+                let mut batch_progress = |phase: &str, tail: &str| {
+                    let _ = tx.send(BatchEvent::Progress(index, phase.to_string(), tail.to_string()));
+                };
+                let (result, usage) = if batch_cancel.load(Ordering::Relaxed) {
+                    (Err("cancelled".into()), None)
+                } else {
+                    run(index, batch_cancel, &mut batch_progress)
+                };
+                if result.is_err() {
+                    batch_cancel.store(true, Ordering::Relaxed);
+                }
+                if tx.send(BatchEvent::Done(index, result, usage)).is_err() {
+                    break;
+                }
+            });
+        }
+        drop(tx);
+        let mut running = std::collections::BTreeSet::new();
+        // The last waiting report of each batch whose wait was not shown because another ran.
+        let mut waiting: BTreeMap<usize, (String, String)> = BTreeMap::new();
+        let mut shown: Option<String> = None;
+        while finished.len() < count {
+            if cancel.load(Ordering::Relaxed) {
+                batch_cancel.store(true, Ordering::Relaxed);
+            }
+            match rx.recv_timeout(Duration::from_millis(500)) {
+                Ok(BatchEvent::Progress(index, phase, tail)) => {
+                    let status = serde_json::from_str::<Vec<serde_json::Value>>(&phase)
+                        .ok()
+                        .and_then(|phases| phases.into_iter().find(|item| item["id"] == phase_id))
+                        .and_then(|item| item["status"].as_str().map(str::to_string));
+                    // A batch waiting again (for example before an output repair) no longer runs.
+                    if status.as_deref() == Some("queued") {
+                        running.remove(&index);
+                    }
+                    waiting.remove(&index);
+                    if status.as_deref() == Some("queued") && !running.is_empty() {
+                        if let Some(shown) = &shown {
+                            progress(shown, &tail);
+                            waiting.insert(index, (phase, tail));
+                            continue;
+                        }
+                    }
+                    if matches!(status.as_deref(), Some("running" | "validating")) {
+                        running.insert(index);
+                    }
+                    progress(&phase, &tail);
+                    shown = Some(phase);
+                }
+                Ok(BatchEvent::Done(index, result, usage)) => {
+                    running.remove(&index);
+                    waiting.remove(&index);
+                    finished.insert(index, (result, usage));
+                    // The last running batch finished while others still wait: show that they wait.
+                    if running.is_empty() {
+                        if let Some((phase, tail)) = waiting.values().next_back().cloned() {
+                            progress(&phase, &tail);
+                            shown = Some(phase);
+                            waiting.clear();
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    });
+    check_cancel(cancel)?;
+    let mut outputs = Vec::new();
+    let mut usages = Vec::new();
+    let mut errors = Vec::new();
+    for (result, usage) in finished.into_values() {
+        usages.extend(usage);
+        match result {
+            Ok(output) => outputs.push(output),
+            Err(error) => errors.push(error),
+        }
+    }
+    // The execution that failed first cancels the others; report its error, not theirs.
+    if let Some(error) = errors.iter().find(|error| *error != "cancelled").or(errors.first()) {
+        return Err(error.clone());
+    }
+    if outputs.len() != count {
+        return Err("Final integration ended before every batch reported".into());
+    }
+    Ok((outputs, usages))
+}
+
+/// Runs one final integration batch. Returns its output and, when it ran the model, its usage.
+#[allow(clippy::too_many_arguments)]
+fn run_final_batch(
+    inputs: &ReviewInputs,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(&str, &str),
+    stage: &integration::Prepared,
+    index: usize,
+    total: usize,
+    config: &Path,
+    payload: &integration::Payload,
+    head: &str,
+) -> (Result<integration::BatchOutput, String>, Option<RunUsage>) {
+    if cancel.load(Ordering::Relaxed) {
+        return (Err("cancelled".into()), None);
+    }
+    if !budget::allows(inputs, budget::Step::FinalBatch) {
+        if let Ok(output) = integration::unconfirmed(stage, payload, head) {
+            progress(
+                &sharded_phase_json("final", "running"),
+                &format!(
+                    "Final integration batch {}/{} skipped: the review's time ran short, so its findings stay as validated in their chunks",
+                    index + 1,
+                    total
+                ),
+            );
+            return (Ok(output), None);
+        }
+    }
+    let integrating = Instant::now();
+    let transcript = stage.directory.join("transcript.json");
+    let fingerprint = match context_fingerprint(&stage.context) {
+        Ok(fingerprint) => fingerprint,
+        Err(error) => return (Err(error), None),
+    };
+    let started = now_millis();
+    progress(
+        &sharded_phase_json("final", "queued"),
+        &format!("Final integration batch {}/{}", index + 1, total),
+    );
+    let mut batch_progress = |phase: &str, tail: &str| {
+        progress(
+            phase,
+            &format!("Final integration batch {}/{}\n{tail}", index + 1, total),
+        )
+    };
+    let mut invalid = false;
+    let result = spawn_and_supervise(
+        inputs,
+        cancel,
+        &mut batch_progress,
+        &SpawnPaths {
+            config,
+            prompt: &stage.prompt,
+            transcript: &transcript,
+            stdout: &stage.directory.join("claude.stdout"),
+            stderr: &stage.directory.join("claude.stderr"),
+            progress_phase: "final",
+            sharded_progress: true,
+        },
+    )
+    .and_then(|()| {
+        if context_fingerprint(&stage.context)? != fingerprint {
+            return Err("Incomplete review: verifier modified the evidence snapshot.".into());
+        }
+        output_repair::validate(
+            inputs,
+            cancel,
+            &mut batch_progress,
+            &SpawnPaths {
+                config,
+                prompt: &stage.prompt,
+                transcript: &transcript,
+                stdout: &stage.directory.join("claude.stdout"),
+                stderr: &stage.directory.join("claude.stderr"),
+                progress_phase: "final",
+                sharded_progress: true,
+            },
+            &stage.context,
+            || integration::validate_output(inputs, stage, payload, head),
+        )
+        .inspect_err(|error| invalid = error != "cancelled")
+    });
+    let usage = parse_transcript_usage(&transcript);
+    record_stage(
+        inputs,
+        "final",
+        (total > 1).then_some((index + 1) as i64),
+        match &result {
+            Ok(_) => "done",
+            Err(error) if error == "cancelled" => "cancelled",
+            Err(_) => "failed",
+        },
+        None,
+        false,
+        &usage,
+        StageMetrics {
+            prompt_bytes: file_bytes(&stage.prompt),
+            diff_bytes: stage.diff.len() as i64,
+            context_bytes: dir_bytes(&stage.context),
+            file_count: stage.files.len() as i64,
+            related_file_count: 0,
+        },
+        started,
+        now_millis(),
+    );
+    budget::with(inputs, |budget| budget.batch_done(integrating.elapsed()));
+    // A batch whose output never validates leaves its candidates as their chunks validated
+    // them, marked unconfirmed, as when the final pass leaves one undecided.
+    let result = match result {
+        Err(error) if invalid => integration::unconfirmed(stage, payload, head)
+            .inspect(|_| {
+                progress(
+                    &sharded_phase_json("final", "running"),
+                    &format!(
+                        "Final integration batch {}/{} did not validate, so its findings stay as validated in their chunks: {error}",
+                        index + 1,
+                        total
+                    ),
+                )
+            })
+            .map_err(|_| error),
+        result => result,
+    };
+    (result, Some(usage))
 }
 
 // Each chunk sends one Done over the channel, so boxing its result would only add an allocation.
@@ -2174,5 +2329,5 @@ pub(crate) fn render_final_prompt(
         &merge_dir.join("report.json"),
     );
     let example = frozen::decision_example(inputs);
-    format!("{prompt}\nThis is independent verification. Read {}/chunk_findings.json and chunk_summaries.md. Verify candidates against targeted snapshot reads, including cross-file risks even when chunks found nothing. Reject refuted hypotheses, do not merely carry them forward. Include findingDecisions alongside report in your final JSON response. Include exactly one decision per candidateId. decision is keep, discard, or needs_context. keep requires commentIndex into report.json findings; discard requires concrete counter-evidence and a counterEvidence array using the same reference schema as report.json, including the exact frozen revision for code. Do not cite chunk reports or candidate summaries as counter-evidence: they are proposals, not source evidence. Replace every example path, line and quote with inspected snapshot bytes; retain the supplied contractVersion and snapshotId for frozen output. For conventions, include source:convention and the supplied convention revision; only external/*, PR.md and SCOPE_CONTEXT.md omit revision. For duplicates, map both candidates with keep to the same commentIndex; candidates in the same file with the same root cause and the same fix are duplicates too, kept as one comment at the place that matters most whose detail names the other lines and each distinct impact; candidates in different files, or needing different fixes, stay separate comments. Missing decisions/evidence make the review incomplete. Do not write formatted comments or summary.\nCandidate decision JSON example:\n{example}\nEnd candidate decision example.\n", merge_dir.display())
+    format!("{prompt}\nThis is independent verification. Read {}/chunk_findings.json and chunk_summaries.md. Verify candidates against targeted snapshot reads, including cross-file risks even when chunks found nothing. Reject refuted hypotheses, do not merely carry them forward. Include findingDecisions alongside report in your final JSON response. Include exactly one decision per candidateId. decision is keep, discard, or needs_context. To keep a candidate exactly as its chunk validated it, use keep with \"unchanged\": true and no commentIndex: its validated comment is posted as is, so do not write it again in report.json findings. Write a finding in report.json only for a candidate you change (line, wording, impact or severity) or merge, and for a new problem; keep then requires commentIndex into report.json findings. discard requires concrete counter-evidence and a counterEvidence array using the same reference schema as report.json, including the exact frozen revision for code. Do not cite chunk reports or candidate summaries as counter-evidence: they are proposals, not source evidence. Replace every example path, line and quote with inspected snapshot bytes; retain the supplied contractVersion and snapshotId for frozen output. For conventions, include source:convention and the supplied convention revision; only external/*, PR.md and SCOPE_CONTEXT.md omit revision. For duplicates, write the merged finding once and map both candidates with keep to the same commentIndex; candidates in the same file with the same root cause and the same fix are duplicates too, kept as one comment at the place that matters most whose detail names the other lines and each distinct impact; candidates in different files, or needing different fixes, stay separate comments. Missing decisions/evidence make the review incomplete. Do not write formatted comments or summary.\nCandidate decision JSON example:\n{example}\nEnd candidate decision example.\n", merge_dir.display())
 }

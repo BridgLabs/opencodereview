@@ -531,3 +531,201 @@ fn sharded_chunks_group_related_tests_and_handlers() {
         .files
         .contains(&"apps/admin/tests/resolved-engagement-page/resolved-engagements.test.ts".to_string()));
 }
+
+#[test]
+fn side_by_side_batches_overlap_and_return_outputs_in_order() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let running = AtomicUsize::new(0);
+    let peak = AtomicUsize::new(0);
+    let mut messages = Vec::new();
+    let (outputs, usages) = super::run_side_by_side(
+        "final",
+        4,
+        3,
+        &AtomicBool::new(false),
+        &mut |_, tail| messages.push(tail.to_string()),
+        |index, _, progress| {
+            let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+            peak.fetch_max(now, Ordering::SeqCst);
+            progress("{}", &format!("batch {index}"));
+            // Later batches finish first, so the order comes from the index, not completion.
+            std::thread::sleep(std::time::Duration::from_millis(40 * (4 - index as u64)));
+            running.fetch_sub(1, Ordering::SeqCst);
+            (Ok(index), Some(super::RunUsage::default()))
+        },
+    )
+    .unwrap();
+    assert_eq!(outputs, vec![0, 1, 2, 3]);
+    assert_eq!(usages.len(), 4);
+    assert_eq!(peak.load(Ordering::SeqCst), 3);
+    assert_eq!(messages.len(), 4);
+}
+
+#[test]
+fn a_failed_side_by_side_batch_cancels_the_others_and_reports_its_error() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let result = super::run_side_by_side(
+        "final",
+        5,
+        2,
+        &AtomicBool::new(false),
+        &mut |_, _| {},
+        |index, cancel, _| {
+            if index == 1 {
+                return (Err::<usize, _>("batch output invalid".into()), None);
+            }
+            while index == 0 && !cancel.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            if cancel.load(Ordering::Relaxed) {
+                return (Err("cancelled".into()), None);
+            }
+            (Ok(index), None)
+        },
+    );
+    assert_eq!(result.unwrap_err(), "batch output invalid");
+}
+
+#[test]
+fn cancelling_the_review_cancels_side_by_side_batches() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let cancel = AtomicBool::new(true);
+    let result = super::run_side_by_side("final", 2, 2, &cancel, &mut |_, _| {}, |_, batch_cancel, _| {
+        while !batch_cancel.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        (Err::<usize, _>("cancelled".into()), None)
+    });
+    assert_eq!(result.unwrap_err(), "cancelled");
+}
+
+#[test]
+fn a_waiting_batch_does_not_show_the_final_phase_as_queued_while_another_runs() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let started = AtomicUsize::new(0);
+    let mut shown = Vec::new();
+    super::run_side_by_side(
+        "final",
+        2,
+        2,
+        &AtomicBool::new(false),
+        &mut |phase, tail| shown.push((tail.to_string(), phase.to_string())),
+        |index, _, progress| {
+            if index == 0 {
+                progress(&super::sharded_phase_json("final", "running"), "batch 0");
+                started.store(1, Ordering::SeqCst);
+                while started.load(Ordering::SeqCst) < 2 {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            } else {
+                while started.load(Ordering::SeqCst) < 1 {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                // Let batch 0's running status reach the collector before this one waits.
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                progress(&super::sharded_phase_json("final", "queued"), "batch 1 waits");
+                started.store(2, Ordering::SeqCst);
+            }
+            (Ok(index), None)
+        },
+    )
+    .unwrap();
+    // Batch 1's wait reaches the collector before batch 0 finishes (batch 0 waits for it), so it is
+    // hidden behind batch 0's running phase. What follows depends on which Done arrives first.
+    let (_, phase) = shown.iter().find(|(tail, _)| tail == "batch 1 waits").unwrap();
+    assert!(
+        phase.contains(r#""id":"final","label":"Final integration","status":"running""#),
+        "{shown:?}"
+    );
+}
+
+#[test]
+fn a_batch_waiting_again_no_longer_counts_as_running() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let step = AtomicUsize::new(0);
+    let wait_for = |at: usize| {
+        while step.load(Ordering::SeqCst) < at {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // Let the previous report reach the collector first.
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    };
+    let mut shown = Vec::new();
+    super::run_side_by_side(
+        "final",
+        3,
+        3,
+        &AtomicBool::new(false),
+        &mut |phase, tail| shown.push((tail.to_string(), phase.to_string())),
+        |index, _, progress| {
+            match index {
+                0 => {
+                    progress(&super::sharded_phase_json("final", "running"), "0 runs");
+                    progress(&super::sharded_phase_json("final", "queued"), "0 waits for a repair");
+                    step.store(1, Ordering::SeqCst);
+                    wait_for(3);
+                }
+                2 => {
+                    wait_for(1);
+                    progress(&super::sharded_phase_json("final", "running"), "2 runs");
+                    step.store(2, Ordering::SeqCst);
+                }
+                _ => {
+                    wait_for(2);
+                    // Wait until batch 2 reported done.
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    progress(&super::sharded_phase_json("final", "queued"), "1 waits");
+                    step.store(3, Ordering::SeqCst);
+                }
+            }
+            (Ok(index), None)
+        },
+    )
+    .unwrap();
+    let (tail, phase) = shown.last().unwrap();
+    assert_eq!(tail, "1 waits");
+    assert!(
+        phase.contains(r#""id":"final","label":"Final integration","status":"queued""#),
+        "every batch waits, so the phase shows queued: {shown:?}"
+    );
+}
+
+#[test]
+fn the_final_phase_shows_queued_once_the_last_running_batch_finishes() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let step = AtomicUsize::new(0);
+    let wait_for = |at: usize| {
+        while step.load(Ordering::SeqCst) < at {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    };
+    let mut shown = Vec::new();
+    super::run_side_by_side(
+        "final",
+        2,
+        2,
+        &AtomicBool::new(false),
+        &mut |phase, tail| shown.push((tail.to_string(), phase.to_string())),
+        |index, _, progress| {
+            if index == 0 {
+                progress(&super::sharded_phase_json("final", "running"), "0 runs");
+                step.store(1, Ordering::SeqCst);
+                wait_for(2);
+            } else {
+                wait_for(1);
+                progress(&super::sharded_phase_json("final", "queued"), "1 waits");
+                step.store(2, Ordering::SeqCst);
+                // Still waiting well after batch 0 finished.
+                std::thread::sleep(std::time::Duration::from_millis(150));
+            }
+            (Ok(index), None)
+        },
+    )
+    .unwrap();
+    let queued = r#""id":"final","label":"Final integration","status":"queued""#;
+    assert!(!shown[1].1.contains(queued), "hidden while batch 0 runs: {shown:?}");
+    let (tail, phase) = shown.last().unwrap();
+    assert_eq!(tail, "1 waits");
+    assert!(phase.contains(queued), "shown once nothing runs: {shown:?}");
+}
