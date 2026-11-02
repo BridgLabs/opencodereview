@@ -10,7 +10,9 @@ ENV VITE_SETUP_API_BASE=/api
 ENV VITE_OCR_API_TOKEN=__OCR_API_TOKEN__
 RUN pnpm build
 
-FROM nginx:1.29-alpine
+FROM nginx:1.30-alpine
+# The base image lags behind Alpine's security fixes; take them at build time.
+RUN apk upgrade --no-cache
 COPY docker/web-nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker/web-entrypoint.sh /docker-entrypoint.d/40-ocr-token.sh
 COPY --from=build /app/dist /usr/share/nginx/html

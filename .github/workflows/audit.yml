@@ -1,8 +1,8 @@
 name: Dependency audit
 
 # New advisories appear for dependencies that did not change, so CI's audit, which runs only when
-# a lockfile changes, cannot see them. This run checks main every day; GitHub emails the
-# maintainers when it fails.
+# a lockfile changes, cannot see them. This run checks main and the published images every day;
+# GitHub emails the maintainers when it fails.
 on:
   schedule:
     - cron: "41 7 * * *"
@@ -35,3 +35,39 @@ jobs:
 
       - name: npm dependencies
         run: pnpm audit --audit-level high
+
+  # The published images carry OS packages and CLIs that no lockfile lists. A high or critical
+  # vulnerability with a fix available fails the run: the next release rebuilds the images, and
+  # their Dockerfiles take the distribution's security updates at build time.
+  images:
+    name: Scan published images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # Both architectures are scanned: each is built on its own runner and takes its own security
+      # updates. The vulnerability database is downloaded once and shared. A finding exits 2, so a
+      # scanner or pull error is reported apart from an image that needs a release.
+      - name: Trivy
+        run: |
+          trivy() {
+            docker run --rm -v "$RUNNER_TEMP/trivy:/root/.cache/trivy" \
+              aquasec/trivy@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c "$@"
+          }
+          trivy image --download-db-only --quiet
+          status=0
+          for image in server runner web; do
+            for platform in linux/amd64 linux/arm64; do
+              ref="ghcr.io/bridglabs/opencodereview-$image:latest"
+              echo "::group::$ref ($platform)"
+              code=0
+              trivy image --quiet --skip-db-update --scanners vuln --platform "$platform" --severity HIGH,CRITICAL \
+                --ignore-unfixed --exit-code 2 "$ref" || code=$?
+              echo "::endgroup::"
+              case "$code" in
+                0) ;;
+                2) echo "::error::$ref ($platform) has fixable high or critical vulnerabilities; run a release to rebuild it."; status=1 ;;
+                *) echo "::error::Trivy could not scan $ref ($platform) (exit $code)."; status=1 ;;
+              esac
+            done
+          done
+          exit "$status"

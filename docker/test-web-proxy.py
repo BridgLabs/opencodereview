@@ -26,7 +26,7 @@ import time
 import uuid
 
 PREFIX = "ocr-web-proxy-test-" + uuid.uuid4().hex[:10]
-NGINX_IMAGE = "nginx:1.29-alpine"
+NGINX_IMAGE = "nginx:1.30-alpine"
 MOCK_IMAGE = "python:3.13-alpine"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 containers = []

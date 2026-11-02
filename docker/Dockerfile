@@ -11,7 +11,9 @@ RUN --mount=type=cache,id=ocr-cargo-registry,target=/usr/local/cargo/registry,sh
   && cp /app/target/release/ocr-server /usr/local/bin/
 
 FROM debian:bookworm-slim
+# Debian's security updates land after the base image is published; take them at build time.
 RUN apt-get update \
+  && apt-get upgrade -y --no-install-recommends \
   && apt-get install -y --no-install-recommends ca-certificates curl git bubblewrap \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
