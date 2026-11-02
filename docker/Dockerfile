@@ -1,4 +1,4 @@
-FROM rust:1.88-bookworm AS server
+FROM rust:1.98.1-bookworm AS server
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
   pkg-config libssl-dev \
