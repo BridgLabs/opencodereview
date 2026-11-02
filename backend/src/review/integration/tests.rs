@@ -1207,6 +1207,7 @@ fn final_output_repair_preserves_distinct_findings_and_decision_indices() {
             &AtomicBool::new(false),
             true,
             true,
+            None,
             || validate_output(&inputs, stage, &payload, HEAD),
             |_| {
                 attempts += 1;
