@@ -391,7 +391,7 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
             items={[
               {
                 label: "Claude",
-                hint: "Claude Pro, Max or Team subscription",
+                hint: "Claude Pro, Max, Team or Enterprise subscription",
                 icon: <ProviderGlyph provider="claude" />,
                 onSelect: () => setSignIn({ provider: "claude" }),
               },

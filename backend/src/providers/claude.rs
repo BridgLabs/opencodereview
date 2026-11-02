@@ -87,7 +87,7 @@ pub(crate) fn local_command(home: &Path) -> Result<Command, String> {
 
 pub(crate) fn read_token(path: &Path) -> Result<String, String> {
     let raw = std::fs::read_to_string(path)
-        .map_err(|_| "Claude authentication is unavailable; sign in from Settings → Integrations")?;
+        .map_err(|_| "Claude authentication is unavailable; sign in from Settings → Providers")?;
     let token = raw.trim();
     if token.is_empty() || token.len() > MAX_TOKEN_BYTES || !token.bytes().all(|byte| byte.is_ascii_graphic()) {
         return Err("Claude authentication token is invalid; sign in again".into());
