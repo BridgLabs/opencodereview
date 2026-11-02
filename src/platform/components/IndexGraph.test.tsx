@@ -43,6 +43,21 @@ function renderGraph(
   return html;
 }
 
+function SelectableGraph({ client }: { client: QueryClient }) {
+  const [selectedId, onSelect] = useState<string | null>(null);
+  return (
+    <QueryClientProvider client={client}>
+      <IndexGraphView
+        repoId={1}
+        repoName="team/repo"
+        status={{ status: "ready" } as RepoIndexStatus}
+        selectedId={selectedId}
+        onSelect={onSelect}
+      />
+    </QueryClientProvider>
+  );
+}
+
 describe("index graph view", () => {
   it("uses the animated lens while loading the saved graph", () => {
     const client = new QueryClient({ defaultOptions: { queries: { enabled: false } } });
@@ -183,20 +198,6 @@ describe("index graph view", () => {
       client.setQueryData(["indexing", "graph", 1, "symbols", null], { nodes: [symbol], edges: [] });
       const element = document.createElement("div");
       const root = createRoot(element);
-      function Harness() {
-        const [selectedId, onSelect] = useState<string | null>(null);
-        return (
-          <QueryClientProvider client={client}>
-            <IndexGraphView
-              repoId={1}
-              repoName="team/repo"
-              status={{ status: "ready" } as RepoIndexStatus}
-              selectedId={selectedId}
-              onSelect={onSelect}
-            />
-          </QueryClientProvider>
-        );
-      }
       const activate = async (node: IndexGraphNode) => {
         if (entry === "canvas") await act(async () => networkProps().onNodeClick?.(node, {} as MouseEvent));
         else if (entry === "keyboard")
@@ -215,7 +216,7 @@ describe("index graph view", () => {
         }
       };
       try {
-        await act(async () => root.render(<Harness />));
+        await act(async () => root.render(<SelectableGraph client={client} />));
         await activate(pkg);
         expect(element.querySelector('[aria-label="Interactive files graph"]')).not.toBeNull();
         expect(networkProps().graphData?.nodes).toEqual([file]);
