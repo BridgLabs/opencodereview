@@ -90,7 +90,7 @@ Do not include real AI calls in tests. Never commit credentials, tokens, `.env` 
 <type>(<scope>): <summary>
 ```
 
-Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`, `revert`. Write the summary in the imperative mood without a trailing period, for example `fix(indexing): resolve tsconfig path aliases`. Mark breaking changes with `!` and a `BREAKING CHANGE:` footer. Because pull requests are squash-merged, the pull request title must follow the same format.
+Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `build`, `ci`, `perf`, `style`, `revert`. Write the summary in the imperative mood without a trailing period, for example `fix(indexing): resolve tsconfig path aliases`. Mark breaking changes with `!` and a `BREAKING CHANGE:` footer. Because pull requests are squash-merged, the pull request title must follow the same format; the required `PR title` check enforces it.
 
 Do not add AI tool attribution (such as `Generated with` footers or AI `Co-Authored-By` trailers) to commits or pull requests.
 
