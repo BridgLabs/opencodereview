@@ -67,31 +67,32 @@ const click = async (element: HTMLElement) => act(async () => element.click());
 
 afterEach(() => vi.unstubAllGlobals());
 
+function Harness({ overrides }: { overrides: Partial<typeof props> }) {
+  const [selectedIds, setSelectedIds] = useState(overrides.selectedIds ?? props.selectedIds);
+  return (
+    <FindingSelection
+      {...props}
+      {...overrides}
+      selectedIds={selectedIds}
+      onToggle={(id) => {
+        overrides.onToggle?.(id);
+        setSelectedIds((current) =>
+          current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
+        );
+      }}
+    >
+      <p>Legacy final output</p>
+    </FindingSelection>
+  );
+}
+
 async function interact(overrides: Partial<typeof props>, test: (container: HTMLElement) => Promise<void>) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  function Harness() {
-    const [selectedIds, setSelectedIds] = useState(overrides.selectedIds ?? props.selectedIds);
-    return (
-      <FindingSelection
-        {...props}
-        {...overrides}
-        selectedIds={selectedIds}
-        onToggle={(id) => {
-          overrides.onToggle?.(id);
-          setSelectedIds((current) =>
-            current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
-          );
-        }}
-      >
-        <p>Legacy final output</p>
-      </FindingSelection>
-    );
-  }
   try {
-    await act(async () => root.render(<Harness />));
+    await act(async () => root.render(<Harness overrides={overrides} />));
     await test(container);
   } finally {
     await act(async () => root.unmount());
