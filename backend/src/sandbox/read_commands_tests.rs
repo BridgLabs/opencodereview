@@ -14,6 +14,11 @@ fn snapshot_commands_allow_bounded_reads_searches_and_listings() {
             root.display()
         ),
         format!("/usr/bin/ls -1A -- '{}'", root.display()),
+        format!("/usr/bin/sed -n '200,400p' -- '{}'", file.display()),
+        format!(
+            "/usr/bin/grep -r -n -F -- 'fn example' '{}' | /usr/bin/head -n 20",
+            root.display()
+        ),
     ] {
         validate(&command, &[root.as_path()]).unwrap();
     }
@@ -25,7 +30,11 @@ fn snapshot_commands_reject_shell_execution_and_unbounded_reads() {
     let root = std::env::temp_dir();
     for command in [
         "cat /etc/passwd",
-        "/usr/bin/sed -n '1,201p' -- '/tmp/a'",
+        "/usr/bin/sed -n '1,202p' -- '/tmp/a'",
+        "/usr/bin/grep -r -n -F -- 'x' '/tmp' | /usr/bin/head -n 81",
+        "/usr/bin/grep -r -n -F -- 'x' '/tmp' | /usr/bin/head -n 0",
+        "/usr/bin/grep -r -n -F -- 'x' '/tmp' | /usr/bin/head -n +5",
+        "/usr/bin/grep -r -n -F -- 'x' '/tmp' | /usr/bin/head -n 5 | /usr/bin/head -n 5",
         "/usr/bin/sed -n '0,20p' -- '/tmp/a'",
         "/usr/bin/sed -n '20,1p' -- '/tmp/a'",
         "/usr/bin/sed -n '1,$p' -- '/tmp/a'",

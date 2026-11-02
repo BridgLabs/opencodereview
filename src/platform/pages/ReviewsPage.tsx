@@ -27,9 +27,8 @@ import {
   type FindingSelectionDraft,
   findingSelectionDirty,
   prepareEmptyFindingDecision,
-  reviewBodyHasPostableFinding,
-  reviewPointKind,
   selectedFindingIds,
+  storedPointCounts,
 } from "../lib/findings";
 import {
   formatFlowDuration,
@@ -339,19 +338,19 @@ export function ReviewsPage() {
     monitoring?.resultPublicationStatus === "failed" &&
     monitoring.resultObservedHeadSha === monitoring.headSha &&
     executionControl?.kind !== "stop";
-  const resultFindingCount =
+  // Without the audit (no stage open), count the run's stored comments and body.
+  const stored = monitoredRun?.commentsJson
+    ? storedPointCounts(
+        parseComments(monitoredRun.commentsJson).map((comment) => comment.body),
+        monitoredRun.reviewBody,
+      )
+    : undefined;
+  const countKept = (kind: "finding" | "question") =>
     findingView?.audit?.candidates.filter(
-      (candidate) =>
-        candidateKind(candidate) === "finding" && candidate.aiDecision === "kept" && !candidate.blockedReason,
-    ).length ??
-    (monitoredRun?.commentsJson && !reviewBodyHasPostableFinding(monitoredRun.reviewBody)
-      ? parseComments(monitoredRun.commentsJson).filter((comment) => reviewPointKind(comment.body) === "finding").length
-      : undefined);
-  const resultQuestionCount =
-    findingView?.audit?.candidates.filter(
-      (candidate) =>
-        candidateKind(candidate) === "question" && candidate.aiDecision === "kept" && !candidate.blockedReason,
-    ).length ?? 0;
+      (candidate) => candidateKind(candidate) === kind && candidate.aiDecision === "kept" && !candidate.blockedReason,
+    ).length ?? stored?.[kind === "finding" ? "findings" : "questions"];
+  const resultFindingCount = countKept("finding");
+  const resultQuestionCount = countKept("question") ?? 0;
   const authorOptions = useMemo(() => {
     const authors = new Map<string, ReviewCard>();
     for (const card of items)

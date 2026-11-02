@@ -125,10 +125,11 @@ function labelLane(lane: string) {
   return LANE_LABELS[lane] ?? lane.replaceAll("_", " ");
 }
 
-/** A card's status: its lane, except that a review published with nothing but suggestions says so. */
-export function labelCard(card: Pick<ReviewCard, "lane" | "suggestionsOnly">) {
-  if (card.suggestionsOnly && ["auto_posted", "posted"].includes(card.lane)) return "Suggestions posted";
-  return labelLane(card.lane);
+/** A card's status: its lane, except that a review published with only suggestions or questions says so. */
+export function labelCard(card: Pick<ReviewCard, "lane" | "suggestionsOnly" | "questionsOnly">) {
+  if (!["auto_posted", "posted"].includes(card.lane)) return labelLane(card.lane);
+  if (card.suggestionsOnly) return "Suggestions posted";
+  return card.questionsOnly ? "Questions posted" : labelLane(card.lane);
 }
 
 /** Each outcome gets its own colour: posted findings are green, a clean review stays grey. */
