@@ -15,12 +15,14 @@ window.scrollTo = () => {};
 let container: HTMLDivElement;
 afterEach(() => container?.remove());
 
+let broken = true;
+function Page() {
+  if (broken) throw new Error("Cannot read properties of undefined (reading 'analyzing')");
+  return <p>Recovered</p>;
+}
+
 it("replaces a crashed page with a recoverable error screen", async () => {
-  let broken = true;
-  const Page = () => {
-    if (broken) throw new Error("Cannot read properties of undefined (reading 'analyzing')");
-    return <p>Recovered</p>;
-  };
+  broken = true;
   const root = createRootRoute();
   const route = createRoute({ getParentRoute: () => root, path: "/platform/skills", component: Page });
   const reviews = createRoute({
