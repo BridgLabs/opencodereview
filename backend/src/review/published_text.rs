@@ -93,47 +93,81 @@ fn url_password_end(authority: &str) -> Option<usize> {
     (!password.is_empty()).then_some(at)
 }
 
-/// A line of PEM key material: base64, or an encrypted key's `Proc-Type`/`DEK-Info` header.
-fn key_body(line: &str) -> bool {
-    let line = line.trim();
-    line.starts_with("Proc-Type:")
-        || line.starts_with("DEK-Info:")
-        || (line.len() >= 16 && line.chars().all(|c| c.is_ascii_alphanumeric() || "+/=".contains(c)))
+/// Length of the next line in `text` and of the break after it: a newline, or a `\n` escape as
+/// in a JSON or string literal key. A last line has a break of 0.
+fn next_line(text: &str) -> (usize, usize) {
+    let newline = text.find('\n');
+    let escaped = text.find("\\n");
+    match (newline, escaped) {
+        (Some(n), Some(e)) if e < n => (e, 2),
+        (Some(n), _) => (n, 1),
+        (None, Some(e)) => (e, 2),
+        (None, None) => (text.len(), 0),
+    }
 }
 
-/// Replaces a private key block: its `BEGIN ... PRIVATE KEY` line, the key lines that follow and
-/// the `END` line when present. A header with no key lines after it (one named in prose) stays.
+/// The base64 characters of a line of PEM key material, or `None` when the line is not one. A
+/// key line may be blank (encrypted keys), an encrypted key's `Proc-Type`/`DEK-Info` field, or
+/// base64 of any length wrapped in string quoting or concatenation.
+fn key_line(line: &str) -> Option<usize> {
+    let line = line.trim_matches(|c: char| c.is_whitespace() || "\"',+".contains(c));
+    if line.starts_with("Proc-Type:") || line.starts_with("DEK-Info:") {
+        return Some(0);
+    }
+    line.chars()
+        .all(|c| c.is_ascii_alphanumeric() || "+/=".contains(c))
+        .then_some(line.len())
+}
+
+/// How much of `text` after a `BEGIN ... PRIVATE KEY-----` header is key material, through the
+/// `END ... PRIVATE KEY-----` marker when it follows the key lines. `None` when no key follows (a
+/// header named in prose).
+fn key_block_len(text: &str) -> Option<usize> {
+    let (mut pos, mut consumed, mut base64) = (0, 0, 0);
+    loop {
+        let (len, break_len) = next_line(&text[pos..]);
+        let line = &text[pos..pos + len];
+        let marker = line.trim_start_matches(|c: char| c.is_whitespace() || "\"',+".contains(c));
+        if marker.starts_with("-----END ") {
+            let close = line.find("PRIVATE KEY-----")? + "PRIVATE KEY-----".len();
+            return (base64 > 0).then_some(pos + close);
+        }
+        let Some(chars) = key_line(line) else { break };
+        base64 += chars;
+        consumed = pos + len;
+        if break_len == 0 {
+            break;
+        }
+        pos += len + break_len;
+    }
+    (base64 >= 40).then_some(consumed)
+}
+
+/// Replaces private key blocks, multi-line or escaped on one line, including a truncated one
+/// with no `END` marker. A header with no key after it (one named in prose) stays.
 fn redact_private_keys(value: &str) -> String {
-    let lines: Vec<&str> = value.split_inclusive('\n').collect();
+    const BEGIN: &str = "-----BEGIN ";
     let mut out = String::with_capacity(value.len());
-    let mut index = 0;
-    while index < lines.len() {
-        let line = lines[index];
-        let header = line
-            .find("-----BEGIN ")
-            .filter(|start| line[*start..].trim_end().ends_with("PRIVATE KEY-----"));
-        let body_end = (index + 1..lines.len())
-            .find(|next| !key_body(lines[*next]))
-            .unwrap_or(lines.len());
-        match header {
-            Some(start) if body_end > index + 1 => {
-                let end_line = lines
-                    .get(body_end)
-                    .filter(|end| end.trim_start().starts_with("-----END ") && end.contains("PRIVATE KEY-----"));
-                let last = end_line.copied().unwrap_or(lines[body_end - 1]);
-                out.push_str(&line[..start]);
+    let mut rest = value;
+    while let Some(start) = rest.find(BEGIN) {
+        let after = &rest[start + BEGIN.len()..];
+        let header = after
+            .find("-----")
+            .filter(|end| after[..*end].ends_with("PRIVATE KEY") && !after[..*end].contains('\n'));
+        let body = header.map(|end| start + BEGIN.len() + end + 5);
+        match body.and_then(|body| key_block_len(&rest[body..]).map(|len| body + len)) {
+            Some(end) => {
+                out.push_str(&rest[..start]);
                 out.push_str(REDACTED);
-                if last.ends_with('\n') {
-                    out.push('\n');
-                }
-                index = body_end + usize::from(end_line.is_some());
+                rest = &rest[end..];
             }
-            _ => {
-                out.push_str(line);
-                index += 1;
+            None => {
+                out.push_str(&rest[..start + BEGIN.len()]);
+                rest = &rest[start + BEGIN.len()..];
             }
         }
     }
+    out.push_str(rest);
     out
 }
 
@@ -214,7 +248,15 @@ mod tests {
         assert_eq!(redact(&key), format!("before\n{REDACTED}\nafter"));
         // A truncated key loses its key lines but keeps the text after them.
         let truncated = format!("Quote:\n-----BEGIN OPENSSH PRIVATE KEY-----\n{body}\nRotate the key.");
-        assert_eq!(redact(&truncated), format!("Quote:\n{REDACTED}\n\nRotate the key."));
+        assert_eq!(redact(&truncated), format!("Quote:\n{REDACTED}\nRotate the key."));
+        // A key escaped on one line, as JSON service-account files and string literals hold it.
+        let json = r#""private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\nAb12==\n-----END PRIVATE KEY-----\n","#;
+        assert_eq!(redact(json), format!(r#""private_key": "{REDACTED}\n","#));
+        let concatenated = "key = \"-----BEGIN PRIVATE KEY-----\\n\" +\n  \"MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\\n\" +\n  \"-----END PRIVATE KEY-----\\n\";";
+        assert_eq!(redact(concatenated), format!("key = \"{REDACTED}\\n\";"));
+        // An encrypted key has a blank line after its fields, and a last base64 line can be short.
+        let encrypted = format!("-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,0A1B\n\n{body}Ab12==\n-----END RSA PRIVATE KEY-----\ndone");
+        assert_eq!(redact(&encrypted), format!("{REDACTED}\ndone"));
         // A header named in prose is not a key, and nothing after it is dropped.
         let prose = "config/id_rsa contains a -----BEGIN OPENSSH PRIVATE KEY----- block; remove it and rotate the key";
         assert_eq!(redact(prose), prose);
