@@ -369,6 +369,14 @@ fn a_push_with_only_content_excluded_files_keeps_the_previous_outcome() {
     assert!(output.no_new_changes, "{}", output.body);
     assert!(output.body.contains("fixture.txt") && output.body.contains("not a new clean review"));
     assert_eq!(db.review_run_by_id(run).unwrap().unwrap().status, "running");
+    let ids: String = conn
+        .query_row(
+            "SELECT covered_patch_ids_json FROM review_coverage WHERE run_id=$1",
+            [run],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(ids, "[]", "a run that reviewed nothing covers no patch");
     drop(conn);
     drop(db);
     std::fs::remove_dir_all(&repos).unwrap();

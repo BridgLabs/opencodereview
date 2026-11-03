@@ -605,6 +605,24 @@ pub(crate) fn run_inner(
                 &no_change_phase_json(),
                 "No new reviewable PR-owned changes. Previous outcome preserved; policy exclusions are not reviewed.",
             );
+            // Nothing was reviewed, so this run covers no patch, like a re-review whose files were
+            // excluded before the freeze.
+            inputs
+                .open_db()?
+                .begin_review_coverage(&crate::db::ReviewCoverageInput {
+                    repo_id: inputs.repo_id,
+                    pr_id: inputs.pr_id,
+                    run_id: inputs.run_id,
+                    base_ref: &inputs.base_ref,
+                    base_sha: &base_rev,
+                    merge_base_sha: &merge_base_sha,
+                    head_sha: &head_sha,
+                    changed_files: &full_pr_changed,
+                    covered_patch_ids: &[],
+                    diff_hash: &crate::review::coverage::diff_hash(&full_pr_diff),
+                    diff_text: &full_pr_diff,
+                    source_json: coverage_source.as_deref(),
+                })?;
             let excluded = changed
                 .iter()
                 .map(|path| format!("\n- `{path}`: excluded from review evidence, not reviewed"))
