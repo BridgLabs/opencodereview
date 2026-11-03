@@ -427,6 +427,61 @@ fn verify_repository_read_access_using(
     Ok(())
 }
 
+fn repository_is_public_using(
+    repository: &str,
+    host: &str,
+    cancel: &AtomicBool,
+    request: &mut impl FnMut(&[&str]) -> Result<Vec<u8>, String>,
+) -> Result<bool, String> {
+    if cancel.load(Ordering::Relaxed) {
+        return Err("cancelled".into());
+    }
+    let route = format!("repos/{repository}");
+    let bytes = request(&["api", "--hostname", host, &route, "--jq", ".private"]).map_err(|error| {
+        dependency_git_error(
+            &error,
+            &format!("Could not verify the visibility of {repository}. Check GitHub access or retry"),
+            cancel,
+        )
+    })?;
+    match std::str::from_utf8(&bytes).map(str::trim) {
+        Ok("false") => Ok(true),
+        Ok("true") => Ok(false),
+        _ => Err(format!("Could not verify the visibility of {repository}")),
+    }
+}
+
+// Linked repositories are read with the operator's gh session, so their code can reach a pull
+// request whose readers lack access to it. A private or internal dependency is accepted only for
+// a private or internal pull request repository of the same owner.
+fn authorize_dependency_disclosure_using(
+    primary: &str,
+    primary_public: &mut Option<bool>,
+    repository: &str,
+    host: &str,
+    cancel: &AtomicBool,
+    mut request: impl FnMut(&[&str]) -> Result<Vec<u8>, String>,
+) -> Result<(), String> {
+    if repository_is_public_using(repository, host, cancel, &mut request)? {
+        return Ok(());
+    }
+    let public = match *primary_public {
+        Some(public) => public,
+        None => *primary_public.insert(repository_is_public_using(primary, host, cancel, &mut request)?),
+    };
+    let owner = |name: &str| name.split('/').next().unwrap_or_default().to_ascii_lowercase();
+    let reason = if public {
+        "it is a public repository"
+    } else if owner(primary) != owner(repository) {
+        "it belongs to another owner"
+    } else {
+        return Ok(());
+    };
+    Err(format!(
+        "Linked repository {repository} is private or internal, and its code cannot be quoted in a review of {primary} because {reason}. Remove the link from the PR description or changed Markdown files (or the submodule) to review this pull request."
+    ))
+}
+
 fn ensure_dependency_repository(
     root: &Path,
     repository: &str,
@@ -926,6 +981,8 @@ pub(crate) fn capture_with_recorded(
     recorded: Option<&[DependencyProvenance]>,
     cancel: &AtomicBool,
 ) -> Result<Archive, String> {
+    let primary = archive.scope().repository.clone();
+    let mut primary_public = None;
     capture_with_recorded_and_access(
         archive,
         repo,
@@ -935,7 +992,12 @@ pub(crate) fn capture_with_recorded(
         network,
         recorded,
         cancel,
-        &mut verify_repository_read_access,
+        &mut |repository, host, cancel| {
+            verify_repository_read_access(repository, host, cancel)?;
+            authorize_dependency_disclosure_using(&primary, &mut primary_public, repository, host, cancel, |args| {
+                crate::github::gh_capture_cancellable(args, cancel)
+            })
+        },
     )
 }
 

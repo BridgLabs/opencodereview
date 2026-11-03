@@ -1490,6 +1490,94 @@ fn pinned_gh_contents_probe_is_host_scoped_sanitized_and_cancellable() {
     );
 }
 
+fn disclosure(primary: &str, repository: &str, visibility: &[(&str, &str)]) -> Result<(), String> {
+    let cancel = AtomicBool::new(false);
+    let mut primary_public = None;
+    authorize_dependency_disclosure_using(
+        primary,
+        &mut primary_public,
+        repository,
+        "github.com",
+        &cancel,
+        |args| {
+            let route = args[3].strip_prefix("repos/").unwrap();
+            assert_eq!(args, ["api", "--hostname", "github.com", args[3], "--jq", ".private"]);
+            let (_, private) = visibility.iter().find(|(name, _)| *name == route).unwrap();
+            Ok(format!("{private}\n").into_bytes())
+        },
+    )
+}
+
+#[test]
+fn linked_private_repository_never_reaches_a_wider_audience() {
+    // Public dependencies are always fine and never need the primary's visibility.
+    disclosure("acme/web", "other/lib", &[("other/lib", "false")]).unwrap();
+    // A private dependency of the same owner may back a private review.
+    disclosure(
+        "acme/web",
+        "Acme/secrets",
+        &[("Acme/secrets", "true"), ("acme/web", "true")],
+    )
+    .unwrap();
+    // A public pull request must never quote private code, even from its own owner.
+    let error = disclosure(
+        "acme/web",
+        "acme/secrets",
+        &[("acme/secrets", "true"), ("acme/web", "false")],
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("acme/secrets") && error.contains("public repository"),
+        "{error}"
+    );
+    // Another owner's private code stays out of a private review too.
+    let error = disclosure(
+        "acme/web",
+        "other/secrets",
+        &[("other/secrets", "true"), ("acme/web", "true")],
+    )
+    .unwrap_err();
+    assert!(error.contains("another owner"), "{error}");
+    // An unreadable visibility answer fails closed without echoing gh output.
+    let cancel = AtomicBool::new(false);
+    let error = authorize_dependency_disclosure_using("acme/web", &mut None, "acme/lib", "github.com", &cancel, |_| {
+        Err("private-auth-fixture-do-not-persist".into())
+    })
+    .unwrap_err();
+    assert!(
+        error.contains("visibility") && !error.contains("private-auth-fixture"),
+        "{error}"
+    );
+    assert!(
+        authorize_dependency_disclosure_using("acme/web", &mut None, "acme/lib", "github.com", &cancel, |_| Ok(
+            b"null\n".to_vec()
+        ))
+        .is_err()
+    );
+}
+
+#[test]
+fn disclosure_check_asks_for_the_primary_visibility_once() {
+    let cancel = AtomicBool::new(false);
+    let mut primary_public = None;
+    let mut primary_calls = 0;
+    for repository in ["acme/one", "acme/two"] {
+        authorize_dependency_disclosure_using(
+            "acme/web",
+            &mut primary_public,
+            repository,
+            "github.com",
+            &cancel,
+            |args| {
+                primary_calls += usize::from(args[3] == "repos/acme/web");
+                Ok(b"true\n".to_vec())
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!((primary_calls, primary_public), (1, Some(false)));
+}
+
 #[test]
 fn pinned_gh_authorized_object_cache_fetches_named_reference_without_checkout() {
     let root = temporary();
