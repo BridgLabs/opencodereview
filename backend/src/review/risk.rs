@@ -248,7 +248,7 @@ pub(crate) fn is_config_path(path: &str) -> bool {
     lower.ends_with(".yml")
         || lower.ends_with(".yaml")
         || lower.ends_with(".toml")
-        || lower.ends_with(".lock")
+        || crate::path_kinds::is_lockfile(path)
         || lower.ends_with(".sql")
         || lower.ends_with("dockerfile")
         || lower.contains("package.json")
@@ -259,11 +259,7 @@ pub(crate) fn is_config_path(path: &str) -> bool {
 }
 
 pub(crate) fn is_generated_or_lockfile(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    lower.ends_with(".lock")
-        || lower.ends_with("generated.ts")
-        || lower.ends_with("generated.js")
-        || lower.contains("/generated/")
+    crate::path_kinds::is_generated_path(path) || crate::path_kinds::is_lockfile(path)
 }
 
 pub(crate) fn sample_paths(paths: &[&String]) -> String {

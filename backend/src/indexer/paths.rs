@@ -140,15 +140,5 @@ pub(crate) fn is_binary_path(path: &str) -> bool {
 }
 
 pub(crate) fn is_generated_path(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
-    lower.contains("/node_modules/")
-        || lower.contains("/dist/")
-        || lower.contains("/build/")
-        || lower.contains("/.next/")
-        || lower.contains("/coverage/")
-        || lower.contains("/__generated__/")
-        || lower.contains(".generated.")
-        || lower.ends_with(".min.js")
-        || lower.ends_with(".lock")
-        || lower.ends_with("lock.yaml")
+    crate::path_kinds::is_generated_path(path) || crate::path_kinds::is_lockfile(path)
 }
