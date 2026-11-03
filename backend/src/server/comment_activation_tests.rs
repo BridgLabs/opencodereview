@@ -620,14 +620,14 @@ fn file_limit_counts_only_reviewable_files_and_remembers_them_per_revision() {
     };
     // Under the limit GitHub's count stands and nothing is listed.
     assert_eq!(file_count_for_limit(&state, &f.repo, &pr, 10, listed()), full(10));
-    // Over it, source files and the lockfile count; bundles and images do not.
-    assert_eq!(file_count_for_limit(&state, &f.repo, &pr, 3, listed()), reviewable(4));
-    assert_eq!(file_count_for_limit(&state, &f.repo, &pr, 3, listed()), reviewable(4));
+    // Over it, only source files count; bundles, images and lockfiles do not.
+    assert_eq!(file_count_for_limit(&state, &f.repo, &pr, 3, listed()), reviewable(3));
+    assert_eq!(file_count_for_limit(&state, &f.repo, &pr, 3, listed()), reviewable(3));
     assert_eq!(calls.get(), 1, "the same head and base are counted once");
     let moved = snapshot("Feature", "def7654321", Some(files.len() as i64));
     assert_eq!(
         file_count_for_limit(&state, &f.repo, &moved, 3, listed()),
-        reviewable(4)
+        reviewable(3)
     );
     assert_eq!(calls.get(), 2, "a new head is counted again");
     // A short listing (GitHub stops at 3,000 files) keeps the full count, and is not listed again.
@@ -659,7 +659,7 @@ fn file_limit_counts_only_reviewable_files_and_remembers_them_per_revision() {
         .for_each(|(_, listing)| {
             *listing = FileListing::Failed(std::time::Instant::now() - FILE_LISTING_RETRY);
         });
-    assert_eq!(file_count_for_limit(&failed, &f.repo, &pr, 3, listed()), reviewable(4));
+    assert_eq!(file_count_for_limit(&failed, &f.repo, &pr, 3, listed()), reviewable(3));
     let unknown = snapshot("Feature", "abc1234567", None);
     assert_eq!(
         file_count_for_limit(&failed, &f.repo, &unknown, 3, |_, _| unreachable!()),

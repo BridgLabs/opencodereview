@@ -859,7 +859,10 @@ fn discover(
         }
     }
 
-    for link in &resolved_links {
+    // A link to a generated file or lockfile is left out like the file itself; a link to private
+    // configuration or a private path still stops preparation.
+    let mut kept_links = Vec::with_capacity(resolved_links.len());
+    for link in resolved_links {
         let entry = review_archive::SourceEntry {
             path: link.path.clone(),
             revision: link.commit.clone(),
@@ -867,13 +870,18 @@ fn discover(
             mode: "100644".into(),
             bytes: 0,
         };
-        if entry.exclusion().map_err(|error| error.to_string())?.is_some() {
-            return Err(format!(
-                "Pinned dependency {} contains a requested path excluded by evidence policy",
-                link.repository
-            ));
+        match entry.exclusion().map_err(|error| error.to_string())? {
+            None => kept_links.push(link),
+            Some(review_archive::Exclusion::Generated) => {}
+            Some(_) => {
+                return Err(format!(
+                    "Pinned dependency {} contains a requested path excluded by evidence policy",
+                    link.repository
+                ))
+            }
         }
     }
+    let resolved_links = kept_links;
 
     let mut submodule_requests = Vec::new();
     for revision in archive.scope().revisions() {
