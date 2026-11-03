@@ -174,11 +174,14 @@ struct GeneralQuestion {
 }
 
 fn text(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('`', "\\`")
+    use crate::review::published_text::{neutralize, redact};
+    neutralize(
+        &redact(value)
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('`', "\\`"),
+    )
 }
 
 fn external_mismatch(reference: &Reference) -> String {
@@ -598,7 +601,13 @@ fn render(point: &Point) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let task = format!("{}:{}\n{}", point.path, point.line, point.action).replace('`', "");
+    let task = format!(
+        "{}:{}\n{}",
+        point.path,
+        point.line,
+        crate::review::published_text::redact(&point.action)
+    )
+    .replace('`', "");
     let task = task
         .lines()
         .flat_map(|line| {
@@ -694,6 +703,12 @@ fn repeats(listed: &Listed, other: &Listed) -> bool {
         .symmetric_difference(&other.words)
         .any(|word| listed.code.contains(word) || other.code.contains(word));
     (listed.line - other.line).abs() <= 3 && union > 0 && 2 * shared >= union && !names_differ
+}
+
+/// Whether two published points, each `(path, line, title)`, are the same point by the rules of
+/// `repeats`.
+pub(crate) fn same_point(a: (&str, i64, &str), b: (&str, i64, &str)) -> bool {
+    repeats(&Listed::new(a.0, a.1, a.2), &Listed::new(b.0, b.1, b.2))
 }
 
 /// The summary section listing validated suggestions (`path`, `line`, `title`, `detail`, `action`),
