@@ -179,7 +179,8 @@ pub(crate) fn neutralize(value: &str) -> String {
     let mut prev: Option<char> = None;
     let mut chars = value.chars().peekable();
     while let Some(ch) = chars.next() {
-        if ch.is_whitespace() || "([".contains(ch) {
+        // A URL ends at whitespace or at the punctuation that closes or follows it.
+        if ch.is_whitespace() || "([)],;'\"<>".contains(ch) {
             word_start = out.len() + ch.len_utf8();
         }
         out.push(ch);
@@ -277,6 +278,13 @@ mod tests {
             "ask @\u{2060}octocat or @\u{2060}org/team"
         );
         assert_eq!(neutralize("(@Override)"), "(@\u{2060}Override)");
+        for (after_url, neutralized) in [
+            ("[docs](https://host)@org/team", "[docs](https://host)@\u{2060}org/team"),
+            ("https://example.com,@octocat", "https://example.com,@\u{2060}octocat"),
+            ("https://example.com;@octocat", "https://example.com;@\u{2060}octocat"),
+        ] {
+            assert_eq!(neutralize(after_url), neutralized);
+        }
         assert_eq!(
             neutralize("see https://host/@a then @octocat"),
             "see https://host/@a then @\u{2060}octocat"
