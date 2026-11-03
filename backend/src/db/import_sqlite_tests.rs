@@ -116,6 +116,8 @@ fn an_install_moves_with_its_history_and_identity() {
     };
     assert_eq!(setting("installation_id"), "installation-from-sqlite");
     assert_eq!(setting("theme"), "dark");
+    // The SQLite seed keeps merged archives a day; the import moves it to the current default.
+    assert_eq!(setting("review_archive_retention_days"), "0");
     let removed: Option<i64> = scalar(db, "SELECT removed_at FROM repos WHERE id = 99");
     assert!(removed.is_some(), "the removed repository is marked removed");
     assert_eq!(
