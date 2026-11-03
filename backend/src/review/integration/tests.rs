@@ -147,6 +147,29 @@ fn all_excluded_frozen_review_paths_are_never_assigned() {
 }
 
 #[test]
+fn offline_submodules_and_symlinks_are_never_skipped_as_unreviewable() {
+    let files = vec!["libs/vendored-sdk".to_string()];
+    let mut inputs = frozen_inputs(&[("src/a.rs".to_string(), LINE.to_string())]);
+    inputs.offline = true;
+    let scope = inputs.frozen.as_ref().unwrap().archive.scope().clone();
+    let submodule = crate::review_archive::SourceEntry {
+        path: files[0].clone(),
+        revision: HEAD.into(),
+        mode: "160000".into(),
+        git_blob_id: "e".repeat(40),
+        bytes: 0,
+    };
+    let archive =
+        crate::review_archive::Archive::build(scope, vec![submodule.clone()], &AtomicBool::new(false), |_| {
+            panic!("A submodule has no content to open")
+        })
+        .unwrap();
+    inputs.frozen = Some(std::sync::Arc::new(frozen::FrozenContext::new(archive)));
+    assert!(frozen_omittable_paths(&inputs, &files).contains(&files[0]));
+    assert!(frozen_unreviewable_paths(&inputs, &files).is_empty());
+}
+
+#[test]
 fn lockfiles_are_left_out_of_a_mixed_review_and_its_risk_triggers() {
     let files = vec!["src/media.ts".to_string(), "package-lock.json".to_string()];
     let inputs = frozen_inputs(

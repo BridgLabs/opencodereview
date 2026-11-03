@@ -1605,8 +1605,8 @@ pub(crate) fn frozen_omittable_paths(inputs: &ReviewInputs, changed: &[String]) 
 }
 
 /// Changed paths the archive left out as generated, binary or oversized: skipped without review.
-/// Private paths are not among them, so a pull request that only changes private files still
-/// fails explicitly.
+/// Private paths and offline submodules or symlinks are not among them, so a pull request that
+/// only changes those still fails explicitly.
 pub(crate) fn frozen_unreviewable_paths(
     inputs: &ReviewInputs,
     changed: &[String],
@@ -1631,6 +1631,7 @@ fn frozen_paths_where(
                 Some(
                     crate::review_archive::Exclusion::PrivateConfiguration
                         | crate::review_archive::Exclusion::PrivatePath
+                        | crate::review_archive::Exclusion::NonRegular
                 )
             )
     };

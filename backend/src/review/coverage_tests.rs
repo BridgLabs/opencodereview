@@ -293,6 +293,89 @@ fn legacy_recovery_rejects_partial_malformed_and_uncompleted_proofs() {
 }
 
 #[test]
+fn a_push_with_only_content_excluded_files_keeps_the_previous_outcome() {
+    let (root, db, pr, previous_run, previous_head) = legacy_fixture();
+    let git = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    };
+    let prior = db.review_run_scope(previous_run).unwrap().unwrap();
+    git(&["checkout", "-q", "feature"]);
+    git(&["merge", "--no-ff", "-qm", "sync main", "main"]);
+    // An oversized fixture is only known to be excluded once the archive is frozen.
+    std::fs::write(root.join("fixture.txt"), "x".repeat(1_000_001)).unwrap();
+    git(&["add", "fixture.txt"]);
+    git(&["commit", "-qm", "large fixture"]);
+    let head = git(&["rev-parse", "HEAD"]);
+    git(&["remote", "add", "origin", root.to_str().unwrap()]);
+    git(&["update-ref", "refs/pull/1/head", &head]);
+    let conn = db.handle().open().unwrap();
+    conn.execute(
+        "UPDATE pull_requests SET head_sha=$2 WHERE id=$1",
+        crate::pg_params![pr, head],
+    )
+    .unwrap();
+    let run = db.start_review_skeleton_with(pr, Some("fixture")).unwrap();
+    db.set_review_run_running(run, "[]").unwrap();
+    // The freeze needs the repository at `<repos>/acme/fixture`.
+    let repos = std::env::temp_dir().join(format!("ocr-layout-{}", crate::sandbox::secret().unwrap()));
+    let layout = repos.join("acme/fixture");
+    std::fs::create_dir_all(layout.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&root, &layout).unwrap();
+    let input = crate::review::ReviewInputs {
+        frozen: None,
+        run_id: run,
+        repo_id: 1,
+        pr_id: pr,
+        repo_path: layout.clone(),
+        full_name: "acme/fixture".into(),
+        number: 1,
+        base_ref: "main".into(),
+        fixed_head_sha: None,
+        offline: false,
+        expected_scope: None,
+        prior_scope: Some(prior),
+        last_reviewed_sha: Some(previous_head),
+        force_full: false,
+        reprocess: false,
+        skill_content: "Review correctness".into(),
+        unresolved_review_head: None,
+        // With suggestions off (the default) the review keeps none, not even a pending one's.
+        unresolved_review_body: Some(format!(
+            "No findings.\n\n{}",
+            crate::review::evidence::suggestions_section(&[serde_json::json!(
+                {"path":"code.rs","line":1,"title":"Stale test name","detail":"Detail","action":"Rename it"}
+            )])
+        )),
+        pr_title: "Sync main".into(),
+        pr_body: String::new(),
+        model: "fixture".into(),
+        review_depth_mode: "auto".into(),
+        review_deep_threshold: 20,
+        review_chunk_size: 5,
+        review_parallel_chunks: 1,
+        db_handle: Some(db.handle()),
+        archive_dir: std::env::temp_dir().join(format!("ocr-review-archives-{}", crate::sandbox::secret().unwrap())),
+        budget: None,
+    };
+    let output = crate::review::execute(&input, &AtomicBool::new(false), &mut |_, _| {}).unwrap();
+    assert!(output.no_new_changes, "{}", output.body);
+    assert!(output.body.contains("fixture.txt") && output.body.contains("not a new clean review"));
+    assert_eq!(db.review_run_by_id(run).unwrap().unwrap().status, "running");
+    drop(conn);
+    drop(db);
+    std::fs::remove_dir_all(&repos).unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn legacy_merge_with_only_excluded_delta_finishes_without_inference() {
     let (root, db, pr, previous_run, previous_head) = legacy_fixture();
     let git = |args: &[&str]| {
