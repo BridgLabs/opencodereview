@@ -3,29 +3,50 @@
 
 const REDACTED: &str = "[redacted secret]";
 
-/// Token prefixes with the shortest body that still names a real credential.
-const TOKEN_PREFIXES: &[(&str, usize)] = &[
-    ("github_pat_", 22),
-    ("ghp_", 30),
-    ("gho_", 30),
-    ("ghu_", 30),
-    ("ghs_", 30),
-    ("ghr_", 30),
-    ("glpat-", 20),
-    ("sk-ant-", 20),
-    ("sk-proj-", 20),
-    ("sk_live_", 16),
-    ("rk_live_", 16),
-    ("xoxb-", 10),
-    ("xoxp-", 10),
-    ("xoxa-", 10),
-    ("xoxr-", 10),
-    ("xoxs-", 10),
-    ("AKIA", 16),
-    ("ASIA", 16),
-    ("AIza", 30),
-    ("npm_", 30),
+fn alnum(ch: char) -> bool {
+    ch.is_ascii_alphanumeric()
+}
+
+fn upper_alnum(ch: char) -> bool {
+    ch.is_ascii_uppercase() || ch.is_ascii_digit()
+}
+
+fn alnum_underscore(ch: char) -> bool {
+    alnum(ch) || ch == '_'
+}
+
+/// Credential prefixes with the body length range and alphabet of a real token, so identifiers
+/// that only share a prefix (`ASIA_PACIFIC_REGION`, `npm_package_version`) stay readable.
+const TOKEN_SHAPES: &[(&str, usize, usize, fn(char) -> bool)] = &[
+    ("github_pat_", 22, 255, alnum_underscore),
+    ("ghp_", 36, 36, alnum),
+    ("gho_", 36, 36, alnum),
+    ("ghu_", 36, 36, alnum),
+    ("ghs_", 36, 36, alnum),
+    ("ghr_", 36, 36, alnum),
+    ("glpat-", 20, 64, token_char),
+    ("sk-ant-", 20, 255, token_char),
+    ("sk-proj-", 20, 255, token_char),
+    ("sk_live_", 16, 255, alnum),
+    ("rk_live_", 16, 255, alnum),
+    ("xoxb-", 10, 255, token_char),
+    ("xoxp-", 10, 255, token_char),
+    ("xoxa-", 10, 255, token_char),
+    ("xoxr-", 10, 255, token_char),
+    ("xoxs-", 10, 255, token_char),
+    ("AKIA", 16, 16, upper_alnum),
+    ("ASIA", 16, 16, upper_alnum),
+    ("AIza", 35, 35, token_char),
+    ("npm_", 36, 36, alnum),
 ];
+
+fn credential(token: &str) -> bool {
+    TOKEN_SHAPES.iter().any(|(prefix, min, max, alphabet)| {
+        token
+            .strip_prefix(prefix)
+            .is_some_and(|body| (*min..=*max).contains(&body.len()) && body.chars().all(alphabet))
+    })
+}
 
 fn token_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'
@@ -39,13 +60,7 @@ pub(crate) fn redact(value: &str) -> String {
     while let Some(ch) = rest.chars().next() {
         let at_boundary = out.chars().next_back().is_none_or(|prev| !token_char(prev));
         let token_len = rest.find(|c: char| !token_char(c)).unwrap_or(rest.len());
-        if at_boundary
-            && TOKEN_PREFIXES.iter().any(|(prefix, min)| {
-                rest[..token_len]
-                    .strip_prefix(prefix)
-                    .is_some_and(|body| body.len() >= *min)
-            })
-        {
+        if at_boundary && credential(&rest[..token_len]) {
             out.push_str(REDACTED);
             rest = &rest[token_len..];
             continue;
@@ -139,11 +154,15 @@ mod tests {
     #[test]
     fn credentials_are_redacted_and_ordinary_text_stays() {
         let github = format!("ghp_{}", "a1".repeat(18));
+        let npm = format!("npm_{}", "Ab3".repeat(12));
         let aws = "AKIAIOSFODNN7EXAMPLE";
         let anthropic = format!("sk-ant-api03-{}", "x".repeat(40));
-        let text = format!("Token {github} and {aws}, key={anthropic}.");
+        let text = format!("Token {github} and {aws}, key={anthropic}, {npm}.");
         let redacted = redact(&text);
-        assert_eq!(redacted, format!("Token {REDACTED} and {REDACTED}, key={REDACTED}."));
+        assert_eq!(
+            redacted,
+            format!("Token {REDACTED} and {REDACTED}, key={REDACTED}, {REDACTED}.")
+        );
         // Short or embedded look-alikes are not credentials.
         for kept in [
             "ghp_short",
@@ -151,6 +170,10 @@ mod tests {
             "mask_ghp_value",
             "risk-ant-model",
             "use npm_config_cache",
+            "ASIA_PACIFIC_SOUTHEAST_REGION",
+            "AKIAIOSFODNN7EXAMPLEEXTRA",
+            "npm_package_dependencies_typescript",
+            "ghp_with_underscores_and_enough_characters_here",
         ] {
             assert_eq!(redact(kept), kept);
         }
