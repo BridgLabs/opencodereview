@@ -222,6 +222,15 @@ pub(crate) struct CreateSkillVersionRequest {
     note: Option<String>,
 }
 
+/// Runs archive maintenance now instead of at its next hourly pass.
+pub(crate) fn wake_retention_worker(state: &SharedState) {
+    let (lock, cvar) = &*state.retention_worker_notify;
+    if let Ok(mut wake) = lock.lock() {
+        *wake = true;
+        cvar.notify_one();
+    }
+}
+
 fn resolve_persisted_token(data_dir: &Path) -> Option<String> {
     let token_path = data_dir.join("api-token");
     if let Ok(existing) = std::fs::read_to_string(&token_path) {

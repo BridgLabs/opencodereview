@@ -342,7 +342,7 @@ fn migration_9_upgrades_a_version_8_database_with_runs() {
         .query_one("SELECT MAX(version) FROM schema_migrations", &[])
         .unwrap()
         .get(0);
-    assert_eq!(latest, 9);
+    assert_eq!(latest, crate::db::pg::migrate::MIGRATIONS.len() as i64);
     let runs: i64 = client
         .query_one("SELECT COUNT(*) FROM review_runs", &[])
         .unwrap()

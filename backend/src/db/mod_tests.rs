@@ -886,7 +886,7 @@ fn review_max_files_setting_is_persisted_and_validated() {
 #[test]
 fn review_archive_retention_days_setting_is_persisted_and_validated() {
     let db = Db::for_test().open().expect("open db");
-    assert_eq!(db.settings().unwrap().review_archive_retention_days, 1);
+    assert_eq!(db.settings().unwrap().review_archive_retention_days, 0);
     assert_eq!(
         db.save_setting("review_archive_retention_days", "30")
             .unwrap()
@@ -905,13 +905,19 @@ fn review_archive_retention_days_setting_is_persisted_and_validated() {
             .review_archive_retention_days,
         1
     );
-    for value in ["0", "-1", "366", "1.5", "", "abc"] {
+    assert_eq!(
+        db.save_setting("review_archive_retention_days", "0")
+            .unwrap()
+            .review_archive_retention_days,
+        0
+    );
+    for value in ["-1", "366", "1.5", "", "abc"] {
         assert!(
             db.save_setting("review_archive_retention_days", value).is_err(),
             "accepted {value:?}"
         );
     }
-    assert_eq!(db.settings().unwrap().review_archive_retention_days, 1);
+    assert_eq!(db.settings().unwrap().review_archive_retention_days, 0);
 
     // Test save_settings_batch validation
     let update = SettingsUpdate {
@@ -922,7 +928,7 @@ fn review_archive_retention_days_setting_is_persisted_and_validated() {
     assert_eq!(snapshot.settings.review_archive_retention_days, 14);
 
     let invalid_update = SettingsUpdate {
-        settings: HashMap::from([("review_archive_retention_days".into(), "0".into())]),
+        settings: HashMap::from([("review_archive_retention_days".into(), "-1".into())]),
         repositories: None,
     };
     assert!(db.save_settings_batch(&invalid_update).is_err());

@@ -198,7 +198,8 @@ fn retention_worker_preserves_unmerged_and_recently_merged_prs() {
         .deposit_and_link(&archive_closed, &format!("review:{run_closed}"))
         .unwrap();
 
-    // PR 3: merged only 3 hours ago (retention is 1 day)
+    // PR 3: merged only 3 hours ago, kept while retention is set to 1 day
+    db.save_setting_value("review_archive_retention_days", "1").unwrap();
     let pr_recent = db
         .upsert_pull_request(&PullRequestInput {
             repo_id: 1,
@@ -218,10 +219,10 @@ fn retention_worker_preserves_unmerged_and_recently_merged_prs() {
         })
         .unwrap();
     let three_hours_ago = now_ms - 3 * 3600 * 1000;
-    db.mark_pr_terminal_with_merged_at(pr_recent, "merged", "Merged", Some(three_hours_ago))
-        .unwrap();
     let run_recent = db.start_review_skeleton_with(pr_recent, Some("dan")).unwrap();
     db.finish_review_run(run_recent, "Done", None, "[]").unwrap();
+    db.mark_pr_terminal_with_merged_at(pr_recent, "merged", "Merged", Some(three_hours_ago))
+        .unwrap();
     let archive_recent = sample_archive("recent");
     store
         .deposit_and_link(&archive_recent, &format!("review:{run_recent}"))
@@ -234,6 +235,15 @@ fn retention_worker_preserves_unmerged_and_recently_merged_prs() {
     assert_eq!(result.bytes_removed, 0);
     assert_eq!(result.deferrals, 3);
     assert_eq!(store.list_artifacts().unwrap().len(), 3);
+
+    // The default purges merged code as soon as the merge is confirmed; open and closed stay.
+    db.save_setting_value("review_archive_retention_days", "0").unwrap();
+    let result = coordinator.perform_maintenance(&cancel).unwrap();
+    assert_eq!(result.packages_removed, 1);
+    assert_eq!(result.deferrals, 2);
+    let remaining = store.list_artifacts().unwrap();
+    assert_eq!(remaining.len(), 2);
+    assert!(!remaining.iter().any(|(id, _)| *id == archive_recent.descriptor().id));
 }
 
 #[test]
@@ -417,8 +427,8 @@ fn retention_coordinator_rejects_malformed_setting() {
     let archive = sample_archive("malformed");
     store.deposit_and_link(&archive, "review:1").unwrap();
 
-    // Set invalid setting "0" directly in DB
-    db.save_setting_value("review_archive_retention_days", "0").unwrap();
+    // Set invalid setting "-1" directly in DB
+    db.save_setting_value("review_archive_retention_days", "-1").unwrap();
 
     let cancel = AtomicBool::new(false);
     let result = coordinator.perform_maintenance(&cancel);

@@ -283,11 +283,7 @@ pub(crate) fn save_setting(request: &Request, state: &SharedState) -> Result<ser
     let payload: SaveSettingRequest = serde_json::from_slice(&request.body).map_err(|error| error.to_string())?;
     let result = with_db(state, |db| db.save_setting(&payload.key, &payload.value))?;
     if payload.key == "review_archive_retention_days" {
-        let (lock, cvar) = &*state.retention_worker_notify;
-        if let Ok(mut wake) = lock.lock() {
-            *wake = true;
-            cvar.notify_one();
-        }
+        super::wake_retention_worker(state);
     }
     Ok(result)
 }
@@ -297,11 +293,7 @@ pub(crate) fn save_settings_batch_http(request: &Request, state: &SharedState) -
     let has_retention = payload.settings.contains_key("review_archive_retention_days");
     let result = with_db(state, |db| db.save_settings_batch(&payload))?;
     if has_retention {
-        let (lock, cvar) = &*state.retention_worker_notify;
-        if let Ok(mut wake) = lock.lock() {
-            *wake = true;
-            cvar.notify_one();
-        }
+        super::wake_retention_worker(state);
     }
     Ok(result)
 }
