@@ -586,3 +586,53 @@ fn activation_acknowledgement_is_due_only_while_the_pr_is_open() {
         .is_empty());
     assert!(f.db.activated_open_pr_numbers(1).unwrap().is_empty());
 }
+
+#[test]
+fn file_limit_counts_only_reviewable_files_and_remembers_them_per_revision() {
+    let f = Fixture::new("limit");
+    let state = fixture_state(&f);
+    let mut files: Vec<String> = (0..3).map(|i| format!("src/f{i}.rs")).collect();
+    files.extend((0..5).map(|i| format!("dist/bundle{i}.js")));
+    files.extend(["go.sum".to_string(), "assets/logo.png".to_string()]);
+    let pr = snapshot("Feature", "abc1234567", Some(files.len() as i64));
+    let full_name = f.repo.full_name.clone();
+    let calls = std::cell::Cell::new(0);
+    let calls = &calls;
+    let listed = || {
+        let (files, full_name) = (files.clone(), full_name.clone());
+        move |name: &str, number: i64| {
+            assert_eq!((name, number), (full_name.as_str(), 7));
+            calls.set(calls.get() + 1);
+            Ok(files)
+        }
+    };
+    // Under the limit GitHub's count stands and nothing is listed.
+    assert_eq!(file_count_for_limit(&state, &f.repo, &pr, 10, listed()), Some(10));
+    // Over it, source files and the lockfile count; bundles and images do not.
+    assert_eq!(file_count_for_limit(&state, &f.repo, &pr, 3, listed()), Some(4));
+    assert_eq!(file_count_for_limit(&state, &f.repo, &pr, 3, listed()), Some(4));
+    assert_eq!(calls.get(), 1, "the same head and base are counted once");
+    let moved = snapshot("Feature", "def7654321", Some(files.len() as i64));
+    assert_eq!(file_count_for_limit(&state, &f.repo, &moved, 3, listed()), Some(4));
+    assert_eq!(calls.get(), 2, "a new head is counted again");
+    // A failed or short listing keeps GitHub's full count.
+    let fresh = fixture_state(&f);
+    assert_eq!(
+        file_count_for_limit(&fresh, &f.repo, &pr, 3, |_, _| Err("offline".into())),
+        Some(10)
+    );
+    assert_eq!(
+        file_count_for_limit(&fresh, &f.repo, &pr, 3, |_, _| Ok(vec!["src/a.rs".into()])),
+        Some(10)
+    );
+    assert_eq!(
+        file_count_for_limit(
+            &fresh,
+            &f.repo,
+            &snapshot("Feature", "abc1234567", None),
+            3,
+            |_, _| unreachable!()
+        ),
+        None
+    );
+}

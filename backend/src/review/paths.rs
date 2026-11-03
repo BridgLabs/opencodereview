@@ -160,15 +160,20 @@ pub(crate) fn copy_dir_subset(from: &Path, to: &Path, rels: &[String]) {
 
 pub(crate) fn is_noise_path(path: &str) -> bool {
     is_generated_or_lockfile(path)
-        || path.contains("/vendor/")
-        || path.contains("/dist/")
         || path.contains("/target/")
-        || path.ends_with(".min.js")
         || path.ends_with(".png")
         || path.ends_with(".jpg")
         || path.ends_with(".jpeg")
         || path.ends_with(".gif")
         || path.ends_with(".pdf")
+}
+
+/// Whether a changed file counts toward the review file limit: the review reads it. Paths the
+/// evidence policy excludes and noise without risk (build output, vendored code, bundles, maps,
+/// generated code) are left out of the review, so they do not count.
+pub(crate) fn counts_toward_file_limit(path: &str) -> bool {
+    !matches!(crate::review_archive::path_exclusion(path), Ok(Some(_)))
+        && (!is_noise_path(path) || is_risk_bearing_path(path))
 }
 
 pub(crate) fn is_risk_bearing_path(path: &str) -> bool {
@@ -370,4 +375,34 @@ pub(crate) fn normalize_finding_key(body: &str) -> String {
         .take(16)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod file_limit_tests {
+    #[test]
+    fn file_limit_counts_only_files_a_review_reads() {
+        for counted in [
+            "src/main.rs",
+            "package-lock.json",
+            "go.sum",
+            "src/old_module.rs",
+            "deploy/generated/config.yaml",
+        ] {
+            assert!(super::counts_toward_file_limit(counted), "{counted}");
+        }
+        for skipped in [
+            "dist/app.js",
+            "vendor/github.com/pkg/errors/errors.go",
+            "static/app.min.js",
+            "static/app.js.map",
+            "internal/pb/service.pb.go",
+            "assets/logo.png",
+            "src/__generated__/types.ts",
+            // The evidence policy never freezes these, so a review cannot read them.
+            "Cargo.lock",
+            "pnpm-lock.yaml",
+        ] {
+            assert!(!super::counts_toward_file_limit(skipped), "{skipped}");
+        }
+    }
 }

@@ -7,6 +7,56 @@ pub(crate) struct PolledPr {
     pub queue_eligible: bool,
 }
 
+#[cfg(not(test))]
+fn list_pr_files(full_name: &str, number: i64) -> Result<Vec<String>, String> {
+    github::pr_file_paths(full_name, number)
+}
+
+#[cfg(test)]
+fn list_pr_files(_: &str, _: i64) -> Result<Vec<String>, String> {
+    Err("tests never list pull request files from GitHub".into())
+}
+
+/// The file count the review limit applies to. Above the limit, only the files a review reads
+/// count (`counts_toward_file_limit`), from GitHub's file listing, remembered per head and base.
+/// A listing that fails or stops short (over 3,000 files) keeps GitHub's full count.
+pub(crate) fn file_count_for_limit(
+    state: &SharedState,
+    repo: &Repo,
+    pr: &github::GhPullRequest,
+    limit: i64,
+    list_files: impl FnOnce(&str, i64) -> Result<Vec<String>, String>,
+) -> Option<i64> {
+    let count = pr.changed_files?;
+    if count <= limit {
+        return Some(count);
+    }
+    let key = (repo.id, pr.number);
+    let revision = (pr.head_ref_oid.clone(), pr.base_ref_oid.clone());
+    let cached = state.reviewable_file_counts.lock().ok().and_then(|counts| {
+        counts
+            .get(&key)
+            .filter(|(counted_at, _)| *counted_at == revision)
+            .map(|(_, reviewable)| *reviewable)
+    });
+    if cached.is_some() {
+        return cached;
+    }
+    let reviewable = list_files(&repo.full_name, pr.number)
+        .ok()
+        .filter(|paths| paths.len() as i64 >= count)
+        .map(|paths| {
+            paths
+                .iter()
+                .filter(|path| crate::review::counts_toward_file_limit(path))
+                .count() as i64
+        });
+    if let (Some(reviewable), Ok(mut counts)) = (reviewable, state.reviewable_file_counts.lock()) {
+        counts.insert(key, (revision, reviewable));
+    }
+    Some(reviewable.unwrap_or(count))
+}
+
 pub(crate) fn poll_one_pr(
     state: &SharedState,
     repo: &Repo,
@@ -28,7 +78,8 @@ pub(crate) fn poll_one_pr(
             .as_deref()
             .is_some_and(|base| !base.is_empty() && base != default)
     });
-    let too_many_files = pr.changed_files.is_some_and(|count| count > settings.review_max_files);
+    let file_count = file_count_for_limit(state, repo, pr, settings.review_max_files, list_pr_files);
+    let too_many_files = file_count.is_some_and(|count| count > settings.review_max_files);
     let computed_lane = author_activation_lane(
         pr.is_draft && repo.skip_draft_prs,
         activated,
@@ -38,8 +89,8 @@ pub(crate) fn poll_one_pr(
     );
     let status_reason = if too_many_files {
         Some(format!(
-            "Skipped: {} changed files exceeds the {}-file review limit. Change Maximum PR files in Settings.",
-            pr.changed_files.unwrap_or_default(),
+            "Skipped: {} reviewable changed files exceeds the {}-file review limit. Change Maximum PR files in Settings.",
+            file_count.unwrap_or_default(),
             settings.review_max_files
         ))
     } else if off_main {
@@ -103,7 +154,7 @@ pub(crate) fn poll_one_pr(
             },
             github_updated_at,
         )?;
-        db.set_pr_changed_file_count(pr_id, pr.changed_files)?;
+        db.set_pr_changed_file_count(pr_id, file_count)?;
         let has_active_review_job = state
             .review_jobs
             .lock()
