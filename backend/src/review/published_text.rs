@@ -93,34 +93,47 @@ fn url_password_end(authority: &str) -> Option<usize> {
     (!password.is_empty()).then_some(at)
 }
 
+/// A line of PEM key material: base64, or an encrypted key's `Proc-Type`/`DEK-Info` header.
+fn key_body(line: &str) -> bool {
+    let line = line.trim();
+    line.starts_with("Proc-Type:")
+        || line.starts_with("DEK-Info:")
+        || (line.len() >= 16 && line.chars().all(|c| c.is_ascii_alphanumeric() || "+/=".contains(c)))
+}
+
+/// Replaces a private key block: its `BEGIN ... PRIVATE KEY` line, the key lines that follow and
+/// the `END` line when present. A header with no key lines after it (one named in prose) stays.
 fn redact_private_keys(value: &str) -> String {
-    let mut out = String::new();
-    let mut rest = value;
-    while let Some(start) = rest.find("-----BEGIN ") {
-        let header_end = rest[start..]
-            .find("-----\n")
-            .or_else(|| rest[start + 11..].find("-----").map(|i| i + 11));
-        let is_key = rest[start..]
-            .lines()
-            .next()
-            .is_some_and(|line| line.contains("PRIVATE KEY"));
-        let Some(header_end) = header_end.filter(|_| is_key) else {
-            out.push_str(&rest[..start + 11]);
-            rest = &rest[start + 11..];
-            continue;
-        };
-        out.push_str(&rest[..start]);
-        out.push_str(REDACTED);
-        let after = &rest[start + header_end..];
-        rest = match after.find("-----END ") {
-            Some(end) => {
-                let tail = &after[end + 9..];
-                tail.find("-----").map_or("", |close| &tail[close + 5..])
+    let lines: Vec<&str> = value.split_inclusive('\n').collect();
+    let mut out = String::with_capacity(value.len());
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index];
+        let header = line
+            .find("-----BEGIN ")
+            .filter(|start| line[*start..].trim_end().ends_with("PRIVATE KEY-----"));
+        let body_end = (index + 1..lines.len())
+            .find(|next| !key_body(lines[*next]))
+            .unwrap_or(lines.len());
+        match header {
+            Some(start) if body_end > index + 1 => {
+                let end_line = lines
+                    .get(body_end)
+                    .filter(|end| end.trim_start().starts_with("-----END ") && end.contains("PRIVATE KEY-----"));
+                let last = end_line.copied().unwrap_or(lines[body_end - 1]);
+                out.push_str(&line[..start]);
+                out.push_str(REDACTED);
+                if last.ends_with('\n') {
+                    out.push('\n');
+                }
+                index = body_end + usize::from(end_line.is_some());
             }
-            None => "",
-        };
+            _ => {
+                out.push_str(line);
+                index += 1;
+            }
+        }
     }
-    out.push_str(rest);
     out
 }
 
@@ -189,8 +202,17 @@ mod tests {
             redact("https://example.com/a@b and git@github.com:x"),
             "https://example.com/a@b and git@github.com:x"
         );
-        let key = "before\n-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----\nafter";
-        assert_eq!(redact(key), format!("before\n{REDACTED}\nafter"));
+        let body = "MIIEpAIBAAKCAQEA1234567890abcdef\nZXhhbXBsZSBrZXkgbWF0ZXJpYWw=\n";
+        let key = format!("before\n-----BEGIN RSA PRIVATE KEY-----\n{body}-----END RSA PRIVATE KEY-----\nafter");
+        assert_eq!(redact(&key), format!("before\n{REDACTED}\nafter"));
+        // A truncated key loses its key lines but keeps the text after them.
+        let truncated = format!("Quote:\n-----BEGIN OPENSSH PRIVATE KEY-----\n{body}\nRotate the key.");
+        assert_eq!(redact(&truncated), format!("Quote:\n{REDACTED}\n\nRotate the key."));
+        // A header named in prose is not a key, and nothing after it is dropped.
+        let prose = "config/id_rsa contains a -----BEGIN OPENSSH PRIVATE KEY----- block; remove it and rotate the key";
+        assert_eq!(redact(prose), prose);
+        let two = "Header -----BEGIN RSA PRIVATE KEY-----\nmentioned, then -----END RSA PRIVATE KEY----- later";
+        assert_eq!(redact(two), two);
         let cert = "-----BEGIN CERTIFICATE-----\nMII\n-----END CERTIFICATE-----";
         assert_eq!(redact(cert), cert);
     }
