@@ -1401,3 +1401,109 @@ fn a_repository_over_budget_keeps_the_reviewed_paths_first() {
     // And so does the runner's transfer check.
     transfer::transfer_manifest(&archive.descriptor(), &raw).unwrap();
 }
+
+/// A copy of `archive` whose manifest records `policy`, with `rename` applied to an entry path,
+/// rehashed so only the policy check can reject it. Edits the canonical bytes in place.
+fn recorded_under(archive: &Archive, policy: u32, rename: (&str, &str)) -> (Descriptor, Vec<u8>) {
+    let encoded = String::from_utf8(archive.manifest_bytes().unwrap()).unwrap();
+    let current = format!("\"policyVersion\":{POLICY_VERSION}");
+    assert!(encoded.contains(&current));
+    let mut raw = encoded.replace(&current, &format!("\"policyVersion\":{policy}"));
+    if !rename.0.is_empty() {
+        raw = raw.replace(
+            &format!("\"path\":\"{}\"", rename.0),
+            &format!("\"path\":\"{}\"", rename.1),
+        );
+    }
+    let raw = raw.into_bytes();
+    let mut descriptor = archive.descriptor();
+    descriptor.id = hash(&raw);
+    descriptor.manifest_bytes = raw.len() as u64;
+    (descriptor, raw)
+}
+
+#[test]
+fn policy_two_freezes_its_own_generated_and_lockfile_rules() {
+    for path in [
+        "vendor/github.com/pkg/errors/errors.go",
+        "web/generated/client.ts",
+        "static/app.min.css",
+        "static/app.js.map",
+        "static/app.css.map",
+        "api/service.pb.go",
+        "api/service.pb.h",
+        "api/service.pb.cc",
+        "proto/service_pb2.py",
+        "proto/service_pb2_grpc.py",
+        "internal/mock_gen.go",
+        "pkg/zz_generated.deepcopy.go",
+        "src/schema.generated.ts",
+        "src/graphql/generated.ts",
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "go.sum",
+        "Package.resolved",
+        "src/App/packages.lock.json",
+        "bun.lockb",
+    ] {
+        assert_eq!(path_exclusion(path).unwrap(), Some(Exclusion::Generated), "{path}");
+        let policy_one = path_exclusion_for(path, 1).unwrap();
+        assert!(
+            policy_one.is_none() || path.contains(".generated."),
+            "{path}: {policy_one:?}"
+        );
+    }
+    // Policy 2 only adds generated paths after policy 1's rules, so their reasons never change.
+    assert_eq!(path_exclusion("vendor/.env").unwrap(), Some(Exclusion::PrivatePath));
+    assert_eq!(path_exclusion("vendor/logo.png").unwrap(), Some(Exclusion::BinaryPath));
+    assert_eq!(
+        path_exclusion("generated/.git/config").unwrap(),
+        Some(Exclusion::PrivateConfiguration)
+    );
+    for kept in [
+        "src/build.rs",
+        "go.mod",
+        "package.json",
+        "src/vendored.rs",
+        "docs/generated.md",
+    ] {
+        assert_eq!(path_exclusion(kept).unwrap(), None, "{kept}");
+    }
+}
+
+#[test]
+fn stored_archives_validate_under_the_policy_they_record() {
+    let head = scope().head_sha;
+    let archive = build(&[("gosum.rs", &head, b"h1:abc"), ("src/a.rs", &head, b"fn a() {}")]);
+    // An archive frozen under policy 1 holds go.sum as content and still reads after the upgrade.
+    let (descriptor, raw) = recorded_under(&archive, 1, ("gosum.rs", "go.sum"));
+    let restored = Archive::decode(&descriptor, &raw, archive.blobs().to_vec()).unwrap();
+    assert_eq!(restored.resolve(&head, "go.sum").unwrap(), "h1:abc");
+    // The same entries under policy 2 claim content its rules exclude, and an unknown policy is refused.
+    for policy in [2, 3] {
+        let (descriptor, raw) = recorded_under(&archive, policy, ("gosum.rs", "go.sum"));
+        assert!(
+            Archive::decode(&descriptor, &raw, archive.blobs().to_vec()).is_err(),
+            "{policy}"
+        );
+    }
+    // New archives exclude go.sum without opening it.
+    let fresh = Archive::build(
+        scope(),
+        vec![source("go.sum", &head, b"h1:abc")],
+        &AtomicBool::new(false),
+        |_| panic!("Excluded content must not be opened"),
+    )
+    .unwrap();
+    assert!(matches!(fresh.resolve(&head, "go.sum"), Err(Error::Excluded(_))));
+}
+
+#[test]
+fn transfer_accepts_only_the_current_policy() {
+    let head = scope().head_sha;
+    let archive = build(&[("src/a.rs", &head, b"fn a() {}")]);
+    assert!(Incoming::new(archive.descriptor(), archive.manifest_bytes().unwrap()).is_ok());
+    let (descriptor, raw) = recorded_under(&archive, 1, ("", ""));
+    assert!(Archive::decode(&descriptor, &raw, archive.blobs().to_vec()).is_ok());
+    assert!(Incoming::new(descriptor, raw).is_err());
+}

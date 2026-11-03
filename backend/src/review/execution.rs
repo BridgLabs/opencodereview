@@ -511,18 +511,13 @@ pub(crate) fn run_inner(
             .iter()
             .map(|file| format!("\n- `{}`: {:?} — excluded, not reviewed", file.path, file.reason))
             .collect::<String>();
-        let pending = inputs.unresolved_review_body.as_deref().map(|body| format!("\n\nPreviously pending review\nThis PR still has an unresolved generated review from `{}`. Keep it in mind before marking this PR reviewed.\n\n{}", inputs.unresolved_review_head.as_deref().unwrap_or("previous head"), body.trim())).unwrap_or_default();
-        return Ok(ReviewOutput {
-      body: format!(
-        "fe-review report — PR #{} incremental re-review\n\nSummary\n- Head SHA: {head_sha}\n- No new reviewable PR-owned changes; unchanged files reuse verified coverage.\n- No model executed and no new findings were validated.\n\nPolicy exclusions (not reviewed){excluded}\n\nClosing\n- Previous review outcome preserved; this is not a new clean review.{pending}",
-        inputs.number,
-      ),
-      comments_json: Some(format!(r#"{{"commit_id":"{head_sha}","comments":[]}}"#)),
-      evidence_warnings: Vec::new(),
-      usage: RunUsage::default(),
-      risk: score_review_risk(&risk_plan, &full_pr_diff, Some(format!(r#"{{"commit_id":"{head_sha}","comments":[]}}"#)).as_deref()),
-      no_new_changes: true,
-    });
+        return Ok(preserved_outcome(
+            inputs,
+            &head_sha,
+            &excluded,
+            &risk_plan,
+            &full_pr_diff,
+        ));
     }
 
     if !changed.is_empty() && diff.trim().is_empty() {
@@ -600,6 +595,52 @@ pub(crate) fn run_inner(
     })?);
     let inputs = &prepared_inputs;
     let _ = cleanup_pr_ref(&inputs.repo_path, inputs.number);
+    let excluded = frozen_unreviewable_paths(inputs, &changed);
+    // Deferred files were not frozen for review, so a run that deferred any has more to review.
+    if !changed.is_empty() && deferred.is_empty() && changed.iter().all(|path| excluded.contains(path)) {
+        // A re-review whose new changes are all excluded keeps the previous outcome, like one with
+        // no new changes; only a first or full review is skipped.
+        if reviewed_since.is_some() || scope_reuse.is_some() || !stacked_sources.is_empty() {
+            progress(
+                &no_change_phase_json(),
+                "No new reviewable PR-owned changes. Previous outcome preserved; policy exclusions are not reviewed.",
+            );
+            // Nothing was reviewed, so this run covers no patch, like a re-review whose files were
+            // excluded before the freeze.
+            inputs
+                .open_db()?
+                .begin_review_coverage(&crate::db::ReviewCoverageInput {
+                    repo_id: inputs.repo_id,
+                    pr_id: inputs.pr_id,
+                    run_id: inputs.run_id,
+                    base_ref: &inputs.base_ref,
+                    base_sha: &base_rev,
+                    merge_base_sha: &merge_base_sha,
+                    head_sha: &head_sha,
+                    changed_files: &full_pr_changed,
+                    covered_patch_ids: &[],
+                    diff_hash: &crate::review::coverage::diff_hash(&full_pr_diff),
+                    diff_text: &full_pr_diff,
+                    source_json: coverage_source.as_deref(),
+                })?;
+            let excluded = changed
+                .iter()
+                .map(|path| format!("\n- `{path}`: excluded from review evidence, not reviewed"))
+                .collect::<String>();
+            return Ok(preserved_outcome(
+                inputs,
+                &head_sha,
+                &excluded,
+                &risk_plan,
+                &full_pr_diff,
+            ));
+        }
+        let sample = changed.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+        return Err(format!(
+            "{NOTHING_REVIEWABLE}: every changed file is excluded from review evidence (generated, vendored, lockfile, binary or oversized): {sample}{}",
+            if changed.len() > 5 { ", …" } else { "" }
+        ));
+    }
     progress(
         &phase_json("context", "ok"),
         &format!(
@@ -866,6 +907,30 @@ pub(crate) fn run_inner(
 /// `body` as the review keeps it, in its stored body and its audit. Reviews still list
 /// suggestions, so low-priority points never turn into findings, but only the
 /// `review_suggestions_enabled` setting (off by default) keeps them for posting.
+/// The output of a re-review with no new reviewable changes: no model ran, and the previous
+/// outcome stands; this is never a new clean review.
+fn preserved_outcome(
+    inputs: &ReviewInputs,
+    head_sha: &str,
+    excluded: &str,
+    risk_plan: &crate::db::ReviewContextPlan,
+    full_pr_diff: &str,
+) -> ReviewOutput {
+    let pending = inputs.unresolved_review_body.as_deref().map(|body| format!("\n\nPreviously pending review\nThis PR still has an unresolved generated review from `{}`. Keep it in mind before marking this PR reviewed.\n\n{}", inputs.unresolved_review_head.as_deref().unwrap_or("previous head"), body.trim())).unwrap_or_default();
+    let comments_json = format!(r#"{{"commit_id":"{head_sha}","comments":[]}}"#);
+    ReviewOutput {
+        body: format!(
+            "fe-review report — PR #{} incremental re-review\n\nSummary\n- Head SHA: {head_sha}\n- No new reviewable PR-owned changes; unchanged files reuse verified coverage.\n- No model executed and no new findings were validated.\n\nPolicy exclusions (not reviewed){excluded}\n\nClosing\n- Previous review outcome preserved; this is not a new clean review.{pending}",
+            inputs.number,
+        ),
+        risk: score_review_risk(risk_plan, full_pr_diff, Some(comments_json.as_str())),
+        comments_json: Some(comments_json),
+        evidence_warnings: Vec::new(),
+        usage: RunUsage::default(),
+        no_new_changes: true,
+    }
+}
+
 pub(crate) fn kept_review_body(db: &crate::db::Database, body: &str) -> String {
     if db.settings().is_ok_and(|settings| settings.review_suggestions_enabled) {
         body.to_string()

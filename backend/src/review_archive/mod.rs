@@ -7,7 +7,11 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const VERSION: u32 = 1;
-pub const POLICY_VERSION: u32 = 1;
+/// The evidence exclusion policy new archives are frozen under. A stored archive is validated
+/// under the policy it records, so a rule change is a new version, never an edit of an old one.
+pub const POLICY_VERSION: u32 = 2;
+/// Policies whose stored archives still validate.
+const STORED_POLICY_VERSIONS: [u32; 2] = [1, 2];
 pub const MAX_FILE_BYTES: u64 = 1_000_000;
 pub const MAX_BLOB_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_MANIFEST_BYTES: u64 = 32 * 1024 * 1024;
@@ -302,12 +306,17 @@ impl SourceEntry {
         Ok(())
     }
 
+    /// Why the current policy leaves this source out of an archive, if it does.
     pub fn exclusion(&self) -> Result<Option<Exclusion>, Error> {
+        self.exclusion_for(POLICY_VERSION)
+    }
+
+    fn exclusion_for(&self, policy: u32) -> Result<Option<Exclusion>, Error> {
         safe_path(&self.path)?;
         if !matches!(self.mode.as_str(), "100644" | "100755") {
             return Ok(Some(Exclusion::NonRegular));
         }
-        if let Some(reason) = path_exclusion(&self.path)? {
+        if let Some(reason) = path_exclusion_for(&self.path, policy)? {
             return Ok(Some(reason));
         }
         Ok((self.bytes > MAX_FILE_BYTES).then_some(Exclusion::Oversized))
@@ -326,7 +335,38 @@ pub(crate) fn in_agent_folder(path: &str) -> bool {
     })
 }
 
+/// Why the current policy leaves this path out of an archive, if it does.
 pub(crate) fn path_exclusion(path: &str) -> Result<Option<Exclusion>, Error> {
+    path_exclusion_for(path, POLICY_VERSION)
+}
+
+/// Directories policy 2 adds to policy 1's generated ones: vendored dependencies and generated code.
+const POLICY_2_GENERATED_DIRS: &[&str] = &["vendor", "generated"];
+/// File name endings policy 2 adds: minified styles, source maps, protobuf and Go generated code.
+const POLICY_2_GENERATED_SUFFIXES: &[&str] = &[
+    "generated.ts",
+    "generated.js",
+    ".min.css",
+    ".js.map",
+    ".css.map",
+    ".pb.go",
+    ".pb.h",
+    ".pb.cc",
+    "_pb2.py",
+    "_pb2_grpc.py",
+    "_gen.go",
+    ".lockb",
+];
+/// Lockfile names policy 2 adds to policy 1's `.lock` and `lock.yaml` endings.
+const POLICY_2_LOCKFILES: &[&str] = &[
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "go.sum",
+    "package.resolved",
+    "packages.lock.json",
+];
+
+fn path_exclusion_for(path: &str, policy: u32) -> Result<Option<Exclusion>, Error> {
     safe_path(path)?;
     let path = path.to_ascii_lowercase();
     let parts = path.split('/').collect::<Vec<_>>();
@@ -380,6 +420,18 @@ pub(crate) fn path_exclusion(path: &str) -> Result<Option<Exclusion>, Error> {
     {
         return Ok(Some(Exclusion::Generated));
     }
+    // Policy 2 only adds generated paths after every policy 1 rule, so a private or binary path
+    // keeps its reason under both.
+    if policy >= 2
+        && (parts[..parts.len() - 1]
+            .iter()
+            .any(|part| POLICY_2_GENERATED_DIRS.contains(part))
+            || name.starts_with("zz_generated")
+            || POLICY_2_GENERATED_SUFFIXES.iter().any(|suffix| name.ends_with(suffix))
+            || POLICY_2_LOCKFILES.contains(name))
+    {
+        return Ok(Some(Exclusion::Generated));
+    }
     Ok(None)
 }
 
@@ -394,7 +446,7 @@ impl Descriptor {
 
 impl Manifest {
     fn validate(&self, data: &[u8]) -> Result<u64, Error> {
-        if self.version != VERSION || self.policy_version != POLICY_VERSION {
+        if self.version != VERSION || !STORED_POLICY_VERSIONS.contains(&self.policy_version) {
             return Err(Error::Contract);
         }
         self.validate_sources()?;
@@ -429,7 +481,7 @@ impl Manifest {
         let mut expanded = 0u64;
         for entry in self.all_entries() {
             match (
-                entry.source.exclusion()?,
+                entry.source.exclusion_for(self.policy_version)?,
                 entry.exclusion,
                 entry.content_hash.as_deref(),
             ) {

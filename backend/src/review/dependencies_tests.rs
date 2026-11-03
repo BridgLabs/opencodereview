@@ -476,6 +476,19 @@ fn pinned_dependencies_capture_authorized_links_and_submodule_without_checkout()
     assert!(capture(base(), &repo, &[], &private, &authorized, false, &cancel)
         .unwrap_err()
         .contains("excluded by evidence policy"));
+    // A link to a lockfile or generated file is left out like the file, without failing preparation.
+    for generated in ["go.sum", "vendor/lib/x.go", "api.pb.go", "docs/diagram.png"] {
+        let link = format!("https://github.com/acme/api/blob/{api_sha}/{generated}");
+        let captured = capture(base(), &repo, &[], &link, &authorized, false, &cancel).unwrap();
+        let unlinked = capture(base(), &repo, &[], "", &authorized, false, &cancel).unwrap();
+        assert_eq!(captured.descriptor(), unlinked.descriptor(), "{generated}");
+    }
+    // Such a link never reaches the repository's access check, cache or budget, even when that
+    // repository is unknown and would be refused.
+    let unknown = format!("https://github.com/other/private/blob/{api_sha}/go.sum https://github.com/other/private/blob/main/package-lock.json");
+    let captured = capture(base(), &repo, &[], &unknown, &authorized, true, &cancel).unwrap();
+    let unlinked = capture(base(), &repo, &[], "", &authorized, false, &cancel).unwrap();
+    assert_eq!(captured.descriptor(), unlinked.descriptor());
     assert!(capture(base(), &repo, &changed, "", &authorized, false, &AtomicBool::new(true)).is_err());
     fs::remove_dir_all(root).unwrap();
 }

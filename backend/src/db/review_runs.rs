@@ -589,6 +589,30 @@ impl Database {
         self.resolve_all_pending_for_pr(pr_id)
     }
 
+    /// Skips a run whose pull request changed only files excluded from review evidence. The PR is
+    /// left `skipped` until its head changes; nothing is reviewed or marked clean.
+    pub fn skip_review_run_without_reviewable_files(&self, run_id: i64, reason: &str) -> Result<(), String> {
+        let now = now_millis();
+        let pr_id: i64 = self
+            .conn
+            .query_row("SELECT pr_id FROM review_runs WHERE id = $1", params![run_id], |row| {
+                row.get(0)
+            })
+            .map_err(|error| error.to_string())?;
+        let run_changed = self.conn.execute(
+            "UPDATE review_runs SET status = 'skipped', error_message = $1, outcome = $1, finished_at = $2, updated_at = $2 WHERE id = $3 AND status IN ('pending','running')",
+            params![reason, now, run_id],
+        ).map_err(|error| error.to_string())? > 0;
+        if run_changed {
+            self.set_pr_lane_if_open(
+                pr_id,
+                "skipped",
+                Some("Not reviewed: only generated files, lockfiles or other excluded paths changed"),
+            )?;
+        }
+        self.resolve_all_pending_for_pr(pr_id)
+    }
+
     pub fn fail_review_run(&self, run_id: i64, error_message: &str) -> Result<(), String> {
         let now = now_millis();
         let pr_id: i64 = self

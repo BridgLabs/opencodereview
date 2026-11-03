@@ -27,6 +27,9 @@ mod validation;
 
 pub(crate) use context_support::*;
 pub(crate) use git::*;
+/// Prefix of the preparation error for a pull request whose changed files are all excluded from
+/// review evidence; the run is skipped, never failed or marked clean.
+pub(crate) const NOTHING_REVIEWABLE: &str = "review has no reviewable files";
 pub(crate) use paths::*;
 pub(crate) use risk::*;
 #[cfg(test)]

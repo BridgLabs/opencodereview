@@ -381,13 +381,7 @@ pub(crate) fn normalize_finding_key(body: &str) -> String {
 mod file_limit_tests {
     #[test]
     fn file_limit_counts_only_files_a_review_reads() {
-        for counted in [
-            "src/main.rs",
-            "package-lock.json",
-            "go.sum",
-            "src/old_module.rs",
-            "deploy/generated/config.yaml",
-        ] {
+        for counted in ["src/main.rs", "src/old_module.rs", "deploy/config.yaml"] {
             assert!(super::counts_toward_file_limit(counted), "{counted}");
         }
         for skipped in [
@@ -401,6 +395,9 @@ mod file_limit_tests {
             // The evidence policy never freezes these, so a review cannot read them.
             "Cargo.lock",
             "pnpm-lock.yaml",
+            "package-lock.json",
+            "go.sum",
+            "deploy/generated/config.yaml",
         ] {
             assert!(!super::counts_toward_file_limit(skipped), "{skipped}");
         }

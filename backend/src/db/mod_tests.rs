@@ -2374,3 +2374,47 @@ fn the_board_carries_an_auto_post_failure_and_a_suggestions_only_mark_until_the_
     assert_eq!(card(&db).result_error, None);
     assert!(!card(&db).suggestions_only);
 }
+
+#[test]
+fn a_run_with_only_excluded_files_is_skipped_not_failed_or_clean() {
+    let db = Db::for_test().open().expect("open db");
+    db.ensure_temp_repo_for_index(1, "acme/fixture").unwrap();
+    db.save_repo_subscription(1, true, "manual", false, false).unwrap();
+    let pr_id = db
+        .upsert_pull_request(&PullRequestInput {
+            repo_id: 1,
+            number: 43,
+            title: "Lockfile refresh".into(),
+            author: "fixture".into(),
+            author_avatar_url: None,
+            is_draft: false,
+            head_sha: "head".into(),
+            base_sha: Some("base".into()),
+            base_ref: Some("main".into()),
+            head_ref: Some("feature".into()),
+            default_branch: Some("main".into()),
+            url: None,
+            lane: "open".into(),
+            status_reason: None,
+        })
+        .unwrap();
+    let run_id = db.start_review_skeleton_with(pr_id, Some("fixture")).unwrap();
+    let reason = format!("{}: every changed file is excluded", crate::review::NOTHING_REVIEWABLE);
+    db.skip_review_run_without_reviewable_files(run_id, &reason).unwrap();
+    let run = db.review_run_by_id(run_id).unwrap().unwrap();
+    assert_eq!(run.status, "skipped");
+    let (lane, status): (String, Option<String>) = db
+        .conn
+        .query_row(
+            "SELECT review_lane, status_reason FROM pull_requests WHERE id = $1",
+            params![pr_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(lane, "skipped");
+    assert!(status.unwrap().starts_with("Not reviewed"));
+    assert!(db
+        .review_result(pr_id)
+        .unwrap()
+        .is_none_or(|result| result.effective_state != "clean"));
+}
