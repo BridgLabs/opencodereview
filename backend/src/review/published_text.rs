@@ -106,41 +106,49 @@ fn next_line(text: &str) -> (usize, usize) {
     }
 }
 
-/// The base64 characters of a line of PEM key material, or `None` when the line is not one. A
-/// key line may be blank (encrypted keys), an encrypted key's `Proc-Type`/`DEK-Info` field, or
-/// base64 of any length wrapped in string quoting or concatenation.
-fn key_line(line: &str) -> Option<usize> {
+/// A line of PEM key material: its base64 length and whether it is unmistakably key material (a
+/// full-width base64 line or an encrypted key's `Proc-Type`/`DEK-Info` field), or `None` when the
+/// line is not one. Blank lines (encrypted keys) and short base64 lines (a key's last line)
+/// count only between such lines and an `END` marker, so a one-word line after a truncated key
+/// stays.
+fn key_line(line: &str) -> Option<(usize, bool)> {
     let line = line.trim_matches(|c: char| c.is_whitespace() || "\"',+".contains(c));
     if line.starts_with("Proc-Type:") || line.starts_with("DEK-Info:") {
-        return Some(0);
+        return Some((0, true));
     }
     line.chars()
         .all(|c| c.is_ascii_alphanumeric() || "+/=".contains(c))
-        .then_some(line.len())
+        .then_some((line.len(), line.len() >= 16))
 }
 
 /// How much of `text` after a `BEGIN ... PRIVATE KEY-----` header is key material, through the
 /// `END ... PRIVATE KEY-----` marker when it follows the key lines. `None` when no key follows (a
 /// header named in prose).
 fn key_block_len(text: &str) -> Option<usize> {
-    let (mut pos, mut consumed, mut base64) = (0, 0, 0);
+    const END: &str = "PRIVATE KEY-----";
+    let (mut pos, mut certain_end, mut base64) = (0, 0, 0);
     loop {
         let (len, break_len) = next_line(&text[pos..]);
         let line = &text[pos..pos + len];
         let marker = line.trim_start_matches(|c: char| c.is_whitespace() || "\"',+".contains(c));
         if marker.starts_with("-----END ") {
-            let close = line.find("PRIVATE KEY-----")? + "PRIVATE KEY-----".len();
-            return (base64 > 0).then_some(pos + close);
+            // A malformed END marker still ends the key; its lines are redacted as truncated.
+            if let Some(close) = line.find(END).filter(|_| base64 > 0) {
+                return Some(pos + close + END.len());
+            }
+            break;
         }
-        let Some(chars) = key_line(line) else { break };
+        let Some((chars, certain)) = key_line(line) else { break };
         base64 += chars;
-        consumed = pos + len;
+        if certain {
+            certain_end = pos + len;
+        }
         if break_len == 0 {
             break;
         }
         pos += len + break_len;
     }
-    (base64 >= 40).then_some(consumed)
+    (base64 >= 40).then_some(certain_end)
 }
 
 /// Replaces private key blocks, multi-line or escaped on one line, including a truncated one
@@ -180,10 +188,15 @@ pub(crate) fn neutralize(value: &str) -> String {
     let mut chars = value.chars().peekable();
     while let Some(ch) = chars.next() {
         // A URL ends at whitespace or at the punctuation that closes or follows it.
-        if ch.is_whitespace() || "([)],;'\"<>".contains(ch) {
-            word_start = out.len() + ch.len_utf8();
-        }
+        // Input is HTML-escaped, so `&gt;`/`&lt;` close a URL while the `;` of `&amp;` in a query
+        // does not.
         out.push(ch);
+        if ch.is_whitespace()
+            || "([)],'\"".contains(ch)
+            || (ch == ';' && (out.ends_with("&gt;") || out.ends_with("&lt;")))
+        {
+            word_start = out.len();
+        }
         let next = chars.peek().copied();
         if ch == '!' && next == Some('[') {
             out.push('\\');
@@ -249,7 +262,7 @@ mod tests {
         assert_eq!(redact(&key), format!("before\n{REDACTED}\nafter"));
         // A truncated key loses its key lines but keeps the text after them.
         let truncated = format!("Quote:\n-----BEGIN OPENSSH PRIVATE KEY-----\n{body}\nRotate the key.");
-        assert_eq!(redact(&truncated), format!("Quote:\n{REDACTED}\nRotate the key."));
+        assert_eq!(redact(&truncated), format!("Quote:\n{REDACTED}\n\nRotate the key."));
         // A key escaped on one line, as JSON service-account files and string literals hold it.
         let json = r#""private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\nAb12==\n-----END PRIVATE KEY-----\n","#;
         assert_eq!(redact(json), format!(r#""private_key": "{REDACTED}\n","#));
@@ -258,6 +271,15 @@ mod tests {
         // An encrypted key has a blank line after its fields, and a last base64 line can be short.
         let encrypted = format!("-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,0A1B\n\n{body}Ab12==\n-----END RSA PRIVATE KEY-----\ndone");
         assert_eq!(redact(&encrypted), format!("{REDACTED}\ndone"));
+        // A malformed END marker still ends the key, and the key lines before it are redacted.
+        let malformed = format!("-----BEGIN OPENSSH PRIVATE KEY-----\n{body}-----END OPENSSH PRIVATE KEY----\nok");
+        assert_eq!(
+            redact(&malformed),
+            format!("{REDACTED}\n-----END OPENSSH PRIVATE KEY----\nok")
+        );
+        // One-word lines after a truncated key are prose, not key lines.
+        let words = format!("-----BEGIN PRIVATE KEY-----\n{body}Rotate\n\"Note,\"\nThanks");
+        assert_eq!(redact(&words), format!("{REDACTED}\nRotate\n\"Note,\"\nThanks"));
         // A header named in prose is not a key, and nothing after it is dropped.
         let prose = "config/id_rsa contains a -----BEGIN OPENSSH PRIVATE KEY----- block; remove it and rotate the key";
         assert_eq!(redact(prose), prose);
@@ -281,7 +303,10 @@ mod tests {
         for (after_url, neutralized) in [
             ("[docs](https://host)@org/team", "[docs](https://host)@\u{2060}org/team"),
             ("https://example.com,@octocat", "https://example.com,@\u{2060}octocat"),
-            ("https://example.com;@octocat", "https://example.com;@\u{2060}octocat"),
+            (
+                "&lt;https://example.com&gt;@octocat",
+                "&lt;https://example.com&gt;@\u{2060}octocat",
+            ),
         ] {
             assert_eq!(neutralize(after_url), neutralized);
         }
@@ -298,6 +323,8 @@ mod tests {
             "npmjs.com/package/@scope/pkg",
             "[docs](https://host/@user) and https://mastodon.social/@user",
             "https://host/x?u=@name",
+            // `text()` escapes `&` before neutralizing, so queries reach it as `&amp;`.
+            "https://www.npmjs.com/search?ranking=popularity&amp;q=@types/node",
         ] {
             assert_eq!(neutralize(kept), kept);
         }
