@@ -221,7 +221,38 @@ pub(crate) fn github_review_comment(comment: &serde_json::Value, body: String) -
 }
 
 pub fn dedupe_review_comments(full_name: &str, number: i64, comments: serde_json::Value) -> DedupeResult {
-    let existing = existing_ocr_comment_keys(full_name, number);
+    dedupe_against(&existing_ocr_comments(full_name, number), comments)
+}
+
+/// The `[Finding]` or `[Question]` title of a rendered OpenCodeReview comment.
+fn point_title(body: &str) -> Option<&str> {
+    let start = ["**[Finding] ", "**[Question] "]
+        .iter()
+        .find_map(|marker| body.find(marker).map(|at| at + marker.len()))?;
+    let end = body[start..].find("**\n").or_else(|| body[start..].find("**"))?;
+    Some(body[start..start + end].trim())
+}
+
+/// Whether an existing comment already carries this point: the same fingerprint, or the same
+/// title in the same file (where a later push may have moved it), or a close rewording within
+/// three lines. A different point on the same line is not a duplicate.
+fn already_posted<'a>(
+    existing: &'a [ExistingOcrComment],
+    fingerprint: &str,
+    path: &str,
+    line: i64,
+    body: &str,
+) -> Option<&'a ExistingOcrComment> {
+    let title = point_title(body);
+    existing.iter().find(|comment| {
+        comment.fingerprint.as_deref() == Some(fingerprint)
+            || title.zip(comment.title.as_deref()).is_some_and(|(title, other)| {
+                crate::review::evidence::same_point((&comment.path, comment.line, other), (path, line, title))
+            })
+    })
+}
+
+pub(crate) fn dedupe_against(existing: &[ExistingOcrComment], comments: serde_json::Value) -> DedupeResult {
     let mut post_comments = Vec::new();
     let mut annotated = Vec::new();
     let mut suppressed_count = 0usize;
@@ -239,8 +270,7 @@ pub fn dedupe_review_comments(full_name: &str, number: i64, comments: serde_json
             .unwrap_or_default()
             .to_string();
         let (fingerprint, body_with_marker) = with_fingerprint_marker(&path, line, &body);
-        let loc_key = format!("{}:{}", path, line);
-        if let Some(duplicate) = existing.get(&fingerprint).or_else(|| existing.get(&loc_key)) {
+        if let Some(duplicate) = already_posted(existing, &fingerprint, &path, line, &body) {
             if let Some(obj) = comment.as_object_mut() {
                 obj.insert("status".to_string(), serde_json::json!("duplicate_suppressed"));
                 obj.insert("fingerprint".to_string(), serde_json::json!(fingerprint));
@@ -271,44 +301,124 @@ pub fn dedupe_review_comments(full_name: &str, number: i64, comments: serde_json
 pub(crate) struct ExistingOcrComment {
     author: String,
     url: String,
+    path: String,
+    line: i64,
+    fingerprint: Option<String>,
+    title: Option<String>,
 }
 
-pub(crate) fn existing_ocr_comment_keys(full_name: &str, number: i64) -> HashMap<String, ExistingOcrComment> {
-    let route = format!("repos/{full_name}/pulls/{number}/comments?per_page=100");
-    let bytes = match run_raw("gh", &["api", "--paginate", &route]) {
-        Ok(bytes) => bytes,
-        Err(_) => return HashMap::new(),
-    };
-    let comments = match serde_json::from_slice::<serde_json::Value>(&bytes) {
-        Ok(value) => value.as_array().cloned().unwrap_or_default(),
-        Err(_) => return HashMap::new(),
-    };
-    let mut out = HashMap::new();
-    for comment in comments {
+impl ExistingOcrComment {
+    fn from_github(comment: &serde_json::Value) -> Option<Self> {
         let body = comment.get("body").and_then(|v| v.as_str()).unwrap_or_default();
         if !is_ocr_comment(body) {
-            continue;
+            return None;
         }
-        let path = comment.get("path").and_then(|v| v.as_str()).unwrap_or_default();
-        let line = comment.get("line").and_then(|v| v.as_i64()).unwrap_or_default();
-        let item = ExistingOcrComment {
-            author: comment
-                .pointer("/user/login")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string(),
-            url: comment
-                .get("html_url")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-        };
-        if let Some(fingerprint) = extract_ocr_fingerprint(body) {
-            out.insert(fingerprint, item.clone());
-        }
-        out.insert(format!("{}:{}", path, line), item);
+        let field = |pointer: &str| comment.pointer(pointer).and_then(|v| v.as_str());
+        Some(Self {
+            author: field("/user/login").unwrap_or("unknown").to_string(),
+            url: field("/html_url").unwrap_or_default().to_string(),
+            path: field("/path").unwrap_or_default().to_string(),
+            // An outdated comment has no current line; its original one still places it.
+            line: ["/line", "/original_line"]
+                .iter()
+                .find_map(|pointer| comment.pointer(pointer).and_then(|v| v.as_i64()))
+                .unwrap_or_default(),
+            fingerprint: extract_ocr_fingerprint(body),
+            title: point_title(body).map(str::to_string),
+        })
     }
-    out
+}
+
+pub(crate) fn existing_ocr_comments(full_name: &str, number: i64) -> Vec<ExistingOcrComment> {
+    let route = format!("repos/{full_name}/pulls/{number}/comments?per_page=100");
+    let Ok(bytes) = run_raw("gh", &["api", "--paginate", &route]) else {
+        return Vec::new();
+    };
+    let Ok(comments) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return Vec::new();
+    };
+    comments
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(ExistingOcrComment::from_github)
+        .collect()
+}
+
+#[cfg(test)]
+mod dedupe_tests {
+    use super::*;
+
+    fn posted(path: &str, line: i64, title: &str) -> serde_json::Value {
+        let body =
+            format!("<!-- ocr:fingerprint=fnv64:{line:016x} -->\nOpenCodeReview\n\n**[Finding] {title}**\n\nDetail");
+        serde_json::json!({"path": path, "line": line, "body": body, "html_url": format!("https://x/{path}/{line}"), "user": {"login": "me"}})
+    }
+
+    fn new_comment(path: &str, line: i64, title: &str) -> serde_json::Value {
+        serde_json::json!({"path": path, "line": line, "side": "RIGHT", "body": format!("{}\n\n**[Finding] {title}**\n\nOther detail", crate::review::REVIEW_ATTRIBUTION)})
+    }
+
+    fn dedupe(existing: &[serde_json::Value], comments: Vec<serde_json::Value>) -> DedupeResult {
+        let existing: Vec<_> = existing.iter().filter_map(ExistingOcrComment::from_github).collect();
+        dedupe_against(&existing, serde_json::Value::Array(comments))
+    }
+
+    #[test]
+    fn a_different_point_on_an_already_commented_line_is_posted() {
+        let result = dedupe(
+            &[posted("src/a.rs", 10, "Cache is never invalidated")],
+            vec![new_comment("src/a.rs", 10, "Lock is held across the network call")],
+        );
+        assert_eq!(
+            (result.suppressed_count, result.post_comments.as_array().unwrap().len()),
+            (0, 1)
+        );
+    }
+
+    #[test]
+    fn the_same_point_moved_by_a_later_push_is_not_posted_again() {
+        let result = dedupe(
+            &[posted("src/a.rs", 10, "Cache is never invalidated")],
+            vec![new_comment("src/a.rs", 42, "Cache is never invalidated")],
+        );
+        assert_eq!(result.suppressed_count, 1);
+        assert!(result.annotated_comments_json.contains("https://x/src/a.rs/10"));
+    }
+
+    #[test]
+    fn a_close_rewording_nearby_is_a_repeat_but_not_in_another_file() {
+        let existing = [posted("src/a.rs", 10, "Cache entry is never invalidated after update")];
+        let near = dedupe(
+            &existing,
+            vec![new_comment("src/a.rs", 12, "Cache entry never invalidated on update")],
+        );
+        assert_eq!(near.suppressed_count, 1);
+        let other_file = dedupe(
+            &existing,
+            vec![new_comment(
+                "src/b.rs",
+                10,
+                "Cache entry is never invalidated after update",
+            )],
+        );
+        assert_eq!(other_file.suppressed_count, 0);
+    }
+
+    #[test]
+    fn outdated_comments_keep_their_original_line_and_foreign_comments_are_ignored() {
+        let mut outdated = posted("src/a.rs", 7, "Wrong default port");
+        outdated["original_line"] = outdated["line"].take();
+        let comment = ExistingOcrComment::from_github(&outdated).unwrap();
+        assert_eq!(
+            (comment.line, comment.title.as_deref()),
+            (7, Some("Wrong default port"))
+        );
+        assert!(
+            ExistingOcrComment::from_github(&serde_json::json!({"body": "LGTM", "path": "src/a.rs", "line": 7}))
+                .is_none()
+        );
+    }
 }
 
 #[cfg(test)]
