@@ -1600,28 +1600,41 @@ pub(crate) fn run_review_chunk(
     })
 }
 
-fn frozen_omittable_paths(inputs: &ReviewInputs, changed: &[String]) -> std::collections::BTreeSet<String> {
+pub(crate) fn frozen_omittable_paths(inputs: &ReviewInputs, changed: &[String]) -> std::collections::BTreeSet<String> {
+    frozen_paths_where(inputs, changed, false)
+}
+
+/// Changed paths the archive left out as generated, binary or oversized: skipped without review.
+/// Private paths are not among them, so a pull request that only changes private files still
+/// fails explicitly.
+pub(crate) fn frozen_unreviewable_paths(
+    inputs: &ReviewInputs,
+    changed: &[String],
+) -> std::collections::BTreeSet<String> {
+    frozen_paths_where(inputs, changed, true)
+}
+
+fn frozen_paths_where(
+    inputs: &ReviewInputs,
+    changed: &[String],
+    exclude_private: bool,
+) -> std::collections::BTreeSet<String> {
     let Some(frozen) = &inputs.frozen else {
         return std::collections::BTreeSet::new();
     };
     let head = frozen.archive.scope().head_sha.as_str();
     let entries = frozen.archive.entries();
-    let omittable = |entry: &crate::review_archive::Entry| {
-        // Offline, a submodule or symlink has no content to review: nothing pins what it points at.
-        (inputs.offline && matches!(entry.exclusion, Some(crate::review_archive::Exclusion::NonRegular)))
-            || matches!(
+    let private = |entry: &crate::review_archive::Entry| {
+        exclude_private
+            && matches!(
                 entry.exclusion,
                 Some(
                     crate::review_archive::Exclusion::PrivateConfiguration
                         | crate::review_archive::Exclusion::PrivatePath
-                        | crate::review_archive::Exclusion::Generated
-                        | crate::review_archive::Exclusion::BinaryPath
-                        | crate::review_archive::Exclusion::Binary
-                        | crate::review_archive::Exclusion::NonUtf8
-                        | crate::review_archive::Exclusion::Oversized
                 )
             )
     };
+    let omittable = |entry: &crate::review_archive::Entry| !private(entry) && omittable_entry(inputs, entry);
     changed
         .iter()
         .filter(|path| {
@@ -1640,6 +1653,23 @@ fn frozen_omittable_paths(inputs: &ReviewInputs, changed: &[String]) -> std::col
         .collect()
 }
 
+fn omittable_entry(inputs: &ReviewInputs, entry: &crate::review_archive::Entry) -> bool {
+    // Offline, a submodule or symlink has no content to review: nothing pins what it points at.
+    (inputs.offline && matches!(entry.exclusion, Some(crate::review_archive::Exclusion::NonRegular)))
+        || matches!(
+            entry.exclusion,
+            Some(
+                crate::review_archive::Exclusion::PrivateConfiguration
+                    | crate::review_archive::Exclusion::PrivatePath
+                    | crate::review_archive::Exclusion::Generated
+                    | crate::review_archive::Exclusion::BinaryPath
+                    | crate::review_archive::Exclusion::Binary
+                    | crate::review_archive::Exclusion::NonUtf8
+                    | crate::review_archive::Exclusion::Oversized
+            )
+        )
+}
+
 pub(crate) fn build_review_map(
     inputs: &ReviewInputs,
     plan: &ReviewContextPlan,
@@ -1654,8 +1684,15 @@ pub(crate) fn build_review_map(
         .filter(|path| omittable_paths.contains(path.as_str()) || (is_noise_path(path) && !is_risk_bearing_path(path)))
         .cloned()
         .collect();
+    // When every file is noise, the noise is reviewed, but never a generated, binary or oversized
+    // path the archive excluded; a private one stays so its preflight fails explicitly.
     let reviewable_files = if omitted_noise_files.len() == changed.len() {
-        changed.to_vec()
+        let unreviewable = frozen_unreviewable_paths(inputs, changed);
+        changed
+            .iter()
+            .filter(|path| !unreviewable.contains(path.as_str()))
+            .cloned()
+            .collect()
     } else {
         changed
             .iter()
@@ -1666,7 +1703,8 @@ pub(crate) fn build_review_map(
     let mut risk_triggers = Vec::new();
     let mut data_lifecycle_triggers = Vec::new();
     let mut public_contract_triggers = Vec::new();
-    for path in changed {
+    // A file the archive excluded cannot be read, so it never becomes a trigger to check.
+    for path in changed.iter().filter(|path| !omittable_paths.contains(path.as_str())) {
         if is_config_path(path) {
             risk_triggers.push(format!("runtime/config: {path}"));
         }

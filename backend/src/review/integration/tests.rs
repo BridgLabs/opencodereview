@@ -123,21 +123,45 @@ fn mixed_frozen_review_omits_oversized_assets_from_assigned_scope() {
 }
 
 #[test]
-fn all_binary_frozen_review_paths_keep_explicit_preflight_failure() {
-    let files = vec!["test/files/sample-video.mp4".to_string()];
+fn all_excluded_frozen_review_paths_are_never_assigned() {
+    for files in [
+        vec!["test/files/sample-video.mp4".to_string()],
+        vec!["package-lock.json".to_string(), "go.sum".to_string()],
+        vec!["vendor/lib/x.go".to_string(), "api/service.pb.go".to_string()],
+    ] {
+        let inputs = frozen_inputs(
+            &files
+                .iter()
+                .map(|path| (path.clone(), LINE.to_string()))
+                .collect::<Vec<_>>(),
+        );
+        let (root, _, map, _) = fixture(-22060, &inputs, &files);
+        assert_eq!(map.omitted_noise_files, files);
+        assert!(map.reviewable_files.is_empty(), "{files:?}");
+        assert!(map.risk_triggers.is_empty(), "{:?}", map.risk_triggers);
+        // Execution skips such a pull request before inference instead of failing preflight.
+        let excluded = frozen_unreviewable_paths(&inputs, &files);
+        assert!(files.iter().all(|path| excluded.contains(path)), "{files:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn lockfiles_are_left_out_of_a_mixed_review_and_its_risk_triggers() {
+    let files = vec!["src/media.ts".to_string(), "package-lock.json".to_string()];
     let inputs = frozen_inputs(
         &files
             .iter()
             .map(|path| (path.clone(), LINE.to_string()))
             .collect::<Vec<_>>(),
     );
-    let (root, context, map, diff) = fixture(-22060, &inputs, &files);
-    assert_eq!(map.omitted_noise_files, files);
-    assert_eq!(map.reviewable_files, files);
-    assert_eq!(
-        frozen::prepare_stage(&inputs, &context, &map.reviewable_files, &diff, MERGE_BASE).unwrap_err(),
-        "Evidence path is excluded by policy: BinaryPath"
-    );
+    let (root, context, map, diff) = fixture(-22061, &inputs, &files);
+    assert_eq!(map.reviewable_files, vec!["src/media.ts"]);
+    assert!(!map
+        .risk_triggers
+        .iter()
+        .any(|trigger| trigger.contains("package-lock.json")));
+    frozen::prepare_stage(&inputs, &context, &map.reviewable_files, &diff, MERGE_BASE).unwrap();
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -199,6 +223,10 @@ fn private_artifacts_only_keep_explicit_preflight_failure() {
         assert_eq!(map.changed_files, files);
         assert_eq!(map.omitted_noise_files, files);
         assert_eq!(map.reviewable_files, files);
+        assert!(
+            frozen_unreviewable_paths(&inputs, &files).is_empty(),
+            "{path} is never skipped"
+        );
         assert_eq!(
             frozen::prepare_stage(&inputs, &context, &map.reviewable_files, &diff, MERGE_BASE).unwrap_err(),
             format!("Evidence path is excluded by policy: {reason}")

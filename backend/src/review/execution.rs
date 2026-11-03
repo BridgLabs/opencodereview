@@ -600,6 +600,14 @@ pub(crate) fn run_inner(
     })?);
     let inputs = &prepared_inputs;
     let _ = cleanup_pr_ref(&inputs.repo_path, inputs.number);
+    let excluded = frozen_unreviewable_paths(inputs, &changed);
+    if !changed.is_empty() && changed.iter().all(|path| excluded.contains(path)) {
+        let sample = changed.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+        return Err(format!(
+            "{NOTHING_REVIEWABLE}: every changed file is excluded from review evidence (generated, vendored, lockfile, binary or oversized): {sample}{}",
+            if changed.len() > 5 { ", …" } else { "" }
+        ));
+    }
     progress(
         &phase_json("context", "ok"),
         &format!(

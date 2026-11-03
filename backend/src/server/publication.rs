@@ -863,6 +863,9 @@ pub(crate) fn run_review_job(
             Err(error) if error.starts_with("review file limit exceeded:") => {
                 let _ = db.skip_review_run_for_file_limit(run_id, error);
             }
+            Err(error) if error.starts_with(review::NOTHING_REVIEWABLE) => {
+                let _ = db.skip_review_run_without_reviewable_files(run_id, error);
+            }
             Err(error) if is_review_target_changed_error(error) => {
                 let _ = db.restore_review_intent(pr_id, inputs.force_full, inputs.reprocess);
                 let _ = db.supersede_review_run_without_changing_pr(run_id, "Review superseded by a changed PR target");
