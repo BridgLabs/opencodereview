@@ -177,13 +177,16 @@ pub(crate) fn run_inner(
     let full_pr_range = format!("{base_rev}...{head_sha}");
     let full_pr_changed = changed_files_local(&inputs.repo_path, &full_pr_range, cancel)?;
     let full_pr_diff = diff_local(&inputs.repo_path, &full_pr_range, cancel)?;
-    let actual_file_count = changed_file_count_local(&inputs.repo_path, &full_pr_range, cancel)?;
+    let reviewable_file_count = changed_file_targets_local(&inputs.repo_path, &full_pr_range, cancel)?
+        .iter()
+        .filter(|path| crate::review::counts_toward_file_limit(path))
+        .count();
     let db = inputs.open_db()?;
-    db.set_pr_changed_file_count(inputs.pr_id, Some(actual_file_count as i64))?;
+    db.set_pr_changed_file_count(inputs.pr_id, Some(reviewable_file_count as i64))?;
     let max_files = db.settings()?.review_max_files;
-    if actual_file_count as i64 > max_files {
+    if reviewable_file_count as i64 > max_files {
         return Err(format!(
-            "review file limit exceeded: {actual_file_count} changed files exceeds the {max_files}-file review limit"
+            "review file limit exceeded: {reviewable_file_count} reviewable changed files exceeds the {max_files}-file review limit"
         ));
     }
     inputs.open_db()?.store_finding_audit(

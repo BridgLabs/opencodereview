@@ -4,6 +4,7 @@ pub mod db;
 pub mod github;
 pub mod indexer;
 pub mod local;
+mod path_kinds;
 mod providers;
 mod review;
 pub mod review_archive;

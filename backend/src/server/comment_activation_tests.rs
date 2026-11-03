@@ -586,3 +586,83 @@ fn activation_acknowledgement_is_due_only_while_the_pr_is_open() {
         .is_empty());
     assert!(f.db.activated_open_pr_numbers(1).unwrap().is_empty());
 }
+
+#[test]
+fn file_limit_counts_only_reviewable_files_and_remembers_them_per_revision() {
+    let f = Fixture::new("limit");
+    let state = fixture_state(&f);
+    let mut files: Vec<String> = (0..3).map(|i| format!("src/f{i}.rs")).collect();
+    files.extend((0..5).map(|i| format!("dist/bundle{i}.js")));
+    files.extend(["go.sum".to_string(), "assets/logo.png".to_string()]);
+    let pr = snapshot("Feature", "abc1234567", Some(files.len() as i64));
+    let full_name = f.repo.full_name.clone();
+    let calls = std::cell::Cell::new(0);
+    let calls = &calls;
+    let listed = || {
+        let (files, full_name) = (files.clone(), full_name.clone());
+        move |name: &str, number: i64| {
+            assert_eq!((name, number), (full_name.as_str(), 7));
+            calls.set(calls.get() + 1);
+            Ok(files)
+        }
+    };
+    let full = |count| {
+        Some(FileCount {
+            count,
+            reviewable: false,
+        })
+    };
+    let reviewable = |count| {
+        Some(FileCount {
+            count,
+            reviewable: true,
+        })
+    };
+    // Under the limit GitHub's count stands and nothing is listed.
+    assert_eq!(file_count_for_limit(&state, &f.repo, &pr, 10, listed()), full(10));
+    // Over it, source files and the lockfile count; bundles and images do not.
+    assert_eq!(file_count_for_limit(&state, &f.repo, &pr, 3, listed()), reviewable(4));
+    assert_eq!(file_count_for_limit(&state, &f.repo, &pr, 3, listed()), reviewable(4));
+    assert_eq!(calls.get(), 1, "the same head and base are counted once");
+    let moved = snapshot("Feature", "def7654321", Some(files.len() as i64));
+    assert_eq!(
+        file_count_for_limit(&state, &f.repo, &moved, 3, listed()),
+        reviewable(4)
+    );
+    assert_eq!(calls.get(), 2, "a new head is counted again");
+    // A short listing (GitHub stops at 3,000 files) keeps the full count, and is not listed again.
+    let short = fixture_state(&f);
+    let short_calls = std::cell::Cell::new(0);
+    for _ in 0..2 {
+        let result = file_count_for_limit(&short, &f.repo, &pr, 3, |_, _| {
+            short_calls.set(short_calls.get() + 1);
+            Ok(vec!["src/a.rs".into()])
+        });
+        assert_eq!(result, full(10));
+    }
+    assert_eq!(short_calls.get(), 1);
+    // A failed listing keeps the full count until it is retried.
+    let failed = fixture_state(&f);
+    assert_eq!(
+        file_count_for_limit(&failed, &f.repo, &pr, 3, |_, _| Err("offline".into())),
+        full(10)
+    );
+    assert_eq!(
+        file_count_for_limit(&failed, &f.repo, &pr, 3, |_, _| unreachable!()),
+        full(10)
+    );
+    failed
+        .reviewable_file_counts
+        .lock()
+        .unwrap()
+        .values_mut()
+        .for_each(|(_, listing)| {
+            *listing = FileListing::Failed(std::time::Instant::now() - FILE_LISTING_RETRY);
+        });
+    assert_eq!(file_count_for_limit(&failed, &f.repo, &pr, 3, listed()), reviewable(4));
+    let unknown = snapshot("Feature", "abc1234567", None);
+    assert_eq!(
+        file_count_for_limit(&failed, &f.repo, &unknown, 3, |_, _| unreachable!()),
+        None
+    );
+}

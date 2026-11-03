@@ -34,7 +34,7 @@ export function ReviewSettingsPanel({
         />
         <SettingRow
           title="Maximum PR files"
-          description="Skip PRs with more changed files than this limit. The default is 100; generated files and deletions count."
+          description="Skip PRs that change more files than this limit. The default is 100; deletions count, build output, vendored and generated files do not."
         >
           <input
             className="settings-number-input h-9 w-24 rounded-md border border-line bg-surface px-3 text-small text-fg shadow-card outline-none focus:border-brand focus:ring-3 focus:ring-brand/15"

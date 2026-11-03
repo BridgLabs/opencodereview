@@ -250,7 +250,12 @@ pub(crate) fn diff_local(repo_path: &Path, range: &str, cancel: &AtomicBool) -> 
     Ok(String::from_utf8_lossy(&output).to_string())
 }
 
-pub(crate) fn changed_file_count_local(repo_path: &Path, range: &str, cancel: &AtomicBool) -> Result<usize, String> {
+/// The changed files of a range, a rename or copy counted once at its new path.
+pub(crate) fn changed_file_targets_local(
+    repo_path: &Path,
+    range: &str,
+    cancel: &AtomicBool,
+) -> Result<Vec<String>, String> {
     let output = git_capture(
         repo_path,
         &["diff", "--name-status", "-z", "--find-renames", range],
@@ -261,7 +266,7 @@ pub(crate) fn changed_file_count_local(repo_path: &Path, range: &str, cancel: &A
         .split(|byte| *byte == 0)
         .filter(|field| !field.is_empty())
         .collect::<Vec<_>>();
-    let mut count = 0;
+    let mut targets = Vec::new();
     let mut index = 0;
     while index < fields.len() {
         let status = fields[index];
@@ -277,9 +282,11 @@ pub(crate) fn changed_file_count_local(repo_path: &Path, range: &str, cancel: &A
         if index > fields.len() {
             return Err("Git returned an incomplete changed-file inventory".into());
         }
-        count += 1;
+        let target = std::str::from_utf8(fields[index - 1])
+            .map_err(|error| format!("Git changed-file paths are not UTF-8: {error}"))?;
+        targets.push(target.to_string());
     }
-    Ok(count)
+    Ok(targets)
 }
 
 /// Diff a range limited to specific paths (used by incremental re-review to show

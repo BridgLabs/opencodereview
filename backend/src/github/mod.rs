@@ -31,6 +31,10 @@ pub use comments::{
     dedupe_review_comments, find_review_id_by_marker, post_review, prepare_review, upsert_issue_comment_by_marker,
     DedupeResult, PreparedReview,
 };
+#[cfg(test)]
+pub(crate) use pr::parse_pr_file_pages;
+#[cfg(not(test))]
+pub(crate) use pr::pr_file_paths;
 pub use pr::{diff_anchors, pr_description};
 pub use repo::{
     list_open_prs, list_open_prs_for_login, list_repos, list_workspaces, live_pr_state, live_pr_state_cancellable,

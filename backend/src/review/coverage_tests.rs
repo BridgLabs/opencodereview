@@ -1099,13 +1099,13 @@ fn changed_file_limit_counts_a_rename_once() {
     git(&["mv", "old.txt", "new.txt"]);
     git(&["commit", "-qm", "rename"]);
     let head = git(&["rev-parse", "HEAD"]);
-    let count = crate::review::changed_file_count_local(
+    let targets = crate::review::changed_file_targets_local(
         &root,
         &format!("{base}...{head}"),
         &std::sync::atomic::AtomicBool::new(false),
     )
     .unwrap();
-    assert_eq!(count, 1);
+    assert_eq!(targets, ["new.txt"]);
     std::fs::remove_dir_all(root).unwrap();
 }
 

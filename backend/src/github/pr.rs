@@ -147,6 +147,29 @@ pub fn pr_description(full_name: &str, number: i64) -> Result<(String, String), 
     parse_pr_description_payload(full_name, number, &bytes)
 }
 
+/// The changed file paths of a pull request (a rename at its new path), from GitHub's file
+/// listing, which stops at 3,000 files.
+#[cfg_attr(test, allow(dead_code))]
+pub(crate) fn pr_file_paths(full_name: &str, number: i64) -> Result<Vec<String>, String> {
+    let route = format!("repos/{full_name}/pulls/{number}/files?per_page=100");
+    let bytes = transport::gh_capture(&["api", "--paginate", "--slurp", &route])?;
+    parse_pr_file_pages(&bytes)
+}
+
+pub(crate) fn parse_pr_file_pages(bytes: &[u8]) -> Result<Vec<String>, String> {
+    let pages: Vec<Vec<serde_json::Value>> = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+    pages
+        .into_iter()
+        .flatten()
+        .map(|file| {
+            file.get("filename")
+                .and_then(|name| name.as_str())
+                .map(str::to_string)
+                .ok_or_else(|| "GitHub returned a changed file without a name".to_string())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod hunk_regression_tests {
     #[test]

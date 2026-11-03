@@ -82,3 +82,11 @@ fn forgetting_the_identity_clears_cached_login_and_teams() {
     assert!(GH_LOGIN.lock().unwrap().is_none());
     assert!(GH_TEAM_SLUGS.lock().unwrap().is_none());
 }
+
+#[test]
+fn pr_file_pages_flatten_and_reject_a_file_without_a_name() {
+    let pages = br#"[[{"filename":"src/a.rs"},{"filename":"dist/a.js"}],[{"filename":"go.sum"}]]"#;
+    assert_eq!(parse_pr_file_pages(pages).unwrap(), ["src/a.rs", "dist/a.js", "go.sum"]);
+    assert!(parse_pr_file_pages(br#"[[{"status":"added"}]]"#).is_err());
+    assert!(parse_pr_file_pages(b"not json").is_err());
+}
