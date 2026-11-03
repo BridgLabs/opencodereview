@@ -35,6 +35,25 @@ impl RawDiscoveredLink {
             Self::Named { repository, .. } => repository,
         }
     }
+
+    /// Whether every path the link can name is a generated, lockfile or binary path the evidence
+    /// policy leaves out. A named link qualifies only when all its reference splits do.
+    fn only_unreviewable_paths(&self) -> bool {
+        let unreviewable = |path: &str| {
+            matches!(
+                review_archive::path_exclusion(path),
+                Ok(Some(
+                    review_archive::Exclusion::Generated | review_archive::Exclusion::BinaryPath
+                ))
+            )
+        };
+        match self {
+            Self::Sha { path, .. } => unreviewable(path),
+            Self::Named { candidate_splits, .. } => {
+                !candidate_splits.is_empty() && candidate_splits.iter().all(|(_, path)| unreviewable(path))
+            }
+        }
+    }
 }
 
 fn is_valid_repo_name(owner: &str, repo: &str) -> bool {
@@ -714,9 +733,11 @@ fn discover(
         return Err("Pinned dependency references exceed the discovery budget".into());
     }
 
+    // Links to generated, lockfile or binary paths are left out before their repository is counted,
+    // checked or fetched, like the files themselves.
     let raw_links: Vec<RawDiscoveredLink> = raw_links
         .into_iter()
-        .filter(|l| l.repository() != archive.scope().repository)
+        .filter(|l| l.repository() != archive.scope().repository && !l.only_unreviewable_paths())
         .collect();
 
     let mut distinct_repos: BTreeSet<_> = raw_links.iter().map(|link| link.repository().to_string()).collect();
@@ -859,8 +880,8 @@ fn discover(
         }
     }
 
-    // A link to a generated file or lockfile is left out like the file itself; a link to private
-    // configuration or a private path still stops preparation.
+    // A link to a generated, lockfile or binary path is left out like the file itself; a link to
+    // private configuration or a private path still stops preparation.
     let mut kept_links = Vec::with_capacity(resolved_links.len());
     for link in resolved_links {
         let entry = review_archive::SourceEntry {
@@ -872,7 +893,7 @@ fn discover(
         };
         match entry.exclusion().map_err(|error| error.to_string())? {
             None => kept_links.push(link),
-            Some(review_archive::Exclusion::Generated) => {}
+            Some(review_archive::Exclusion::Generated | review_archive::Exclusion::BinaryPath) => {}
             Some(_) => {
                 return Err(format!(
                     "Pinned dependency {} contains a requested path excluded by evidence policy",
