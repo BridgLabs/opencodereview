@@ -17,6 +17,7 @@ mod integration;
 mod lens;
 pub(crate) mod output_repair;
 mod paths;
+pub(crate) mod published_text;
 mod recovery;
 #[cfg(test)]
 mod recovery_tests;
