@@ -367,10 +367,15 @@ fn copy_operational(
         .collect::<Result<_, _>>()
         .map_err(sqlite_error)?;
     for (key, value, updated_at) in &settings {
+        // Postgres migration 0010 ran before this copy; apply it to the imported value too.
+        let value = match (key.as_str(), value.as_str()) {
+            ("review_archive_retention_days", "1") => "0",
+            _ => value.as_str(),
+        };
         tx.execute(
             "INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, $3)
              ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-            &[key, value, updated_at],
+            &[key, &value, updated_at],
         )
         .map_err(db_error)?;
     }
