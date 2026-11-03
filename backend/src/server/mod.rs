@@ -118,7 +118,7 @@ pub(crate) struct ServerState {
     review_jobs: Arc<Mutex<HashMap<i64, ReviewJob>>>,
     /// Reviewable file counts of pull requests over the file limit, per repository and number,
     /// for the head and base they were counted at.
-    reviewable_file_counts: Mutex<HashMap<(i64, i64), ((String, Option<String>), i64)>>,
+    reviewable_file_counts: Mutex<HashMap<(i64, i64), ((String, Option<String>), FileListing)>>,
     github_auth_cancel: Arc<Mutex<Option<Arc<AtomicBool>>>>,
     github_auth_events: Arc<Mutex<Vec<serde_json::Value>>>,
     github_auth_flow_secret: Arc<Mutex<Option<String>>>,
