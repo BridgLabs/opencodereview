@@ -66,10 +66,16 @@ pub(crate) fn is_pr_author(full_name: &str, number: i64, user_id: i64) -> Result
     Ok(pr_author_response(&issue, user_id))
 }
 
+// Only authors who belong to the repository may activate a review: an outside contributor's
+// command would otherwise bypass "assigned only" and spend the operator's AI accounts.
 fn pr_author_response(issue: &serde_json::Value, user_id: i64) -> bool {
     issue.get("pull_request").is_some()
         && issue.get("state").and_then(|v| v.as_str()) == Some("open")
         && issue.pointer("/user/id").and_then(|v| v.as_i64()) == Some(user_id)
+        && matches!(
+            issue.get("author_association").and_then(|v| v.as_str()),
+            Some("OWNER" | "MEMBER" | "COLLABORATOR")
+        )
 }
 
 pub(crate) fn unedited_author_command(
@@ -113,7 +119,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn activation_matches_author_identity_not_organization_role_or_regular_issue() {
+    fn activation_requires_repository_author_of_an_open_pull_request() {
         let pr =
             serde_json::json!({"pull_request": {}, "state":"open", "user":{"id":123}, "author_association":"MEMBER"});
         assert!(pr_author_response(&pr, 123));
@@ -123,7 +129,28 @@ mod tests {
             123
         ));
         assert!(!pr_author_response(
-            &serde_json::json!({"pull_request":{},"state":"closed","user":{"id":123}}),
+            &serde_json::json!({"pull_request":{},"state":"closed","user":{"id":123},"author_association":"OWNER"}),
+            123
+        ));
+        for association in ["OWNER", "COLLABORATOR"] {
+            let pr = serde_json::json!({"pull_request": {}, "state":"open", "user":{"id":123}, "author_association":association});
+            assert!(pr_author_response(&pr, 123));
+        }
+        for association in [
+            "CONTRIBUTOR",
+            "FIRST_TIME_CONTRIBUTOR",
+            "FIRST_TIMER",
+            "NONE",
+            "MANNEQUIN",
+        ] {
+            let pr = serde_json::json!({"pull_request": {}, "state":"open", "user":{"id":123}, "author_association":association});
+            assert!(
+                !pr_author_response(&pr, 123),
+                "{association} must not activate a review"
+            );
+        }
+        assert!(!pr_author_response(
+            &serde_json::json!({"pull_request":{},"state":"open","user":{"id":123}}),
             123
         ));
     }
