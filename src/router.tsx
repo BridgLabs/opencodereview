@@ -1,11 +1,4 @@
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  lazyRouteComponent,
-  Navigate,
-  Outlet,
-} from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, lazyRouteComponent, Navigate } from "@tanstack/react-router";
 import { ErrorScreen } from "./components/ErrorScreen";
 import { Onboarding } from "./pages/Onboarding";
 import { PlatformLayout } from "./platform/components/PlatformLayout";
@@ -13,8 +6,9 @@ import { IndexingPage } from "./platform/pages/IndexingPage";
 import { ReviewsPage } from "./platform/pages/ReviewsPage";
 import { SettingsPage } from "./platform/pages/SettingsPage";
 import { SkillsPage } from "./platform/pages/SkillsPage";
+import { RootLayout } from "./RootLayout";
 
-const rootRoute = createRootRoute({ component: Outlet });
+const rootRoute = createRootRoute({ component: RootLayout });
 
 const onboardingRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: Onboarding });
 const onboardingAliasRoute = createRoute({
