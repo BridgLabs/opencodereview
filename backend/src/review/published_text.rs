@@ -141,15 +141,22 @@ fn redact_private_keys(value: &str) -> String {
 /// fetches a model-chosen URL or notifies a user or team.
 pub(crate) fn neutralize(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
+    let mut word_start = 0;
     let mut prev: Option<char> = None;
     let mut chars = value.chars().peekable();
     while let Some(ch) = chars.next() {
+        if ch.is_whitespace() || "([".contains(ch) {
+            word_start = out.len() + ch.len_utf8();
+        }
         out.push(ch);
         let next = chars.peek().copied();
         if ch == '!' && next == Some('[') {
             out.push('\\');
         } else if ch == '@'
-            && prev.is_none_or(|p| !p.is_alphanumeric() && p != '.' && p != '_' && p != '-')
+            // GitHub creates no mention inside a URL or path (`npmjs.com/package/@scope/pkg`),
+            // and a word joiner there would change the link.
+            && !out[word_start..].contains("://")
+            && prev.is_none_or(|p| !p.is_alphanumeric() && !"._-/".contains(p))
             && next.is_some_and(|n| n.is_ascii_alphanumeric())
         {
             // A word joiner keeps the text readable while GitHub no longer sees a mention.
@@ -228,7 +235,20 @@ mod tests {
             "ask @\u{2060}octocat or @\u{2060}org/team"
         );
         assert_eq!(neutralize("(@Override)"), "(@\u{2060}Override)");
-        for kept in ["mail me@example.com", "a @ b", "[link](https://example.com)", "wow!"] {
+        assert_eq!(
+            neutralize("see https://host/@a then @octocat"),
+            "see https://host/@a then @\u{2060}octocat"
+        );
+        for kept in [
+            "mail me@example.com",
+            "a @ b",
+            "[link](https://example.com)",
+            "wow!",
+            "https://www.npmjs.com/package/@scope/pkg",
+            "npmjs.com/package/@scope/pkg",
+            "[docs](https://host/@user) and https://mastodon.social/@user",
+            "https://host/x?u=@name",
+        ] {
             assert_eq!(neutralize(kept), kept);
         }
     }
