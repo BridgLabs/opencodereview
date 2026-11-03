@@ -118,8 +118,8 @@ impl Database {
         let review_archive_retention_days = self
             .setting("review_archive_retention_days")?
             .and_then(|value| value.parse().ok())
-            .filter(|value| (1..=365).contains(value))
-            .unwrap_or(1);
+            .filter(|value| (0..=365).contains(value))
+            .unwrap_or(0);
         Ok(Settings {
             theme,
             font_size,
@@ -194,9 +194,9 @@ impl Database {
         if key == "review_archive_retention_days" {
             let days = value
                 .parse::<i64>()
-                .map_err(|_| "Retention days must be an integer between 1 and 365.".to_string())?;
-            if !(1..=365).contains(&days) {
-                return Err("Retention days must be between 1 and 365.".to_string());
+                .map_err(|_| "Retention days must be an integer between 0 and 365.".to_string())?;
+            if !(0..=365).contains(&days) {
+                return Err("Retention days must be between 0 and 365.".to_string());
             }
         }
         if key == "auto_post_mode" && !matches!(value, "off" | "comment" | "request_changes") {
@@ -307,7 +307,7 @@ impl Database {
                 "review_parallel_chunks" => Some(1..=20),
                 "review_max_files" => Some(1..=i64::MAX),
                 "review_focus_files" => Some(0..=i64::MAX),
-                "review_archive_retention_days" => Some(1..=365),
+                "review_archive_retention_days" => Some(0..=365),
                 _ => None,
             };
             if range.is_some_and(|range| !value.parse::<i64>().is_ok_and(|number| range.contains(&number))) {

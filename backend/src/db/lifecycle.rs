@@ -18,7 +18,7 @@ impl Database {
         }
         self.ensure_setting_default("review_result_mode", "result_comment")?;
         self.ensure_setting_default("review_max_files", "100")?;
-        self.ensure_setting_default("review_archive_retention_days", "1")?;
+        self.ensure_setting_default("review_archive_retention_days", "0")?;
         self.ensure_setting_default("installation_id", &generate_installation_id()?)?;
         Ok(())
     }

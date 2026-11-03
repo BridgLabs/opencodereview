@@ -255,6 +255,10 @@ fn reconcile_pr_lifecycle(state: &SharedState, repo: &Repo, open_numbers: &[i64]
             with_db_raw(state, |db| {
                 db.mark_pr_terminal_with_merged_at(pr_id, &live.state, reason, live.merged_at)
             })?;
+            if live.merged_at.is_some() {
+                // Merged code is purged once the merge is confirmed; free it now, not at the next hourly pass.
+                super::wake_retention_worker(state);
+            }
         }
         if !has_more {
             break;

@@ -11,8 +11,9 @@ pub const MS_PER_DAY: i64 = 86_400_000;
 /// Where the last maintenance pass leaves the storage status, for whichever instance is asked.
 pub const STORAGE_STATUS_SETTING: &str = "archive_storage_status";
 pub const MAX_RETENTION_DAYS: i64 = 365;
-pub const MIN_RETENTION_DAYS: i64 = 1;
-pub const DEFAULT_RETENTION_DAYS: i64 = 1;
+/// Zero purges a merged pull request's frozen code as soon as its merge is confirmed.
+pub const MIN_RETENTION_DAYS: i64 = 0;
+pub const DEFAULT_RETENTION_DAYS: i64 = 0;
 pub const STORE_QUOTA_BYTES: u64 = STORE_QUOTA;
 
 #[derive(Clone, Default)]
