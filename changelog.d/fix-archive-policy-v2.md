@@ -11,7 +11,8 @@
 ### Fixed
 
 - Skip a pull request that only changes generated files, lockfiles, binaries or oversized files,
-  marked "Not reviewed", instead of failing with an evidence preflight error. A pull request that
-  only changes private files (such as `.env`) still fails explicitly.
-- Leave a link in the pull request to a generated file or lockfile out of the evidence instead of
-  failing preparation.
+  marked "Not reviewed", instead of failing with an evidence preflight error. A later push that
+  only adds such files keeps the previous review outcome. A pull request that only changes private
+  files (such as `.env`) still fails explicitly.
+- Leave a link in the pull request to a generated, lockfile or binary file out of the evidence,
+  without checking or fetching its repository, instead of failing preparation.
