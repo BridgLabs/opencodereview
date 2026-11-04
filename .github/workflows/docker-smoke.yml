@@ -22,8 +22,13 @@ jobs:
       - name: Validate Compose file
         run: docker compose config --quiet
 
+      # The smoke checks the sandbox, not speed: unoptimized Rust on every core compiles in a
+      # fraction of the release build's time. The Release workflow builds with the defaults.
       - name: Build images
-        run: docker compose build
+        run: |
+          docker compose build \
+            --build-arg CARGO_BUILD_JOBS="$(nproc)" \
+            --build-arg CARGO_PROFILE_RELEASE_OPT_LEVEL=0
 
       # Fake inference: no credentials and no paid calls.
       - name: Runner sandbox smoke
