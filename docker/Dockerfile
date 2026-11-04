@@ -7,7 +7,11 @@ COPY Cargo.toml Cargo.lock ./
 COPY backend ./backend
 COPY assets ./assets
 ARG CARGO_TARGET_CACHE=ocr-cargo-target
-RUN --mount=type=cache,id=ocr-cargo-registry,target=/usr/local/cargo/registry,sharing=locked --mount=type=cache,id=${CARGO_TARGET_CACHE},target=/app/target,sharing=locked CARGO_BUILD_JOBS=2 cargo build --locked --release --bin ocr-server \
+# Cargo reads these from the environment. Builds keep two jobs and full optimization; the CI
+# smoke sets more jobs and opt-level 0, since it checks the sandbox, not speed.
+ARG CARGO_BUILD_JOBS=2
+ARG CARGO_PROFILE_RELEASE_OPT_LEVEL
+RUN --mount=type=cache,id=ocr-cargo-registry,target=/usr/local/cargo/registry,sharing=locked --mount=type=cache,id=${CARGO_TARGET_CACHE},target=/app/target,sharing=locked cargo build --locked --release --bin ocr-server \
   && cp /app/target/release/ocr-server /usr/local/bin/
 
 FROM debian:bookworm-slim
