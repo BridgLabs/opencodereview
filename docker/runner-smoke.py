@@ -149,7 +149,7 @@ def frozen_packet(model, preflight, scenario):
         blobs.append({"hash": digest, "offset": offset, "bytes": len(content)})
         frames.append({"operation": "Blob", "hash": digest, "data": base64.b64encode(content).decode()})
         offset += len(content)
-    manifest = encode({"version": 1, "policyVersion": 1, "scope": {"host": "github.com", "repository": "fixture/repo", "headSha": head, "baseSha": before, "mergeBaseSha": before, "priorSha": None}, "entries": entries, "blobs": blobs})
+    manifest = encode({"version": 1, "policyVersion": 2, "scope": {"host": "github.com", "repository": "fixture/repo", "headSha": head, "baseSha": before, "mergeBaseSha": before, "priorSha": None}, "entries": entries, "blobs": blobs})
     descriptor = {"version": 1, "id": hashlib.sha256(manifest.encode()).hexdigest(), "manifestBytes": len(manifest.encode()), "blobBytes": offset, "entryCount": len(entries), "expandedBytes": offset}
     stage = {"files": ["a.ts"], "before": before, "snapshotId": descriptor["id"], "diffHash": hashlib.sha256(b"frozen").hexdigest()}
     files = {"context/PR_DIFF.patch": "frozen", "context/changed/a.ts": "source", "context/PR.md": "Fixture " + scenario, "context/skill/SKILL.md": "Review", "context/FROZEN.json": encode(descriptor)}

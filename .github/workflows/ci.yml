@@ -67,10 +67,11 @@ jobs:
                 ;;
             esac
             # The image build and sandbox smoke cost several minutes, so they run only when what the
-            # images are built from changes, or the sandbox. Other code is covered by the frontend and
-            # backend jobs, and the Release workflow builds the images again before publishing.
+            # images are built from changes, or the sandbox and the evidence archive it loads. Other
+            # code is covered by the frontend and backend jobs, and the Release workflow builds the images
+            # again before publishing.
             case "$file" in
-              docker/Dockerfile*|docker/*.sh|docker/*.conf|docker/postgres/*|docker/ocr-docker-cleanup|docker/runner-smoke.py|docker-compose.yml|.dockerignore|backend/src/sandbox/*|Cargo.lock|.github/workflows/docker-smoke.yml)
+              docker/Dockerfile*|docker/*.sh|docker/*.conf|docker/postgres/*|docker/ocr-docker-cleanup|docker/runner-smoke.py|docker-compose.yml|.dockerignore|backend/src/sandbox/*|backend/src/review_archive/*|Cargo.lock|.github/workflows/docker-smoke.yml)
                 docker=true
                 ;;
             esac
