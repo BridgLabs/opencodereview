@@ -58,10 +58,12 @@ pub(crate) fn redact(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut rest = value.as_str();
     while let Some(ch) = rest.chars().next() {
-        let at_boundary = out.chars().next_back().is_none_or(|prev| !token_char(prev));
+        // Whole tokens are consumed at once, so every token starts at a boundary and is scanned
+        // once: scanning from each of its characters made long tokens quadratic.
         let token_len = rest.find(|c: char| !token_char(c)).unwrap_or(rest.len());
-        if at_boundary && credential(&rest[..token_len]) {
-            out.push_str(REDACTED);
+        if token_len > 0 {
+            let token = &rest[..token_len];
+            out.push_str(if credential(token) { REDACTED } else { token });
             rest = &rest[token_len..];
             continue;
         }
@@ -245,6 +247,14 @@ mod tests {
         ] {
             assert_eq!(redact(kept), kept);
         }
+    }
+
+    #[test]
+    fn long_tokens_are_scanned_once() {
+        let long = "d".repeat(1_000_000);
+        let github = format!("ghp_{}", "a1".repeat(18));
+        let text = format!("{long} {github} {long}");
+        assert_eq!(redact(&text), format!("{long} {REDACTED} {long}"));
     }
 
     #[test]
