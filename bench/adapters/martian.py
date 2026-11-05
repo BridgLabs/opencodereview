@@ -14,7 +14,8 @@ own extraction, deduplication and judge steps score it next to the published too
     uv run python -m code_review_benchmark.summary_table
 
 Martian's leaderboard lists only tools that commented on GitHub (steps 0 and 1); see
-bench/README.md for that route. Needs an authenticated `gh` for the pull request metadata.
+bench/README.md for that route. Needs an authenticated `gh` for the GitHub pull request
+metadata — Martian's dataset is still GitHub even though the product forge is GitLab.
 """
 
 import argparse
@@ -33,6 +34,7 @@ import common  # noqa: E402
 
 def pull_request(url):
     owner, name, _, number = url.rstrip("/").split("/")[-4:]
+    # Martian URLs identify GitHub PRs; keep `gh` for this public benchmark only.
     raw = subprocess.run(
         ["gh", "api", f"repos/{owner}/{name}/pulls/{number}"], check=True, text=True, capture_output=True,
     ).stdout

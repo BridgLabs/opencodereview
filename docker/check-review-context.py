@@ -172,7 +172,15 @@ def main():
             if args.skill_json:
                 fixture["skill"] = json.loads(pathlib.Path(args.skill_json).read_text())["content"]
             print(json.dumps({"exportedRun": fixture["runId"], "changedFiles": len(fixture["plan"]["changedFiles"]), "relatedFiles": len(fixture["plan"]["relatedFiles"]), "databaseWrites": False}), flush=True)
-            pr = json.loads(command("docker", "exec", args.container, "gh", "api", f"repos/{args.repository}/pulls/{args.pr}", "--jq", "{head: .head.sha, title: .title, body: .body}").stdout)
+            project = args.repository.replace("/", "%2F")
+            mr = json.loads(command(
+                "docker", "exec", args.container, "glab", "api",
+                f"projects/{project}/merge_requests/{args.pr}",
+            ).stdout)
+            head = mr.get("sha") or (mr.get("diff_refs") or {}).get("head_sha")
+            if not head:
+                raise RuntimeError("GitLab merge request response missing head sha")
+            pr = {"head": head, "title": mr.get("title") or "", "body": mr.get("description") or ""}
             packet = json.dumps({"fixture": fixture, "pr": pr})
             if args.hydrate_pinned_dependencies:
                 hydration = command("docker", "exec", "-i", *run_env, "-e", "OCR_DIAGNOSTIC_REPOS=/data/repos", args.container, installed, "review::usage_tests::hydrate_pinned_review_dependencies_without_inference", "--exact", "--ignored", "--nocapture", "--test-threads=1", input=packet, timeout=600)
@@ -206,7 +214,7 @@ def main():
             if sockets:
                 runner_args.extend(["-e", "OCR_DIAGNOSTIC_RUNNER_SOCKETS=" + ",".join(sockets)])
             database_network, database_url = resources.enter_context(scratch_database())
-            result = command("docker", "run", "--rm", "-i", "--init", "--network", database_network, "-e", "OCR_TEST_DATABASE_URL=" + database_url, "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--cpus", "1", "--memory", "768m", "--memory-swap", "768m", "--tmpfs", "/tmp:size=128m", "--mount", f"type=volume,source={args.volume},volume-subpath=repos,target=/repos,readonly", "-e", "OCR_DIAGNOSTIC_REPOS=/repos", "-e", "GIT_NO_LAZY_FETCH=1", "-e", "OCR_GH_HOST=github.com", *runner_args, *export_args, args.image, "review::usage_tests::persisted_review_chunk_preparation_without_inference", "--exact", "--ignored", "--nocapture", "--test-threads=1", input=packet, check=False, timeout=1200 if sockets else 180)
+            result = command("docker", "run", "--rm", "-i", "--init", "--network", database_network, "-e", "OCR_TEST_DATABASE_URL=" + database_url, "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--pids-limit", "128", "--cpus", "1", "--memory", "768m", "--memory-swap", "768m", "--tmpfs", "/tmp:size=128m", "--mount", f"type=volume,source={args.volume},volume-subpath=repos,target=/repos,readonly", "-e", "OCR_DIAGNOSTIC_REPOS=/repos", "-e", "GIT_NO_LAZY_FETCH=1", "-e", "OCR_GITLAB_HOST=gitlab.example.com", *runner_args, *export_args, args.image, "review::usage_tests::persisted_review_chunk_preparation_without_inference", "--exact", "--ignored", "--nocapture", "--test-threads=1", input=packet, check=False, timeout=1200 if sockets else 180)
             for line in result.stdout.splitlines():
                 for marker in ["OFFLINE_ARCHIVE_DIAGNOSTIC ", "PINNED_DEPENDENCY_DIAGNOSTIC ", "OFFLINE_SCOPE_REPLAN ", "RUNTIME_PREFLIGHT ", "EXPORTED_DIAGNOSTIC_STAGE "]:
                     if marker in line:
