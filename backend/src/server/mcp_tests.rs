@@ -292,6 +292,20 @@ fn maps_every_finished_run_status() {
         assert_eq!(value["state"], state, "{status}");
         assert_eq!(value["done"], true, "{status}");
     }
+    let approved = finished_run("approved", None);
+    let posted_result: crate::db::ReviewResult = serde_json::from_value(json!({
+        "id": 1, "prId": 1, "installationId": "i", "markerKey": "m", "githubCommentId": 5,
+        "runId": 9, "actionableRunId": null, "observedHeadSha": "head", "reviewedHeadSha": "head",
+        "priorResultState": null, "priorResultHeadSha": null, "observation": "clean",
+        "effectiveState": "clean", "publicationStatus": "posted", "body": null, "bodyHash": null,
+        "githubReviewId": null, "githubReviewUrl": null, "reviewerVersion": "v", "skillVersion": "v",
+        "errorMessage": null, "createdAt": 1, "updatedAt": 2, "postedAt": 2
+    }))
+    .unwrap();
+    assert_eq!(
+        review_status(&pr, Some(&approved), Some(&posted_result), 3)["state"],
+        "posted"
+    );
     let failed = review_status(&pr, Some(&finished_run("result_failed", None)), None, 3);
     assert!(failed["summary"].as_str().unwrap().contains("comment post failed"));
 }

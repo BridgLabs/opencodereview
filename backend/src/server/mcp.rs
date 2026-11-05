@@ -102,7 +102,7 @@ fn tool_definitions() -> Vec<Value> {
         json!({
             "name": "get_review_status",
             "title": "Get review status",
-            "description": "Current OpenCodeReview review of one pull request: queued, reviewing (with the running stage and chunk progress), publishing, ready, posted, reviewed (marked reviewed without posting), failed (with the error), cancelled, skipped, finished or not reviewed. `done` is false while OpenCodeReview still has work to do; `retryAfterSeconds` says when to ask again. Set waitSeconds to block until the review is done or the wait runs out.",
+            "description": "Current OpenCodeReview review of one pull request: queued, reviewing (with the running stage and chunk progress), publishing, ready, posted, reviewed (marked reviewed in OpenCodeReview, nothing posted), failed (with the error), cancelled, skipped, finished or not reviewed. `done` is false while OpenCodeReview still has work to do; `retryAfterSeconds` says when to ask again. Set waitSeconds to block until the review is done or the wait runs out.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -284,7 +284,9 @@ pub(crate) fn review_status(
             ),
             Some("cancelled") => ("cancelled", "The review was cancelled.".into()),
             Some("posted" | "resolved") => ("posted", "The review is posted on GitHub.".into()),
-            Some("preview") if result_for_run.is_some_and(|result| result.publication_status == "posted") => {
+            Some("preview" | "approved")
+                if result_for_run.is_some_and(|result| result.publication_status == "posted") =>
+            {
                 ("posted", "The review is posted on GitHub.".into())
             }
             Some("preview") => (
