@@ -262,8 +262,10 @@ pub(crate) fn write_response(
 ) -> Result<(), String> {
     let reason = match response.status {
         200 => "OK",
+        202 => "Accepted",
         403 => "Forbidden",
         404 => "Not Found",
+        405 => "Method Not Allowed",
         _ => "Error",
     };
     let cors = cors_origin.map(|origin| format!("access-control-allow-origin: {origin}\r\naccess-control-allow-methods: GET,POST,PUT,DELETE,OPTIONS\r\naccess-control-allow-headers: content-type,authorization,x-flow-secret\r\n")).unwrap_or_default();

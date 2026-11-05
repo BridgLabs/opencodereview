@@ -15,6 +15,9 @@ pub(crate) fn route(request: Request, state: SharedState) -> Response {
             return response;
         }
     }
+    if request.path == mcp::MCP_PATH {
+        return mcp::handle_mcp(&request, &state);
+    }
     let result = match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/health") => health(&state),
         ("GET", "/auth/github/status") => github_auth_status(),
