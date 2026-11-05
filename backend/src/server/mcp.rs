@@ -102,7 +102,7 @@ fn tool_definitions() -> Vec<Value> {
         json!({
             "name": "get_review_status",
             "title": "Get review status",
-            "description": "Current OpenCodeReview review of one pull request: queued, reviewing (with the running stage and chunk progress), publishing, ready, posted, failed (with the error) or not reviewed. `done` is false while OpenCodeReview still has work to do; `retryAfterSeconds` says when to ask again. Set waitSeconds to block until the review is done or the wait runs out.",
+            "description": "Current OpenCodeReview review of one pull request: queued, reviewing (with the running stage and chunk progress), publishing, ready, posted, reviewed (marked reviewed without posting), failed (with the error), cancelled, skipped, finished or not reviewed. `done` is false while OpenCodeReview still has work to do; `retryAfterSeconds` says when to ask again. Set waitSeconds to block until the review is done or the wait runs out.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -273,7 +273,7 @@ pub(crate) fn review_status(
                     .clone()
                     .unwrap_or_else(|| "No review has run for this pull request.".into()),
             ),
-            Some("failed") => (
+            Some("failed" | "result_failed") => (
                 "failed",
                 format!(
                     "The review failed: {}",
@@ -291,12 +291,17 @@ pub(crate) fn review_status(
                 "ready",
                 "The review finished and waits in OpenCodeReview for someone to post or dismiss it.".into(),
             ),
-            Some(_) => (
+            Some("approved") => (
+                "reviewed",
+                "The review finished and was marked as reviewed in OpenCodeReview.".into(),
+            ),
+            Some("superseded" | "skipped") => (
                 "skipped",
                 pr.status_reason
                     .clone()
                     .unwrap_or_else(|| "The last review was skipped or replaced.".into()),
             ),
+            Some(status) => ("finished", format!("The last review ended with status {status}.")),
         }
     };
     let done = !matches!(state, "reviewing" | "publishing" | "queued");
@@ -375,9 +380,10 @@ fn run_phases(phase_json: Option<&str>) -> Vec<Value> {
                 };
                 stage["chunks"] = json!({
                     "total": chunks.len(),
-                    "done": count(&["ok", "done", "cached", "failed", "error"]),
+                    "done": count(&["ok", "done", "cached", "failed", "error", "cancelled"]),
                     "running": count(&["running", "validating"]),
                     "failed": count(&["failed", "error"]),
+                    "cancelled": count(&["cancelled"]),
                 });
             }
             stage

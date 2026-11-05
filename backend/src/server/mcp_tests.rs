@@ -249,3 +249,66 @@ fn notifications_are_accepted_without_a_body_and_get_is_rejected() {
     get.method = "GET".into();
     assert_eq!(handle_mcp(&get, &fixture.state).status, 405);
 }
+
+fn finished_run(status: &str, phase_json: Option<&str>) -> crate::db::ReviewRun {
+    serde_json::from_value(json!({
+        "id": 9, "prId": 1, "status": status, "headSha": "head", "reviewBody": null,
+        "commentsJson": null, "riskScore": null, "riskLevel": null, "riskJson": null,
+        "errorMessage": "comment post failed", "phaseJson": phase_json, "tail": null,
+        "startedAt": 1, "finishedAt": 2, "createdAt": 1, "inputTokens": 0, "outputTokens": 0,
+        "cacheReadTokens": 0, "cacheCreationTokens": 0, "usageModel": null, "model": null,
+        "contextIndexSha": null, "reviewedHeadSha": null
+    }))
+    .unwrap()
+}
+
+fn open_pull_request() -> crate::db::ReviewStatusPullRequest {
+    crate::db::ReviewStatusPullRequest {
+        id: 1,
+        repository: "acme/api".into(),
+        number: 1,
+        title: "PR".into(),
+        url: None,
+        state: "open".into(),
+        review_lane: "open".into(),
+        status_reason: None,
+        head_sha: "head".into(),
+        last_synced_at: 1,
+    }
+}
+
+#[test]
+fn maps_every_finished_run_status() {
+    let pr = open_pull_request();
+    for (status, state) in [
+        ("approved", "reviewed"),
+        ("result_failed", "failed"),
+        ("failed", "failed"),
+        ("posted", "posted"),
+        ("superseded", "skipped"),
+        ("succeeded", "finished"),
+    ] {
+        let value = review_status(&pr, Some(&finished_run(status, None)), None, 3);
+        assert_eq!(value["state"], state, "{status}");
+        assert_eq!(value["done"], true, "{status}");
+    }
+    let failed = review_status(&pr, Some(&finished_run("result_failed", None)), None, 3);
+    assert!(failed["summary"].as_str().unwrap().contains("comment post failed"));
+}
+
+#[test]
+fn counts_cancelled_chunks_as_finished() {
+    let phases = r#"[{"id":"chunks","label":"Review chunks","status":"failed","chunks":[
+        {"id":1,"status":"failed"},{"id":2,"status":"cancelled"},{"id":3,"status":"done"}]}]"#;
+    let value = review_status(
+        &open_pull_request(),
+        Some(&finished_run("failed", Some(phases))),
+        None,
+        3,
+    );
+    let chunks = &value["run"]["stages"][0]["chunks"];
+    assert_eq!(chunks["total"], 3);
+    assert_eq!(chunks["done"], 3);
+    assert_eq!(chunks["failed"], 1);
+    assert_eq!(chunks["cancelled"], 1);
+}

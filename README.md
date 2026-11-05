@@ -113,7 +113,7 @@ bearer_token_env_var = "OCR_API_TOKEN"
 
 | Tool | Returns |
 | --- | --- |
-| `get_review_status` | One pull request (URL or `owner/repo#123`): `state` (`queued`, `reviewing`, `publishing`, `ready`, `posted`, `failed`, `cancelled`, `skipped`, `not_reviewed` or `closed`), `done`, a one-line `summary`, the run's stages and chunk progress, the error of a failed review, and the posted review's link. `waitSeconds` (up to 120) waits for the review to finish before answering. |
+| `get_review_status` | One pull request (URL or `owner/repo#123`): `state` (`queued`, `reviewing`, `publishing`, `ready`, `posted`, `reviewed`, `failed`, `cancelled`, `skipped`, `finished`, `not_reviewed` or `closed`), `done`, a one-line `summary`, the run's stages and chunk progress, the error of a failed review, and the posted review's link. `waitSeconds` (up to 120) waits for the review to finish before answering. |
 | `list_active_reviews` | Open pull requests whose review is queued, running or being posted, optionally for one repository. |
 
 The tools only read OpenCodeReview's state; they never start, cancel or post a review.
