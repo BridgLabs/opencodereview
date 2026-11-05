@@ -1,13 +1,31 @@
 use super::*;
 
-/// `glab api --paginate` merges REST array pages into one flat JSON array.
+/// `glab api --paginate` is supposed to merge REST array pages into one flat JSON
+/// array; on large result sets it still concatenates pages as successive arrays.
 pub(crate) fn api_paginate(route: &str) -> Result<Vec<serde_json::Value>, String> {
     let bytes = transport::glab_capture(&["api", "--paginate", route])?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    match value {
-        serde_json::Value::Array(items) => Ok(items),
-        other => Err(format!("expected a JSON array from glab --paginate, got {other}")),
+    parse_glab_paginate_json(&bytes).map_err(|e| format!("glab --paginate {route}: {e}"))
+}
+
+pub(crate) fn parse_glab_paginate_json(bytes: &[u8]) -> Result<Vec<serde_json::Value>, String> {
+    let text = String::from_utf8_lossy(bytes);
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
     }
+    let mut items = Vec::new();
+    let stream = serde_json::Deserializer::from_str(trimmed).into_iter::<serde_json::Value>();
+    for page in stream {
+        match page.map_err(|e| e.to_string())? {
+            serde_json::Value::Array(page) => items.extend(page),
+            other => {
+                return Err(format!(
+                    "expected a JSON array from glab --paginate, got {other}"
+                ))
+            }
+        }
+    }
+    Ok(items)
 }
 
 pub fn list_workspaces() -> Result<Vec<WorkspaceInput>, String> {
@@ -30,7 +48,25 @@ pub fn list_workspaces() -> Result<Vec<WorkspaceInput>, String> {
             login: path,
             kind: "org".to_string(),
         });
-        let _ = group.get("id").and_then(|v| v.as_i64()).or(Some(user.id));
+    }
+    // Direct project membership often does not include the parent group in
+    // `groups?membership=true`. Surface the top-level namespace of each project
+    // so onboarding can list `web/…` and `bshop/…` repositories.
+    let projects = api_paginate("projects?membership=true&simple=true&per_page=100")?;
+    for project in projects {
+        let Some(full_name) = project.get("path_with_namespace").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(root) = full_name.split('/').next().filter(|part| !part.is_empty()) else {
+            continue;
+        };
+        if root == user.username {
+            continue;
+        }
+        workspaces.push(WorkspaceInput {
+            login: root.to_string(),
+            kind: "org".to_string(),
+        });
     }
     workspaces.sort_by(|a, b| a.login.cmp(&b.login));
     workspaces.dedup_by(|a, b| a.login == b.login);
