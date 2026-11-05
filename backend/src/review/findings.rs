@@ -47,8 +47,11 @@ pub fn point_kind(body: &str) -> &'static str {
             continue;
         }
         let title = line.trim_start_matches(['*', '_', '>', '-', '#', ' ']);
-        finding |= title.starts_with("[Finding]");
-        question |= title.starts_with("[Question]");
+        match crate::review::strip_point_marker(title) {
+            Some(("finding", _)) => finding = true,
+            Some(("question", _)) => question = true,
+            _ => {}
+        }
     }
     match (finding, question) {
         (true, true) => "mixed",
@@ -362,7 +365,8 @@ pub fn finish_audit(
         }
     }
     if crate::review::is_structured_review_point(body) {
-        // Several points in one body each start with the attribution line; split there.
+        // Several points in one body each start with a marker title (or a legacy
+        // attribution line before the title); split there so each becomes its own candidate.
         let starts: Vec<usize> = body
             .split_inclusive('\n')
             .scan(0, |offset, line| {
@@ -370,7 +374,9 @@ pub fn finish_audit(
                 *offset += line.len();
                 Some((start, line))
             })
-            .filter(|(_, line)| crate::review::is_review_attribution_line(line))
+            .filter(|(_, line)| {
+                crate::review::is_review_point_title_line(line) || crate::review::is_review_attribution_line(line)
+            })
             .map(|(start, _)| start)
             .collect();
         let pieces: Vec<String> = if starts.len() > 1 {
