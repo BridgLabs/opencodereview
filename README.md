@@ -94,6 +94,30 @@ browser ──> web (nginx, :1421) ──/api──> server (Rust API, 127.0.0.1
 
 A review fetches the live base and head of the pull request, selects the scope (full, incremental, base sync or stacked), builds context from the index, freezes the evidence into an archive, runs the AI in a runner (split into chunks for large PRs), validates the report and publishes it. On GitHub, OpenCodeReview posts a collapsed summary comment that it updates on each push, a result comment that replaces the previous one, and the validated findings as a single non-blocking review with inline comments. It never approves a pull request on its own.
 
+## Review status for coding agents (MCP)
+
+The server exposes a read-only [MCP](https://modelcontextprotocol.io) endpoint at `http://localhost:1421/api/mcp`, so a coding agent that opened a pull request can ask how its review is going instead of polling GitHub for comments. It uses the same installation token as the UI:
+
+```bash
+# Claude Code
+claude mcp add --transport http opencodereview http://localhost:1421/api/mcp \
+  --header "Authorization: Bearer $(docker compose exec -T server cat /data/api-token)"
+```
+
+```toml
+# Codex (~/.codex/config.toml); export OCR_API_TOKEN with the same token
+[mcp_servers.opencodereview]
+url = "http://localhost:1421/api/mcp"
+bearer_token_env_var = "OCR_API_TOKEN"
+```
+
+| Tool | Returns |
+| --- | --- |
+| `get_review_status` | One pull request (URL or `owner/repo#123`): `state` (`queued`, `reviewing`, `publishing`, `ready`, `posted`, `failed`, `cancelled`, `skipped`, `not_reviewed` or `closed`), `done`, a one-line `summary`, the run's stages and chunk progress, the error of a failed review, and the posted review's link. `waitSeconds` (up to 120) waits for the review to finish before answering. |
+| `list_active_reviews` | Open pull requests whose review is queued, running or being posted, optionally for one repository. |
+
+The tools only read OpenCodeReview's state; they never start, cancel or post a review.
+
 ## Security and privacy
 
 - **Your code goes only to your AI provider.** The pull request evidence is sent to Anthropic or OpenAI with your own sign-in, the same way their CLIs work when you use them directly. OpenCodeReview has no servers and sends no telemetry.
