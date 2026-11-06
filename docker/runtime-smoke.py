@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import subprocess
+import tempfile
 import time
 import urllib.request
 import uuid
@@ -21,10 +22,6 @@ ORIGIN = "http://localhost:1421"
 def run(*args, timeout=120):
     return subprocess.run(args, cwd=ROOT, env={**os.environ, "OCR_REVIEW_RUNNERS": "1"},
                           text=True, capture_output=True, check=True, timeout=timeout).stdout.strip()
-
-
-def compose(*args, timeout=120):
-    return run(ENGINE, "compose", "-p", PROJECT, *args, timeout=timeout)
 
 
 def request(path, token="", payload=None):
@@ -57,30 +54,40 @@ def main():
         for resource in ("container", "volume", "network"):
             if run(ENGINE, resource, "ls", *(["-a"] if resource == "container" else []), "-q", "--filter", f"label={label}={PROJECT}"):
                 raise RuntimeError("Smoke project already exists; choose another OCR_RUNTIME_PROJECT")
-    try:
-        compose("config")
-        compose("build", timeout=1800)
-        print("PASS Compose builds shared server and runner runtime")
-        compose("up", "-d", "--no-build")
-        ready()
-        # Authenticate exactly as the web entrypoint does; never print the installation token.
-        token = compose("exec", "-T", "server", "cat", "/data/api-token")
-        assert token
-        request("/api/settings", token, {"key": "theme", "value": "light"})
-        assert json.loads(request("/api/settings", token))["theme"] == "light"
-        print("PASS UI, API, Postgres settings write and installation authentication")
-        database_ip = compose("exec", "-T", "postgres", "hostname", "-i").split()[0]
-        compose("exec", "-T", "--user", "10001:10001", "review-runner", "perl", "-MIO::Socket::INET", "-e",
-                "exit(IO::Socket::INET->new(PeerAddr=>$ARGV[0],PeerPort=>5432,Timeout=>2) ? 1 : 0)", database_ip)
-        compose("exec", "-T", "--user", "10001:10001", "review-runner", "sh", "-c",
-                "test ! -e /data/api-token && test ! -e /data/repos && test ! -e /run/ocr-db/app-url")
-        print("PASS production runner cannot reach Postgres or private application files")
-        compose("restart")
-        ready()
-        assert json.loads(request("/api/settings", token))["theme"] == "light"
-        print("PASS settings and installation token survive Compose restart")
-    finally:
-        compose("down", "-v", "--remove-orphans")
+    images = {service: f"{PROJECT}-{service}:local" for service in ("server", "web", "review-runner")}
+    images["review-egress"] = images["review-runner"]
+    with tempfile.TemporaryDirectory(prefix="ocr-runtime-smoke-") as temporary:
+        override = pathlib.Path(temporary) / "images.json"
+        override.write_text(json.dumps({"services": {name: {"image": image} for name, image in images.items()}}))
+
+        def compose(*args, timeout=120):
+            return run(ENGINE, "compose", "-p", PROJECT, "-f", str(ROOT / "docker-compose.yml"),
+                       "-f", str(override), *args, timeout=timeout)
+
+        try:
+            compose("config")
+            compose("build", timeout=1800)
+            print("PASS Compose builds shared server and runner runtime")
+            compose("up", "-d", "--no-build")
+            ready()
+            # Authenticate exactly as the web entrypoint does; never print the installation token.
+            token = compose("exec", "-T", "server", "cat", "/data/api-token")
+            assert token
+            request("/api/settings", token, {"key": "theme", "value": "light"})
+            assert json.loads(request("/api/settings", token))["theme"] == "light"
+            print("PASS UI, API, Postgres settings write and installation authentication")
+            database_ip = compose("exec", "-T", "postgres", "hostname", "-i").split()[0]
+            compose("exec", "-T", "--user", "10001:10001", "review-runner", "perl", "-MIO::Socket::INET", "-e",
+                    "exit(IO::Socket::INET->new(PeerAddr=>$ARGV[0],PeerPort=>5432,Timeout=>2) ? 1 : 0)", database_ip)
+            compose("exec", "-T", "--user", "10001:10001", "review-runner", "sh", "-c",
+                    "test ! -e /data/api-token && test ! -e /data/repos && test ! -e /run/ocr-db/app-url")
+            print("PASS production runner cannot reach Postgres or private application files")
+            compose("restart")
+            ready()
+            assert json.loads(request("/api/settings", token))["theme"] == "light"
+            print("PASS settings and installation token survive Compose restart")
+        finally:
+            compose("down", "-v", "--remove-orphans")
 
 
 if __name__ == "__main__":
@@ -88,7 +95,7 @@ if __name__ == "__main__":
         main()
     except subprocess.CalledProcessError as error:
         # Compose logs may contain private configuration. Keep captured output out of CI logs.
-        command = error.cmd[4] if error.cmd[1] == "compose" else error.cmd[1]
+        command = error.cmd[1]
         raise SystemExit(f"FAIL {ENGINE} {command} exited {error.returncode}") from None
     except subprocess.TimeoutExpired:
         raise SystemExit(f"FAIL {ENGINE} command exceeded its time limit") from None
