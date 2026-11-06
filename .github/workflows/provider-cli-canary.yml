@@ -42,7 +42,7 @@ jobs:
           build_args=()
           while IFS= read -r line; do build_args+=(--build-arg "$line"); done < "$RUNNER_TEMP/cli-versions.env"
           docker build -f docker/Dockerfile "${build_args[@]}" -t opencodereview-server:canary .
-          docker build -f docker/Dockerfile.runner --build-arg OCR_RUNTIME_IMAGE=opencodereview-server:canary \
+          docker build -f docker/Dockerfile.runner --build-context ocr_runtime=docker-image://opencodereview-server:canary \
             -t opencodereview-runner:local .
 
       - name: Check the flags each provider passes

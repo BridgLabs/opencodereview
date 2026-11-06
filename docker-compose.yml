@@ -7,8 +7,6 @@ x-review-image: &review-image
     dockerfile: docker/Dockerfile.runner
     additional_contexts:
       ocr_runtime: service:server
-    args:
-      OCR_RUNTIME_IMAGE: ocr_runtime
 
 x-review-runner: &review-runner
   <<: *review-image
@@ -81,12 +79,13 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - database-secret:/secret:ro
-      - ./docker/postgres/init-roles.sh:/docker-entrypoint-initdb.d/init-roles.sh:ro
+      - ./docker/postgres/init-roles.sh:/docker-entrypoint-initdb.d/init-roles.sh:ro,z
     depends_on:
       database-secret:
         condition: service_completed_successfully
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U ocr -d opencodereview"]
+      # The initialization server accepts sockets before roles are ready; only the final server listens on TCP.
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U ocr -d opencodereview"]
       interval: 2s
       timeout: 2s
       retries: 30

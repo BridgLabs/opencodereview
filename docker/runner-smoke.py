@@ -10,6 +10,7 @@ import time
 import uuid
 
 IMAGE = os.environ.get("OCR_SMOKE_IMAGE", "opencodereview-runner:local")
+ENGINE = os.environ.get("OCR_CONTAINER_ENGINE", "docker")
 MODEL = "claude-opus-5-5"
 ENGINE_VERSION = ""
 PREFIX = "ocr-runner-smoke-" + uuid.uuid4().hex[:10]
@@ -18,9 +19,9 @@ sockets = {}
 
 
 def docker(*args, input=None, check=True, timeout=45):
-    result = subprocess.run(["docker", *args], input=input, text=True, capture_output=True, timeout=timeout)
+    result = subprocess.run([ENGINE, *args], input=input, text=True, capture_output=True, timeout=timeout)
     if check and result.returncode:
-        raise RuntimeError(f"docker {args[0]} failed: {result.stderr.strip()}")
+        raise RuntimeError(f"{ENGINE} {args[0]} failed: {result.stderr.strip()}")
     return result
 
 
@@ -201,7 +202,7 @@ def main():
             runners.append(runner)
             clients.append(client)
             sockets[client] = f"/ipc/{runner}.sock"
-            start(runner, ["--hostname", runner, "--network", network, "--cap-add=SETUID", "--cap-add=SETGID", "--cap-add=CHOWN", "--cap-add=DAC_OVERRIDE", "--cap-add=KILL", "--mount", f"type=volume,source={volume},target=/ipc", "--mount", f"type=bind,source={fake},target=/opt/claude/bin/claude,readonly", "--mount", f"type=volume,source={auth},target=/claude-auth,readonly", "--tmpfs", "/work:size=16m,mode=0755", "--tmpfs", "/evidence:size=512m,mode=0755", "--tmpfs", "/output:size=48m,mode=0777", "--tmpfs", "/scratch:size=128m,mode=0755", "--tmpfs", "/tmp:size=64m,mode=1777", IMAGE, "runner"])
+            start(runner, ["--hostname", runner, "--network", network, "--cap-add=SETUID", "--cap-add=SETGID", "--cap-add=CHOWN", "--cap-add=DAC_OVERRIDE", "--cap-add=KILL", "--mount", f"type=volume,source={volume},target=/ipc", "-v", f"{fake}:/opt/claude/bin/claude:ro,z", "--mount", f"type=volume,source={auth},target=/claude-auth,readonly", "--tmpfs", "/work:size=16m,mode=0755", "--tmpfs", "/evidence:size=512m,mode=0755", "--tmpfs", "/output:size=48m,mode=0777", "--tmpfs", "/scratch:size=128m,mode=0755", "--tmpfs", "/tmp:size=64m,mode=1777", IMAGE, "runner"])
             start(client, ["--network=none", "--mount", f"type=volume,source={volume},target=/ipc", "--entrypoint=/bin/sleep", IMAGE, "900"])
             for attempt in range(30):
                 if docker("exec", runner, "test", "-S", sockets[client], check=False).returncode == 0:
@@ -258,9 +259,9 @@ def main():
         for runner in runners:
             denied = docker("exec", "--user=10001:10001", runner, "perl", "-MIO::Socket::UNIX", "-e", "exit(IO::Socket::UNIX->new(Type=>SOCK_STREAM,Peer=>'/ipc/" + runner + ".sock') ? 1 : 0)", check=False)
             assert denied.returncode == 0, "Model UID reached supervisor socket"
-        production = docker("inspect", "--format", "{{json .NetworkSettings.Networks}}", "opencodereview-server-1", check=False)
+        production = docker("inspect", "--format", "{{json .NetworkSettings.Networks}}", os.environ.get("OCR_SMOKE_SERVER", "opencodereview-server-1"), check=False)
         targets = ["http://host.docker.internal:8787/health"]
-        gateway = docker("network", "inspect", "--format", "{{(index .IPAM.Config 0).Gateway}}", PREFIX + "-a").stdout.strip()
+        gateway = docker("inspect", "--format", "{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}", runners[0]).stdout.strip()
         if gateway:
             targets.append("http://" + gateway + ":8787/health")
         if production.returncode == 0:
@@ -278,7 +279,7 @@ def main():
         restarted = rpc(clients[0])
         assert restarted[-1]["event"] == "Finished" and restarted[-1]["error"] is None, restarted
         print("PASS stale socket recovery after runner restart; no automatic work replay")
-        print("PASS Docker smoke completed; no real inference or account login was used")
+        print(f"PASS {ENGINE} smoke completed; no real inference or account login was used")
 
 
 if __name__ == "__main__":
