@@ -55,7 +55,7 @@ def main():
     # Refuse to adopt or delete an existing installation, including stopped containers.
     for label in ("com.docker.compose.project", "io.podman.compose.project"):
         for resource in ("container", "volume", "network"):
-            if run(ENGINE, resource, "ls", "-q", "--filter", f"label={label}={PROJECT}"):
+            if run(ENGINE, resource, "ls", *(["-a"] if resource == "container" else []), "-q", "--filter", f"label={label}={PROJECT}"):
                 raise RuntimeError("Smoke project already exists; choose another OCR_RUNTIME_PROJECT")
     try:
         compose("config")
