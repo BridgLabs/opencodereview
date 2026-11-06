@@ -8,3 +8,5 @@
 
 - Wait for PostgreSQL's final TCP listener before starting the backend, rather than
   accepting the temporary initialization server as ready.
+- Keep runtime smoke images separate from installed images, remove only the smoke's
+  image tags after success or failure, and refuse projects with stopped containers.

@@ -100,6 +100,11 @@ its project name; an existing project is refused. The script also runs on Docker
 with no engine override. For runner network checks against a running non-default
 project, set `OCR_SMOKE_SERVER` to its server container name.
 
+`python3 -B docker/test-runtime-smoke.py` checks the smoke CLI's stopped-project
+guard and image ownership with a disposable engine fixture. Its successful HTTP
+lifecycle runs inside a Linux user/network namespace (`unshare` and `ip` required),
+so it does not use an existing installation's ports or API.
+
 Do not include real AI calls in tests. Never commit credentials, tokens, `.env` files or database files and dumps, and keep test fixtures free of real customer or repository data.
 
 ## Commit messages

@@ -54,7 +54,7 @@ def main():
         for resource in ("container", "volume", "network"):
             if run(ENGINE, resource, "ls", *(["-a"] if resource == "container" else []), "-q", "--filter", f"label={label}={PROJECT}"):
                 raise RuntimeError("Smoke project already exists; choose another OCR_RUNTIME_PROJECT")
-    images = {service: f"{PROJECT}-{service}:local" for service in ("server", "web", "review-runner")}
+    images = {service: f"{PROJECT}-{service}" for service in ("server", "web", "review-runner")}
     images["review-egress"] = images["review-runner"]
     with tempfile.TemporaryDirectory(prefix="ocr-runtime-smoke-") as temporary:
         override = pathlib.Path(temporary) / "images.json"
@@ -87,7 +87,12 @@ def main():
             assert json.loads(request("/api/settings", token))["theme"] == "light"
             print("PASS settings and installation token survive Compose restart")
         finally:
-            compose("down", "-v", "--remove-orphans")
+            try:
+                compose("down", "-v", "--remove-orphans")
+            finally:
+                for image in sorted(set(images.values())):
+                    if run(ENGINE, "image", "ls", "-q", image):
+                        run(ENGINE, "image", "rm", image)
 
 
 if __name__ == "__main__":

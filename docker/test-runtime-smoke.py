@@ -33,11 +33,50 @@ elif args[0] == "compose":
         status = 7 if state["fail"] == "build" else 0
     if "down" in args:
         state["stopped"] = False
+    if "exec" in args:
+        if "cat" in args:
+            output = "fixture-token"
+        elif "hostname" in args:
+            output = "192.0.2.2"
+elif args[:2] == ["image", "ls"]:
+    output = state["images"].get(args[-1], "")
+elif args[:2] == ["image", "rm"]:
+    assert len(args) == 3 and not args[2].startswith("-")
+    del state["images"][args[2]]
 else:
     raise SystemExit("Unexpected external engine command")
 path.write_text(json.dumps(state))
 print(output)
 sys.exit(status)
+'''
+
+NETWORK_RUNNER = r'''
+import json, subprocess, sys, threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+subprocess.run(["ip", "link", "set", "lo", "up"], check=True)
+class Handler(BaseHTTPRequestHandler):
+    theme = "dark"
+    def log_message(self, *args): pass
+    def do_GET(self):
+        if self.path == "/api/settings":
+            assert self.headers["Authorization"] == "Bearer fixture-token"
+            body = json.dumps({"theme": Handler.theme}).encode()
+        elif self.path == "/api/health": body = b'{"ok":true}'
+        else: body = b'<html>isolated fixture</html>'
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(body)
+    def do_POST(self):
+        assert self.path == "/api/settings"
+        assert self.headers["Authorization"] == "Bearer fixture-token"
+        data = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        assert data == {"key":"theme", "value":"light"}
+        Handler.theme = "light"
+        self.send_response(200)
+        self.end_headers()
+server = ThreadingHTTPServer(("127.0.0.1", 1421), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+sys.exit(subprocess.run([sys.executable, "-B", sys.argv[1]]).returncode)
 '''
 
 
@@ -51,12 +90,18 @@ class RuntimeSmokeTests(unittest.TestCase):
         self.engine.write_text(ENGINE)
         self.engine.chmod(0o755)
 
-    def invoke(self, **state):
+    def invoke(self, network=False, **state):
         self.state.write_text(json.dumps({"calls": [], "stopped": False, "fail": "build",
                                          "images": {"opencodereview-runner:local": "production-runner",
-                                                    "foreign:keep": "foreign-image"}, **state}))
+                                                    "foreign:keep": "foreign-image",
+                                                    "foreign:shared": "smoke-build",
+                                                    "postgres:17": "base-image"}, **state}))
+        command = [sys.executable, "-B", str(ROOT / "docker/runtime-smoke.py")]
+        if network:
+            command = ["unshare", "--user", "--map-root-user", "--net", sys.executable,
+                       "-c", NETWORK_RUNNER, str(ROOT / "docker/runtime-smoke.py")]
         result = subprocess.run(
-            [sys.executable, "-B", str(ROOT / "docker/runtime-smoke.py")],
+            command,
             env={**os.environ, "OCR_CONTAINER_ENGINE": str(self.engine),
                  "OCR_RUNTIME_PROJECT": "ocr-cli-fixture", "ENGINE_STATE": str(self.state)},
             capture_output=True, text=True, timeout=20,
@@ -75,6 +120,19 @@ class RuntimeSmokeTests(unittest.TestCase):
         self.assertEqual(state["images"]["opencodereview-runner:local"], "production-runner")
         self.assertEqual(state["images"]["foreign:keep"], "foreign-image")
         self.assertEqual(state["built"]["review-runner"], state["built"]["review-egress"])
+
+    def test_removes_only_owned_images_on_success_and_failure(self):
+        for failure in ("build", None):
+            with self.subTest(failure=failure):
+                result, state = self.invoke(network=failure is None, fail=failure)
+                if failure is None:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                else:
+                    self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(state["images"], {
+                    "opencodereview-runner:local": "production-runner", "foreign:keep": "foreign-image",
+                    "foreign:shared": "smoke-build", "postgres:17": "base-image",
+                })
 
 
 if __name__ == "__main__":
