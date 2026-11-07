@@ -30,9 +30,10 @@ pub(crate) use issues::write_related_issues_context;
 pub(crate) use auth::{apply_git_https_auth, apply_gitlab_host, is_valid_gitlab_host, project_api_id};
 pub use auth::{auth_status, current_login, gitlab_host, run_auth_flow, sign_out};
 pub use comments::{
-    dedupe_review_comments, find_review_id_by_marker, post_review, prepare_review, upsert_issue_comment_by_marker,
-    DedupeResult, PreparedReview,
+    dedupe_review_comments, find_review_id_by_marker, post_review, prepare_review, resolve_stale_ocr_discussions,
+    upsert_issue_comment_by_marker, DedupeResult, KeepPoint, PreparedReview,
 };
+pub(crate) use comments::{keep_points_from_annotated_comments, with_gitlab_verdict};
 #[cfg(not(test))]
 pub(crate) use pr::pr_file_paths;
 pub use pr::{diff_anchors, pr_description};
