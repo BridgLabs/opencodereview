@@ -22,6 +22,7 @@ mod review_coverage;
 mod review_requests;
 mod review_results;
 mod review_runs;
+mod review_status;
 mod review_usage;
 mod settings;
 mod skills;
@@ -30,6 +31,7 @@ pub use accounts::AiAccount;
 pub use handle::Db;
 pub(crate) use handle::ARCHIVE_GATE_KEY;
 pub use instances::{INSTANCE_HEARTBEAT, INSTANCE_TIMEOUT_MS};
+pub use review_status::ReviewStatusPullRequest;
 pub use usage_report::{UsageFilter, USAGE_RANGES};
 
 #[cfg(test)]

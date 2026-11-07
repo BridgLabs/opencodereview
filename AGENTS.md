@@ -12,7 +12,7 @@ backend/src/sandbox/                     ocr-sandbox: runner, egress proxy, read
 backend/src/review/                      Review orchestration, scope, coverage, evidence, findings, validation
 backend/src/review_archive/              Frozen review archives, retention and purge
 backend/src/github/, indexer/            GitHub calls through `gh`; repository indexer
-backend/src/server/                      HTTP API, background jobs, publication, sign-in flows
+backend/src/server/                      HTTP API, background jobs, publication, sign-in flows, MCP review status (mcp.rs)
 backend/src/bench/                       ocr-bench: headless reviewer of the public benchmark image
 backend/src/db/                          Postgres access, migrations (pg/), queries, SQLite import
 backend/src/assets/                      Built-in review skill (review-skill.md)

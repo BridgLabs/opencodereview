@@ -27,6 +27,7 @@ mod accounts;
 mod claude_auth;
 mod codex_auth;
 mod indexing;
+mod mcp;
 mod polling;
 mod publication;
 mod queue_acknowledgements;
@@ -56,6 +57,8 @@ pub(crate) use stream::*;
 pub(crate) use summary::*;
 pub(crate) use usage_http::*;
 pub(crate) use workspace::*;
+#[cfg(test)]
+mod mcp_tests;
 #[cfg(test)]
 mod progress_tests;
 
