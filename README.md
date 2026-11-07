@@ -8,7 +8,7 @@
 
 AI code review for GitHub pull requests that runs on your own machine, using the Claude or ChatGPT account you already have.
 
-OpenCodeReview watches the repositories you pick, reviews each pull request with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Codex](https://github.com/openai/codex) inside isolated Docker containers, checks every finding against the code, and posts the result on the pull request.
+OpenCodeReview watches the repositories you pick, reviews each pull request with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Codex](https://github.com/openai/codex) inside isolated containers, checks every finding against the code, and posts the result on the pull request.
 
 ![The OpenCodeReview review queue](site/app-reviews.png)
 
@@ -47,7 +47,7 @@ Set `OCR_VERSION` (for example `OCR_VERSION=0.1.0`) to stay on one release; the 
 
 ## Requirements
 
-- Docker Engine or Docker Desktop with Docker Compose v2 (the Compose file uses `additional_contexts`).
+- Docker Engine or Docker Desktop with Docker Compose v2 (the Compose file uses `additional_contexts`), or rootless Podman on Linux as described below.
 - A GitHub account with access to the repositories you want reviewed.
 - At least one of:
   - a Claude subscription that works with Claude Code (Pro, Max, Team or Enterprise);
@@ -57,9 +57,38 @@ Local models through Ollama or similar are not supported: the review egress prox
 
 You do not need Node, pnpm or Rust on the host to run OpenCodeReview. Every AI CLI ships in the image at a pinned, checksum-verified version.
 
+### Rootless Podman on Linux
+
+Tested with Podman 5.8.9 and **podman-compose 1.6.0**, with cgroup v2, Netavark and
+aardvark-dns. Use these versions or newer; older versions are not validated.
+The native provider needs version 1.6.0 or newer for `service:` build contexts.
+Podman on macOS and Windows is not supported.
+
+Install podman-compose 1.6.0 or newer with your distribution package manager, or
+run `pipx install podman-compose==1.6.0`. Select it explicitly: `podman compose`
+may otherwise prefer Docker Compose even when podman-compose is installed:
+
+```bash
+podman-compose --version
+export PODMAN_COMPOSE_PROVIDER="$(command -v podman-compose)"
+podman compose up --build
+```
+
+Run the complete build, not just `build review-runner`: the server image must exist
+before its runner context can be resolved. Keep the provider selected for later
+`podman compose stop`, `start`, `restart` and `down` commands. Named volumes preserve
+data across restarts; `down -v` deletes that data.
+
+This native provider does not require the Podman API socket. The Docker Compose
+provider needs `systemctl --user start podman.socket`, but starting the socket
+alone does not fix its additional-context build failure on Podman. Keep Netavark
+DNS enabled for the internal database and runner networks. The shared Compose file
+labels its initialization bind mount for SELinux; do not disable SELinux or relax
+runner isolation to work around startup failures.
+
 ## Configuration
 
-Everything else is configured in the app under **Settings** (providers, repository access, PR selection, integrations). Docker Compose reads these variables from your shell or from a `.env` file next to `docker-compose.yml`:
+Everything else is configured in the app under **Settings** (providers, repository access, PR selection, integrations). Compose reads these variables from your shell or from a `.env` file next to `docker-compose.yml`:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |

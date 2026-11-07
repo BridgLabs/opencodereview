@@ -155,7 +155,6 @@ jobs:
           file: docker/Dockerfile.runner
           platforms: linux/${{ matrix.arch }}
           push: true
-          build-args: OCR_RUNTIME_IMAGE=ocr_runtime
           build-contexts: ocr_runtime=docker-image://${{ env.REGISTRY }}/opencodereview-server@${{ steps.server.outputs.digest }}
           tags: ${{ env.REGISTRY }}/opencodereview-runner:${{ env.TAG }}-${{ matrix.arch }}
 

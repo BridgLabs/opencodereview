@@ -31,7 +31,7 @@ bench/                                   Public benchmark adapters (ReviewBench,
 ## Ground rules
 
 - **pnpm only.** Do not add `package-lock.json`, `yarn.lock` or `bun.lock`.
-- **Docker is the runtime.** OpenCodeReview runs only through `docker compose`. Do not add native desktop wrappers or non-Docker runtime configuration. The one exception is the benchmark image (`docker/Dockerfile.bench`, [bench/README.md](bench/README.md)): a single container that reviews one mounted pull request for public benchmarks and exits. It is not a product runtime and has no HTTP API or UI.
+- **Compose containers are the runtime.** OpenCodeReview runs through Docker Compose or rootless Podman on Linux with podman-compose 1.6.0 or newer (see README.md). Reuse the shared Compose configuration and preserve every sandbox guarantee on both engines. Do not add native desktop wrappers or native application runtime configuration. The one exception is the benchmark image (`docker/Dockerfile.bench`, [bench/README.md](bench/README.md)): a single container that reviews one mounted pull request for public benchmarks and exits. It is not a product runtime and has no HTTP API or UI.
 - **File size limits.** Frontend source files stay at or under 800 lines and Rust files at or under 2,500 lines (`pnpm check:file-size`). Split before you hit the limit.
 - **Conventional Commits** for every commit and pull request title.
 - **Pull requests only.** `main` is protected; every change lands through a squash-merged pull request reviewed by a code owner.
@@ -79,6 +79,8 @@ bench/                                   Public benchmark adapters (ReviewBench,
 docker compose up --build
 ```
 
+For rootless Podman on Linux, follow the provider setup in README.md and use `podman compose` instead.
+
 Open `http://localhost:1421`. Services: `web` (nginx on 1421, proxying `/api`), `server` (API on `127.0.0.1:8787`), `review-runner` (20 replicas by default, `OCR_REVIEW_RUNNERS`), `review-egress`, `postgres` and `database-secret`. State lives in the `ocr-data` and `postgres-data` volumes. `GH_TOKEN` is only a development fallback.
 
 ## Development commands
@@ -103,6 +105,8 @@ docker compose config --quiet
 ```
 
 After building images, `python3 -u docker/runner-smoke.py` validates the sandbox with fake inference (no credentials, no paid calls). Rust tests need `OCR_TEST_DATABASE_URL` pointing at a Postgres where the role may create databases ([CONTRIBUTING.md](CONTRIBUTING.md)). Zero matching tests is not a pass.
+
+Set `OCR_CONTAINER_ENGINE=podman` for `docker/runner-smoke.py`, `docker/test-web-proxy.py` and `docker/runtime-smoke.py` on Podman. The runtime smoke builds an isolated project, checks HTTP, database isolation and persistence after restart, then removes only its own resources; stop any stack using the product's ports first.
 
 ## Database
 

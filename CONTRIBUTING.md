@@ -31,7 +31,7 @@ Steps:
 
 ## Development setup
 
-You need Docker with Compose v2, Node 22, pnpm 10, a stable Rust toolchain and Python 3.
+You need Docker with Compose v2 or [rootless Podman on Linux](README.md#rootless-podman-on-linux), Node 22, pnpm 10, a stable Rust toolchain and Python 3.
 
 ```bash
 git clone https://github.com/<you>/opencodereview && cd opencodereview
@@ -81,6 +81,29 @@ export OCR_TEST_DATABASE_URL=postgres://ocr:dev@127.0.0.1:55432/postgres
 ```
 
 If you changed the runner, egress or Dockerfiles, build the images and run `python3 -u docker/runner-smoke.py` (fake inference, no credentials needed).
+
+For rootless Podman, select podman-compose 1.6.0 as documented in the README, then
+use `podman compose` in place of `docker compose`. Run the container regressions
+with `OCR_CONTAINER_ENGINE=podman`:
+
+```bash
+OCR_CONTAINER_ENGINE=podman python3 -B docker/test-web-proxy.py
+OCR_CONTAINER_ENGINE=podman python3 -u docker/runner-smoke.py
+OCR_CONTAINER_ENGINE=podman python3 -u docker/runtime-smoke.py
+```
+
+`runtime-smoke.py` builds a disposable Compose project with one runner, checks the
+UI and authenticated settings API, restarts the stack, verifies persistence, and
+removes only that project's containers and volumes. Stop any stack using ports
+1421, 8787 or 1455 first. It runs no inference. Set `OCR_RUNTIME_PROJECT` to choose
+its project name; an existing project is refused. The script also runs on Docker
+with no engine override. For runner network checks against a running non-default
+project, set `OCR_SMOKE_SERVER` to its server container name.
+
+`python3 -B docker/test-runtime-smoke.py` checks the smoke CLI's stopped-project
+guard and image ownership with a disposable engine fixture. Its successful HTTP
+lifecycle runs inside a Linux user/network namespace (`unshare` and `ip` required),
+so it does not use an existing installation's ports or API.
 
 Do not include real AI calls in tests. Never commit credentials, tokens, `.env` files or database files and dumps, and keep test fixtures free of real customer or repository data.
 

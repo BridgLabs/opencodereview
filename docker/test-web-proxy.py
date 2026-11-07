@@ -1,7 +1,7 @@
 """Behavioral regression for the web container's same-origin /api nginx proxy.
 
 Runs the repository's docker/web-nginx.conf inside a real nginx container on a
-disposable Docker network, against a disposable mock upstream registered under
+disposable container network, against a disposable mock upstream registered under
 the Compose service name `server`. Verifies the /api prefix strip, forwarding of
 the headers the backend trust checks rely on (Authorization, Referer,
 X-Flow-Secret), the nginx Origin mapping (explicit nonempty Origin wins, a
@@ -14,11 +14,12 @@ origin acceptance and rejection itself stays with the backend guard and its
 Rust tests; this checks the exact Origin value nginx presents to it.
 
 Creates and removes only its own uniquely named containers and network. Runs on
-macOS Docker Desktop and Linux CI.
+macOS Docker Desktop, Linux Docker and rootless Linux Podman (OCR_CONTAINER_ENGINE=podman).
 """
 
 import http.client
 import json
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -26,6 +27,7 @@ import time
 import uuid
 
 PREFIX = "ocr-web-proxy-test-" + uuid.uuid4().hex[:10]
+ENGINE = os.environ.get("OCR_CONTAINER_ENGINE", "docker")
 NGINX_IMAGE = "nginx:1.30-alpine"
 MOCK_IMAGE = "python:3.13-alpine"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -92,9 +94,9 @@ ThreadingHTTPServer(("0.0.0.0", 8787), Handler).serve_forever()
 
 
 def docker(*args, check=True, timeout=300):
-    result = subprocess.run(["docker", *args], text=True, capture_output=True, timeout=timeout)
+    result = subprocess.run([ENGINE, *args], text=True, capture_output=True, timeout=timeout)
     if check and result.returncode:
-        raise RuntimeError(f"docker {args[0]} failed: {result.stderr.strip()}")
+        raise RuntimeError(f"{ENGINE} {args[0]} failed: {result.stderr.strip()}")
     return result
 
 
@@ -137,7 +139,7 @@ def run_checks(work):
     docker(
         "run", "-d", "--name", upstream,
         "--network", network, "--network-alias", "server",
-        "-v", f"{mock_path}:/mock_upstream.py:ro",
+        "-v", f"{mock_path}:/mock_upstream.py:ro,z",
         MOCK_IMAGE, "python", "-u", "/mock_upstream.py",
     )
     containers.append(upstream)
@@ -145,7 +147,7 @@ def run_checks(work):
         "run", "-d", "--name", web,
         "--network", network,
         "-p", "127.0.0.1::1421",
-        "-v", f"{ROOT}/docker/web-nginx.conf:/etc/nginx/conf.d/default.conf:ro",
+        "-v", f"{ROOT}/docker/web-nginx.conf:/etc/nginx/conf.d/default.conf:ro,z",
         NGINX_IMAGE,
     )
     containers.append(web)
@@ -156,7 +158,7 @@ def run_checks(work):
     deadline = time.time() + 60
     while True:
         try:
-            connection, response = request(port, "GET", "/")
+            connection, response = request(port, "GET", "/api/health")
             response.read()
             connection.close()
             if response.status == 200:
@@ -164,7 +166,7 @@ def run_checks(work):
         except OSError:
             pass
         if time.time() > deadline:
-            raise RuntimeError("nginx test container did not start serving within 60s")
+            raise RuntimeError("nginx test container did not reach its upstream within 60s")
         time.sleep(0.5)
 
     connection, response = request(port, "GET", "/platform/reviews")
