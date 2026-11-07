@@ -17,12 +17,15 @@ pub(crate) use activation::{activation_pr, conversation_comments_page, unedited_
 
 mod auth;
 mod comments;
+mod issues;
 mod oauth;
 mod pr;
 mod repo;
 mod review_requests;
 mod status_comments;
 mod transport;
+
+pub(crate) use issues::write_related_issues_context;
 
 pub(crate) use auth::{apply_git_https_auth, apply_gitlab_host, is_valid_gitlab_host, project_api_id};
 pub use auth::{auth_status, current_login, gitlab_host, run_auth_flow, sign_out};
