@@ -6,16 +6,16 @@
 
 [![License](https://img.shields.io/badge/license-PolyForm_Small_Business_1.0.0-blue.svg)](LICENSE)
 
-AI code review for GitHub pull requests that runs on your own machine, using the Claude or ChatGPT account you already have.
+AI code review for GitHub pull requests that runs on your own machine, using your Claude, ChatGPT or OpenCode Go account.
 
-OpenCodeReview watches the repositories you pick, reviews each pull request with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Codex](https://github.com/openai/codex) inside isolated containers, checks every finding against the code, and posts the result on the pull request.
+OpenCodeReview watches the repositories you pick, reviews each pull request with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex) or [OpenCode Go](https://opencode.ai/docs/console/go/) inside isolated containers, checks every finding against the code, and posts the result on the pull request.
 
 ![The OpenCodeReview review queue](site/app-reviews.png)
 
 ## Features
 
-- **Your own AI.** Reviews run on the Claude Code CLI (Claude Opus 5.5 at medium effort by default) or the Codex CLI, signed in with your Claude or ChatGPT account. The top bar picks each provider's model and effort. There is no OpenCodeReview account.
-- **Several accounts with failover.** Connect more than one account, of any provider, and pick the one new reviews start on. When an account hits its usage limit, the review continues on the next account of the same provider, then the other provider, and the limited account comes back after its window resets. Settings shows how much of each Claude and ChatGPT plan is left.
+- **Your own AI.** Reviews run on Claude Code (Claude Opus 5.5 at medium effort by default), Codex or the pinned OpenCode CLI restricted to Go. The top bar picks each provider's model and effort. There is no OpenCodeReview account.
+- **Several accounts with failover.** Connect more than one account and pick the one new reviews start on. A trusted usage-limit response moves the stage to the next account of the same provider, then another provider. Settings reports Claude and ChatGPT plan usage when available; Go quota and reset times remain unknown.
 - **Codebase indexing.** Each selected repository is indexed locally: file metadata, a package and import graph, and lightweight symbols. Reviews get the callers, dependencies and tests of the changed code, plus your convention files (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `REVIEW.md` and others).
 - **Usage.** See the tokens reviews used by day, pull request, repository, model and account, with findings, time and cache reuse. A pull request opens into each of its runs.
 - **Review skills.** The review methodology is a Markdown skill you can edit, version and roll back in the app.
@@ -33,7 +33,7 @@ git clone https://github.com/BridgLabs/opencodereview && cd opencodereview && do
 Open [http://localhost:1421](http://localhost:1421) and follow onboarding:
 
 1. **GitHub**: sign in with the GitHub device flow.
-2. **Your plan**: connect at least one account. Claude uses `claude setup-token` (you paste back the code it shows); ChatGPT uses the `codex login` browser flow or a device code.
+2. **Your plan**: connect at least one account. Claude uses `claude setup-token` (you paste back the code it shows); ChatGPT uses the `codex login` browser flow or a device code. OpenCode Go uses an explicitly pasted Go API key, not OAuth or device login.
 3. **Repositories**: choose the repositories to monitor. They are cloned and indexed in the background.
 4. **First review**: pick an open pull request. After that, new pull requests in monitored repositories are reviewed automatically.
 
@@ -51,7 +51,8 @@ Set `OCR_VERSION` (for example `OCR_VERSION=0.1.0`) to stay on one release; the 
 - A GitHub account with access to the repositories you want reviewed.
 - At least one of:
   - a Claude subscription that works with Claude Code (Pro, Max, Team or Enterprise);
-  - a ChatGPT plan that includes Codex.
+  - a ChatGPT plan that includes Codex;
+  - an OpenCode Go account with an API key and access to the selected model.
 
 Local models through Ollama or similar are not supported: the review egress proxy refuses private networks by design.
 
@@ -118,14 +119,35 @@ browser ──> web (nginx, :1421) ──/api──> server (Rust API, 127.0.0.1
 | --- | --- |
 | `web` | Serves the React UI and proxies `/api` to `server`. |
 | `server` | Rust HTTP API: GitHub polling through the `gh` CLI, indexing, review orchestration, publication and background jobs. |
-| `review-runner` | Runs Claude Code or Codex on a frozen snapshot of the pull request, one review stage per container at a time. 20 replicas by default (`OCR_REVIEW_RUNNERS`); idle ones use almost no memory. Each receives only a private socket and a read-only copy of the sign-in. |
-| `review-egress` | Outbound proxy that allows only `api.anthropic.com`, `chatgpt.com`, `api.openai.com` and `auth.openai.com`, on port 443 and public addresses only. |
+| `review-runner` | Runs Claude Code, Codex or OpenCode Go on a frozen snapshot, one review stage per container at a time. 20 replicas by default (`OCR_REVIEW_RUNNERS`). Each receives only a private socket and a read-only sign-in projection. |
+| `review-egress` | Outbound proxy that allows only `api.anthropic.com`, `chatgpt.com`, `api.openai.com`, `auth.openai.com` and `opencode.ai`, on port 443 and public addresses only. |
 
 A review fetches the live base and head of the pull request, selects the scope (full, incremental, base sync or stacked), builds context from the index, freezes the evidence into an archive, runs the AI in a runner (split into chunks for large PRs), validates the report and publishes it. On GitHub, OpenCodeReview posts a collapsed summary comment that it updates on each push, a result comment that replaces the previous one, and the validated findings as a single non-blocking review with inline comments. It never approves a pull request on its own.
 
+### OpenCode Go
+
+Connect a Go API key under **Settings → Providers**. Keys stay in private application storage and
+the runner's read-only projection. Removing an account deletes its key and projection. A stored
+key indicates a local connection, not verified entitlement or remaining allowance.
+
+The engine picker loads compatible chat models and their advertised reasoning efforts from the
+[official Go models API](https://opencode.ai/inference/go/v1/models). Models without advertised
+efforts have no effort selector. Choose a model explicitly; if that model or effort disappears,
+select another rather than having reviews silently switch models. A failed catalogue request
+shows an error instead of falling back to a bundled list. Availability can vary by account.
+See [runner integration and offline tests](docker/opencode-guard/README.md).
+
+Go sends evidence through OpenCode and its upstream model providers. DeepSeek requires global
+processing. All Contributor models require checking the current data-sharing terms and obtaining
+the required consent; selecting a model does not grant consent. Check those terms before sending
+confidential code.
+
+**Go Extra Usage can incur additional charges.** OpenCodeReview cannot enforce subscription-only
+billing. Quota, balance and reset information are not known; usage is reported in tokens only.
+
 ## Security and privacy
 
-- **Your code goes only to your AI provider.** The pull request evidence is sent to Anthropic or OpenAI with your own sign-in, the same way their CLIs work when you use them directly. OpenCodeReview has no servers and sends no telemetry.
+- **Your code goes to your selected AI service.** Claude and Codex send evidence to Anthropic or OpenAI with your sign-in. Go sends it through OpenCode and its upstream model providers under the terms above. OpenCodeReview has no servers and sends no telemetry.
 - **Sign-ins stay local.** GitHub credentials, AI sign-ins and keys are stored in the `ocr-data` Docker volume (AI sign-ins and keys with file mode `0600`). They are never logged or sent to the browser. **Sign out** (GitHub, in Integrations) and **Remove account** (AI accounts, in Providers) delete them.
 - **Runners are sandboxed.** Read-only root filesystem, no Linux capabilities beyond what supervision needs, an unprivileged user for the AI process, no access to the database or repository cache, and provider-only network access.
 - **The UI is meant for a trusted network.** The API is protected by an installation token that the web container injects into the UI, so anyone who can open the UI can use it. Compose publishes port 1421 on every network interface of the host, and Docker's port rules bypass host firewalls such as ufw. On a shared network or a VPS, change the mapping to `127.0.0.1:1421:1421` and reach it through an SSH tunnel, or put an authenticated reverse proxy in front.
