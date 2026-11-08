@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ReviewCard, ReviewPhase, ReviewRun, ReviewRunStage } from "../../types";
+import type { ReviewCard, ReviewChunkProgress, ReviewPhase, ReviewRun, ReviewRunStage } from "../../types";
 import {
   buildReviewChunks,
   buildReviewFlow,
@@ -331,7 +331,7 @@ describe("individual review chunks", () => {
     expect(chunks.items).toHaveLength(4);
     expect(chunks.items[1].state).toBe("completed");
     expect(chunks.items[1].metrics.tokens).toBe(750);
-    expect(chunks.items[1].metrics.durationMs).toBe(8000);
+    expect(chunks.items[1].metrics.durationMs).toBe(671_000);
     expect(chunks.items[0].state).toBe("completed");
   });
 
@@ -359,6 +359,56 @@ describe("individual review chunks", () => {
       { id: 1, runId: 10, stage: "chunk", chunkId: 2, status: "failed", inputTokens: 300 },
     ] as ReviewRunStage[];
     expect(buildReviewChunks(phases, { ...run, status: "failed" }, rows).items[1].state).toBe("failed");
+  });
+
+  it("uses phase execution timestamps instead of queued stage-row timestamps", () => {
+    const queuedAt = 1_794_150_859_484;
+    const chunks = Array.from({ length: 7 }, (_, index) => {
+      const id = index + 1;
+      const cancelled = [1, 4, 5, 6, 7].includes(id);
+      const startedAt = id === 2 ? 1_794_150_863_495 : id === 3 ? 1_794_151_358_473 : null;
+      const finishedAt = id === 2 ? 1_794_151_356_844 : 1_794_152_260_000;
+      return {
+        id,
+        status: (cancelled ? "cancelled" : id === 2 ? "done" : "failed") as ReviewChunkProgress["status"],
+        queuedAt,
+        startedAt,
+        executionFinishedAt: startedAt === null ? null : finishedAt,
+        finishedAt,
+        fileCount: 3,
+        cached: false,
+        attempts: cancelled ? 0 : 1,
+        log: "",
+        error: cancelled ? "Cancelled after another chunk failed" : id === 3 ? "Stage inference timed out" : null,
+      };
+    });
+    const phase: ReviewPhase[] = [{ id: "chunks", label: "Chunks", status: "failed", chunks }];
+    const actualRun = { ...run, id: 41, status: "failed", finishedAt: 1_794_152_260_000 } as ReviewRun;
+    const rows = [2, 3, 1, 4, 5, 6, 7].map((chunkId, index) => ({
+      id: index + 1,
+      runId: 41,
+      stage: "chunk",
+      chunkId,
+      status: chunkId === 2 ? "done" : chunkId === 3 ? "failed" : "cancelled",
+      model: "claude-opus-5-5",
+      inputTokens: chunkId === 3 ? 181_078 : chunkId === 2 ? 120_211 : 0,
+      createdAt: 1_794_150_859_870,
+      finishedAt: 1_794_152_260_000,
+    })) as ReviewRunStage[];
+
+    const built = buildReviewChunks(phase, actualRun, rows);
+    expect(built.items[1]).toMatchObject({ state: "completed", metrics: { durationMs: 493_349 } });
+    expect(built.items[2]).toMatchObject({
+      state: "failed",
+      startedAt: 1_794_151_358_473,
+      metrics: { durationMs: 901_527 },
+    });
+    for (const chunk of built.items.filter((item) => item.state === "cancelled")) {
+      expect(chunk.startedAt).toBeUndefined();
+      expect(chunk.metrics.durationMs).toBeNull();
+      expect(chunk.detail).toBe("Cancelled after another chunk failed");
+      expect(chunk.queuedDurationMs).toBe(1_400_516);
+    }
   });
 
   it("handles missing status rows and rejects unsafe or unrelated progress text", () => {

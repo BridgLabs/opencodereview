@@ -1,17 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
+import { BrandLoadingIcon } from "../../components/BrandLoading";
 import { cx, DSButton } from "../../components/DesignSystem";
 import { setupApi } from "../../services/setupApi";
 import type { AiAccount, ReviewEngine } from "../../types";
 import { ACCOUNTS_QUERY_KEY, AccountsPanel, accountHealth, ProviderGlyph, providerName } from "./AccountsPanel";
+import { engineCataloguePollInterval } from "./EngineAccounts";
 import { ENGINES_QUERY_KEY } from "./EnginePicker";
 
 type Provider = AiAccount["provider"];
-const PROVIDERS: Provider[] = ["claude", "codex"];
 const planHint: Record<Provider, string> = {
   claude: "Claude Pro, Max or Team plan",
   codex: "ChatGPT Plus or Pro plan",
+  opencode: "OpenCode Go API key",
 };
 
 const groupClass = "flex flex-col overflow-hidden rounded-xl border border-line/70 bg-surface";
@@ -20,7 +22,7 @@ const rowClass =
 
 /** Providers in the order reviews try them: by their first account's place in the account list. */
 function connectedProviders(accounts: AiAccount[]) {
-  return PROVIDERS.filter((provider) => accounts.some((account) => account.provider === provider)).sort(
+  return [...new Set(accounts.map((account) => account.provider))].sort(
     (a, b) =>
       accounts.findIndex((account) => account.provider === a) - accounts.findIndex((account) => account.provider === b),
   );
@@ -42,24 +44,44 @@ function useMoveFirst() {
 export function ProvidersPanel() {
   const [open, setOpen] = useState<Provider | null>(null);
   const accountsQuery = useQuery({ queryKey: ACCOUNTS_QUERY_KEY, queryFn: setupApi.listAccounts });
-  const engines = useQuery({ queryKey: ENGINES_QUERY_KEY, queryFn: setupApi.reviewEngines });
+  const engines = useQuery({
+    queryKey: ENGINES_QUERY_KEY,
+    queryFn: setupApi.reviewEngines,
+    refetchInterval: (query) => engineCataloguePollInterval(query.state.data),
+  });
   const moveFirst = useMoveFirst();
   const accounts = accountsQuery.data ?? [];
   const connected = connectedProviders(accounts);
-  const others = PROVIDERS.filter((provider) => !connected.includes(provider));
+  const runnable = connected.filter((provider) => {
+    const engine = engines.data?.find((item) => item.provider === provider);
+    return (
+      provider !== "opencode" ||
+      (engine?.catalogue?.status === "ready" && Boolean(engine.catalogue.id) && engine.selectionValid === true)
+    );
+  });
+  const others = (engines.data ?? [])
+    .map((engine) => engine.provider)
+    .filter((provider) => !connected.includes(provider));
   const engineLabel = (provider: Provider) =>
-    engines.data
-      ?.find((engine) => engine.provider === provider)
-      ?.label.split(" · ")
-      .slice(1)
-      .join(" · ");
+    (() => {
+      const engine = engines.data?.find((item) => item.provider === provider);
+      if (
+        provider === "opencode" &&
+        engine?.catalogue?.status === "ready" &&
+        (!engine.catalogue.id || engine.selectionValid !== true)
+      )
+        return "Choose model";
+      if (provider === "opencode" && engine?.catalogue?.status === "error") return "Models unavailable";
+      if (provider === "opencode" && engine?.catalogue?.status !== "ready") return "Loading models…";
+      return engine?.label.split(" · ").slice(1).join(" · ");
+    })();
   if (open)
     return (
       <ProviderDetail
         provider={open}
         accounts={accounts}
         engine={engines.data?.find((engine) => engine.provider === open)}
-        first={connected[0] === open}
+        first={connected[0] === open && runnable.includes(open)}
         onBack={() => setOpen(null)}
       />
     );
@@ -74,8 +96,7 @@ export function ProvidersPanel() {
       <header className="px-1">
         <h2 className="text-small font-semibold text-fg">Providers</h2>
         <p className="mt-0.5 max-w-2xl text-caption text-fg-subtle">
-          Reviews run on the AI plans you connect. When one provider's accounts hit their limits, reviews continue on
-          the next.
+          Reviews use connected accounts or API keys. If one account cannot continue, reviews can move to the next.
         </p>
       </header>
       {connected.length > 0 && (
@@ -93,7 +114,11 @@ export function ProvidersPanel() {
               onChange={(event) => moveFirst.mutate({ provider: event.target.value as Provider, accounts })}
             >
               {connected.map((provider) => (
-                <option key={provider} value={provider}>
+                <option
+                  key={provider}
+                  value={provider}
+                  disabled={provider === "opencode" && !runnable.includes(provider)}
+                >
                   {providerName[provider]}
                   {engineLabel(provider) ? ` · ${engineLabel(provider)}` : ""}
                 </option>
@@ -104,23 +129,31 @@ export function ProvidersPanel() {
       )}
       {connected.length > 0 && (
         <ProviderGroup title="Connected">
-          {connected.map((provider, index) => (
-            <button key={provider} type="button" className={rowClass} onClick={() => setOpen(provider)}>
-              <ProviderGlyph provider={provider} />
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2 text-small font-medium text-fg">
-                  {providerName[provider]}
-                  {index === 0 && (
-                    <span className="rounded-full bg-brand-soft px-2 py-0.5 text-caption font-semibold text-brand-hover">
-                      Next review
-                    </span>
-                  )}
+          {connected.map((provider) => {
+            const requiresModel = provider === "opencode" && !runnable.includes(provider);
+            return (
+              <button key={provider} type="button" className={rowClass} onClick={() => setOpen(provider)}>
+                <ProviderGlyph provider={provider} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2 text-small font-medium text-fg">
+                    {providerName[provider]}
+                    {connected[0] === provider && !requiresModel && runnable.includes(provider) && (
+                      <span className="rounded-full bg-brand-soft px-2 py-0.5 text-caption font-semibold text-brand-hover">
+                        Next review
+                      </span>
+                    )}
+                    {requiresModel && (
+                      <span className="rounded-full bg-warning/15 px-2 py-0.5 text-caption font-semibold text-warning">
+                        Model required
+                      </span>
+                    )}
+                  </span>
+                  <span className="block truncate text-caption text-fg-subtle">{summary(provider)}</span>
                 </span>
-                <span className="block truncate text-caption text-fg-subtle">{summary(provider)}</span>
-              </span>
-              <ChevronRight className="size-4 flex-none text-fg-subtle" />
-            </button>
-          ))}
+                <ChevronRight className="size-4 flex-none text-fg-subtle" />
+              </button>
+            );
+          })}
         </ProviderGroup>
       )}
       {others.length > 0 && (
@@ -165,12 +198,36 @@ function ProviderDetail({
 }) {
   const queryClient = useQueryClient();
   const moveFirst = useMoveFirst();
+  const go = provider === "opencode";
+  const catalogue = engine?.catalogue;
+  const catalogueReady = !go || (catalogue?.status === "ready" && Boolean(catalogue.id));
+  const catalogueFailed = go && (catalogue?.status === "error" || (catalogue?.status === "ready" && !catalogue.id));
+  const selectionValid = !go || (catalogueReady && Boolean(catalogue?.id) && engine?.selectionValid === true);
   const save = useMutation({
-    mutationFn: (choice: { model: string; effort: string }) => setupApi.saveReviewEngine({ provider, ...choice }),
+    mutationFn: (choice: { model: string; effort: string; catalogueId?: string }) =>
+      setupApi.saveReviewEngine({ provider, ...choice }),
     onSuccess: (data) => queryClient.setQueryData(ENGINES_QUERY_KEY, data),
   });
+  const refresh = useMutation({
+    mutationFn: setupApi.refreshOpenCodeCatalogue,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ENGINES_QUERY_KEY }),
+  });
   const connected = accounts.some((account) => account.provider === provider);
-  const model = engine?.models.find((item) => item.id === engine.model);
+  const model = engine && selectionValid ? engine.models.find((item) => item.id === engine.model) : undefined;
+  const saveChoice = (modelId: string, effort: string) => {
+    const catalogueId = go ? catalogue?.id : undefined;
+    if (go && (!catalogueReady || !catalogueId)) return;
+    save.mutate({
+      model: modelId,
+      effort,
+      ...(catalogueId ? { catalogueId } : {}),
+    });
+  };
+  const retryButton = (label = "Retry") => (
+    <DSButton size="sm" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
+      {refresh.isPending ? "Refreshing…" : label}
+    </DSButton>
+  );
   return (
     <section className="settings-group flex flex-col gap-5">
       <nav className="flex items-center gap-1.5 px-1 text-small" aria-label="Breadcrumb">
@@ -194,38 +251,61 @@ function ProviderDetail({
               </span>
             )}
           </div>
-          <div className="text-caption text-fg-subtle">{first ? "New reviews start here" : planHint[provider]}</div>
+          <div className="text-caption text-fg-subtle">
+            {go && !catalogueReady
+              ? catalogueFailed
+                ? "OpenCode Go models need a refresh"
+                : "Loading OpenCode Go models…"
+              : go && !selectionValid
+                ? "Choose a model before reviews can use this account"
+                : first
+                  ? "New reviews start here"
+                  : planHint[provider]}
+          </div>
         </div>
-        {connected && !first && (
+        {connected && !first && (!go || selectionValid) && (
           <DSButton disabled={moveFirst.isPending} onClick={() => moveFirst.mutate({ provider, accounts })}>
             Use for new reviews
           </DSButton>
         )}
       </header>
-      <AccountsPanel provider={provider} />
+      <AccountsPanel provider={provider} engineValid={selectionValid} />
       {engine && (
         <div className="flex flex-col gap-2">
           <h3 className="px-1 text-small font-semibold text-fg">Model</h3>
+          {provider === "opencode" && (
+            <p className="px-1 text-caption text-fg-subtle">
+              Review code and findings are sent to OpenCode Go for review.
+            </p>
+          )}
           <div className={cx(groupClass, "divide-y divide-line")}>
             <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
               <div>
                 <div className="text-small font-medium text-fg">Model</div>
                 <div className="text-caption text-fg-subtle">The model reviews run on with this provider.</div>
               </div>
-              {engine.models.length > 1 && (
+              {catalogueReady && engine.models.length > 0 && (engine.models.length > 1 || (go && !selectionValid)) && (
                 <select
                   aria-label={`${providerName[provider]} model`}
                   className="h-9 rounded-lg border border-line bg-surface-muted px-3 text-small text-fg outline-none focus:border-line-strong"
-                  value={engine.model}
-                  disabled={save.isPending}
+                  value={selectionValid ? engine.model : ""}
+                  disabled={save.isPending || (go && !catalogue?.id)}
                   onChange={(event) => {
                     const next = engine.models.find((item) => item.id === event.target.value);
-                    save.mutate({
-                      model: event.target.value,
-                      effort: next?.efforts.includes(engine.effort) ? engine.effort : (next?.defaultEffort ?? ""),
-                    });
+                    if (!next) return;
+                    saveChoice(
+                      event.target.value,
+                      selectionValid && next.efforts.includes(engine.effort)
+                        ? engine.effort
+                        : (next.defaultEffort ?? ""),
+                    );
                   }}
                 >
+                  {go && !selectionValid && (
+                    <option value="" disabled>
+                      Choose a model…
+                    </option>
+                  )}
                   {engine.models.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.label}
@@ -234,12 +314,39 @@ function ProviderDetail({
                 </select>
               )}
             </div>
+            {go && (!catalogue || catalogue.status === "empty" || catalogue.status === "loading") && (
+              <div className="flex items-center gap-2 px-4 py-3 text-small text-fg-muted" role="status">
+                <BrandLoadingIcon size={16} /> Loading OpenCode Go models…
+              </div>
+            )}
+            {catalogueFailed && (
+              <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" role="alert">
+                <p className="text-small text-danger">
+                  {catalogue?.error || "Could not load OpenCode Go models."}
+                  {refresh.error && " Refresh failed. Try again."}
+                </p>
+                {retryButton()}
+              </div>
+            )}
+            {go && catalogueReady && engine.models.length === 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                <p className="text-small text-fg-muted">No OpenCode Go models are available yet.</p>
+                {retryButton("Refresh models")}
+              </div>
+            )}
+            {go && catalogueReady && !selectionValid && engine.models.length > 0 && (
+              <p className="px-4 py-3 text-small text-warning" role="status">
+                Choose a model to enable reviews.
+              </p>
+            )}
             {model && model.efforts.length > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                 <div>
                   <div className="text-small font-medium text-fg">Effort</div>
                   <div className="text-caption text-fg-subtle">
-                    More effort finds subtler issues and uses more of your plan.
+                    {go
+                      ? "More effort can use more tokens for the review."
+                      : "More effort finds subtler issues and uses more of your plan."}
                   </div>
                 </div>
                 <fieldset className="flex flex-wrap gap-1" aria-label="Effort">
@@ -253,7 +360,7 @@ function ProviderDetail({
                         "h-8 cursor-pointer rounded-md px-3 text-caption font-medium capitalize transition-colors",
                         effort === engine.effort ? "bg-fg text-canvas" : "bg-surface-muted text-fg-muted hover:text-fg",
                       )}
-                      onClick={() => save.mutate({ model: engine.model, effort })}
+                      onClick={() => saveChoice(engine.model, effort)}
                     >
                       {effort}
                     </button>

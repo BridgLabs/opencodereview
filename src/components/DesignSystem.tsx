@@ -95,19 +95,24 @@ export function DSMenu({
       if (
         event instanceof KeyboardEvent
           ? event.key === "Escape"
-          : event.type !== "mousedown" ||
-            ![button.current, menu.current].some((node) => node?.contains(event.target as Node))
+          : event.type === "scroll"
+            ? event.target === event.currentTarget ||
+              (event.target instanceof Node && Boolean(button.current && event.target.contains(button.current)))
+            : event.type !== "mousedown" ||
+              ![button.current, menu.current].some((node) => node?.contains(event.target as Node))
       )
         setPosition(null);
     };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", close);
     window.addEventListener("resize", close);
+    window.addEventListener("scroll", close);
     document.addEventListener("scroll", close, true);
     return () => {
       document.removeEventListener("mousedown", close);
       document.removeEventListener("keydown", close);
       window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close);
       document.removeEventListener("scroll", close, true);
     };
   }, [position]);

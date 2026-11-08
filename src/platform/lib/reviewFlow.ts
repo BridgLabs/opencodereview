@@ -447,17 +447,10 @@ export function buildReviewChunks(
         latest?.cacheHit || latest?.status === "cached" || live?.cached || live?.status === "cached" || old?.cached,
       );
       const validating = state === "running" && live?.status === "validating";
-      const starts = records.map((row) => row.createdAt).filter(Number.isFinite);
       const ends = records
         .map((row) => row.finishedAt)
         .filter((value): value is number => value !== null && Number.isFinite(value));
-      const startedAt = cached
-        ? undefined
-        : live
-          ? (live.startedAt ?? undefined)
-          : starts.length
-            ? Math.min(...starts)
-            : old?.startedAt;
+      const startedAt = cached ? undefined : live ? (live.startedAt ?? undefined) : old?.startedAt;
       const finishedAt = live?.finishedAt ?? (ends.length ? Math.max(...ends) : old?.finishedAt);
       const executionEnd = live?.executionFinishedAt ?? finishedAt ?? (live && state === "running" ? now : undefined);
       const measured =
@@ -476,9 +469,13 @@ export function buildReviewChunks(
         ? "Reused validated snapshot cache; no new inference."
         : validating
           ? "Verifying quoted evidence, coverage and anchors locally."
-          : state === "unknown"
-            ? "No final status recorded for this chunk. It is not assumed to have failed or completed."
-            : `${flowStateLabel(state)} · ${latest?.fileCount ?? live?.fileCount ?? "Unknown"} files assigned to this chunk.`;
+          : state === "cancelled" && live?.error
+            ? live.error
+            : state === "cancelled" && startedAt === undefined && (live?.attempts ?? old?.attempts ?? 0) === 0
+              ? "Cancelled before it started."
+              : state === "unknown"
+                ? "No final status recorded for this chunk. It is not assumed to have failed or completed."
+                : `${flowStateLabel(state)} · ${latest?.fileCount ?? live?.fileCount ?? "Unknown"} files assigned to this chunk.`;
       counts[state] += 1;
       return {
         id,

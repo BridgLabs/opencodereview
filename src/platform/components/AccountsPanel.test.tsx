@@ -25,6 +25,7 @@ vi.mock("../../services/setupApi", () => ({
     claudeAuthInput: vi.fn(),
     claudeAuthCancel: vi.fn(),
     claudeTokenSave: vi.fn(),
+    opencodeKeySave: vi.fn(),
     codexAuthStart: vi.fn(),
     codexAuthEvents: vi.fn(),
     codexAuthCancel: vi.fn(),
@@ -69,6 +70,81 @@ it("describes each account by what reviews will do with it", () => {
   expect(accountStatusText(account(8, { enabled: false, status: "limited", limitedUntil: now + 3_600_000 }), now)).toBe(
     "Usage limit reached · resets in 1 h",
   );
+  expect(
+    accountStatusText(account(9, { provider: "opencode", status: "limited", limitedUntil: now + 3_600_000 }), now),
+  ).toBe("Paused · retry in 1 h");
+});
+
+it("clears OpenCode key when reconnect switches account from A to B", async () => {
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([
+    account(8, { provider: "opencode", label: "Go A" }),
+    account(9, { provider: "opencode", label: "Go B" }),
+  ]);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const reopen = async (label: string) => {
+    await act(async () => container.querySelector<HTMLButtonElement>(`button[aria-label="${label} actions"]`)!.click());
+    await act(async () =>
+      [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+        .find((item) => item.textContent?.startsWith("Sign in again"))!
+        .click(),
+    );
+  };
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <AccountsPanel provider="opencode" />
+        </QueryClientProvider>,
+      ),
+    );
+    await vi.waitFor(() => expect(container.querySelectorAll(".account-row")).toHaveLength(2));
+    await reopen("Go A");
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="OpenCode Go API key"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "synthetic-go-key");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(input.value).toBe("synthetic-go-key");
+    await reopen("Go B");
+    const nextInput = container.querySelector<HTMLInputElement>('input[aria-label="OpenCode Go API key"]')!;
+    await vi.waitFor(() => expect(nextInput.value).toBe(""));
+    expect(container.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+    expect(setupApi.opencodeKeySave).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    client.clear();
+  }
+});
+
+it("shows Go local retry backoff in Settings account row", async () => {
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([
+    account(10, { provider: "opencode", label: "Go paused", status: "limited", limitedUntil: Date.now() + 3_600_000 }),
+  ]);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <AccountsPanel provider="opencode" />
+        </QueryClientProvider>,
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(container.querySelector(".account-row")?.textContent).toContain("Paused · retry in 1 h"),
+    );
+    expect(container.querySelector(".account-row")?.textContent).not.toContain("resets in");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    client.clear();
+  }
 });
 
 const menuItem = async (container: HTMLElement, accountLabel: string, item: string) => {

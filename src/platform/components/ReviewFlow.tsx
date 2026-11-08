@@ -159,6 +159,7 @@ export function ReviewFlow({
   const selected = nodes.find((node) => node.id === selectedId) ?? null;
   const phase = selected?.data.phase;
   const failed = selected && ["failed", "cancelled", "superseded"].includes(selected.data.state);
+  const showFailure = selected && ["failed", "superseded"].includes(selected.data.state);
   const errorMessage = selected?.data.chunk?.error || run?.errorMessage;
   const canForceFullReview = Boolean(onFullReview && errorMessage?.includes("Choose Re-run full"));
   const log = selected?.data.chunk
@@ -173,6 +174,19 @@ export function ReviewFlow({
     ? phase.events.filter((event) => event && typeof event.at === "number" && typeof event.message === "string")
     : [];
   const executions = selectedId ? phaseStages(selectedId, stages) : [];
+  const chunkNeverStarted = Boolean(
+    selected?.data.chunk &&
+      selected.data.chunk.startedAt === undefined &&
+      selected.data.chunk.attempts === 0 &&
+      ["pending", "queued", "cancelled"].includes(selected.data.state),
+  );
+  const chunkStarted = Boolean(
+    selected?.data.chunk && (selected.data.chunk.startedAt !== undefined || selected.data.chunk.attempts > 0),
+  );
+  const hasExecution = selected?.data.chunk
+    ? !chunkNeverStarted && (selected.data.chunk.attempts > 0 || selected.data.chunk.startedAt !== undefined)
+    : executions.length > 0 || (selected?.data.metrics.tokens ?? 0) > 0;
+  const executionRows = chunkNeverStarted ? [] : executions;
   const stageNote = selected?.data.chunk?.cached
     ? "Validated cache hit. No new model inference was charged for this chunk."
     : selected?.data.metrics.tokens === 0
@@ -258,13 +272,16 @@ export function ReviewFlow({
                   </span>
                   <span className="review-stage-times text-caption text-fg-muted tabular-nums" title={stageNote}>
                     {[
-                      formatFlowDuration(selected.data.metrics.durationMs),
+                      chunkNeverStarted ? null : formatFlowDuration(selected.data.metrics.durationMs),
                       // A stage that never called a model has no tokens to report; "0 tokens" there is noise.
-                      executions.length > 0 || (selected.data.metrics.tokens ?? 0) > 0
+                      hasExecution && (executions.length > 0 || (selected.data.metrics.tokens ?? 0) > 0)
                         ? `${formatFlowTokens(selected.data.metrics.tokens)}${selected.data.metrics.tokens !== null && selected.data.metrics.partial ? " (partial)" : ""}`
                         : null,
                       startedAt !== null ? `started ${new Date(startedAt).toLocaleTimeString()}` : null,
-                      selected.data.chunk ? `queued ${formatFlowDuration(selected.data.chunk.queuedDurationMs)}` : null,
+                      selected.data.chunk?.queuedDurationMs !== null &&
+                      selected.data.chunk?.queuedDurationMs !== undefined
+                        ? `queued ${formatFlowDuration(selected.data.chunk.queuedDurationMs)}`
+                        : null,
                       selected.data.chunk && selected.data.chunk.attempts > 1
                         ? `${selected.data.chunk.attempts} attempts`
                         : null,
@@ -293,7 +310,7 @@ export function ReviewFlow({
                 )}
                 {selected.data.chunk?.cached && <p className="review-stage-note">{stageNote}</p>}
                 {usageError && <DSError>{usageError}</DSError>}
-                {failed && errorMessage && (
+                {showFailure && errorMessage && (
                   <>
                     <div
                       className="review-stage-error w-full rounded-lg border border-rose-200 bg-rose-50 p-3 text-caption text-rose-800 [overflow-wrap:anywhere]"
@@ -327,13 +344,13 @@ export function ReviewFlow({
                     )}
                   </>
                 )}
-                {executions.length > 0 && (
+                {executionRows.length > 0 && (
                   <details className={`review-stage-executions w-full ${contextGroupClass}`} open>
                     <summary>
-                      Model runs<span>{executions.length}</span>
+                      Model runs<span>{executionRows.length}</span>
                     </summary>
                     <div className="mt-2 grid">
-                      {executions.map((execution) => (
+                      {executionRows.map((execution) => (
                         <div
                           key={execution.id}
                           className="review-stage-execution grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 border-b border-line py-2.5 text-caption [&_h4]:text-small [&_h4]:font-semibold [&_h4]:text-fg [&_p]:mt-1 [&_p]:text-fg-muted [&>span]:font-medium [&>span]:text-fg"
@@ -348,10 +365,10 @@ export function ReviewFlow({
                               {execution.fileCount} files · {execution.model ?? "Model unavailable"}
                             </p>
                             <p>
-                              {execution.status} ·{" "}
-                              {formatFlowDuration(
-                                execution.finishedAt !== null ? execution.finishedAt - execution.createdAt : null,
-                              )}
+                              {execution.status}
+                              {!selected.data.chunk && execution.finishedAt !== null
+                                ? ` · ${formatFlowDuration(execution.finishedAt - execution.createdAt)}`
+                                : ""}
                             </p>
                           </div>
                           <span>{formatFlowTokens(stageTokens(execution))}</span>
@@ -368,7 +385,15 @@ export function ReviewFlow({
                   log={log ?? ""}
                   empty={
                     selected.data.chunk
-                      ? "No retained output for this chunk. The live feed only includes the chunk currently reported by the worker."
+                      ? chunkNeverStarted
+                        ? selected.data.state === "cancelled"
+                          ? "No model output: this chunk was cancelled before it started."
+                          : "This chunk has not started; no model output is available yet."
+                        : selected.data.chunk.cached
+                          ? "No new model output: this chunk reused validated cached results."
+                          : chunkStarted
+                            ? "No retained output for this chunk. The live feed only includes the chunk currently reported by the worker."
+                            : "No model output was recorded for this chunk."
                       : selected.data.state === "pending"
                         ? "This stage has not started yet."
                         : "No stage output recorded for this run."

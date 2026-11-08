@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Check } from "lucide-react";
 import { useState } from "react";
-import { ClaudeSignIn, ClaudeTokenSignIn, CodexSignIn } from "../../components/AccessConnect";
+import { ClaudeSignIn, ClaudeTokenSignIn, CodexSignIn, OpenCodeKeySignIn } from "../../components/AccessConnect";
 import { cx } from "../../components/DesignSystem";
-import type { AiAccount, UsageWindow } from "../../types";
+import type { AiAccount, ReviewEngine, UsageWindow } from "../../types";
 import {
   accountHealth,
   accountStatusText,
@@ -15,6 +15,11 @@ import {
 } from "./AccountsPanel";
 
 type Provider = AiAccount["provider"];
+
+export function engineCataloguePollInterval(engines: ReviewEngine[] | undefined) {
+  const status = engines?.find((engine) => engine.provider === "opencode")?.catalogue?.status;
+  return status === "empty" || status === "loading" ? 1000 : false;
+}
 
 /** When the account has plan left again: the latest reset among its used-up windows, if any is ahead. */
 function usedUpUntil(windows: UsageWindow[], now = Date.now()) {
@@ -30,7 +35,10 @@ function usedUpUntil(windows: UsageWindow[], now = Date.now()) {
 function accountNote(account: AiAccount, windows: UsageWindow[], left: number | null, now = Date.now()) {
   const health = accountHealth(account, now);
   if (health === "signed-out") return "Signed out";
-  if (health === "resting") return `Limit reached · resets in ${relative((account.limitedUntil ?? now) - now)}`;
+  if (health === "resting")
+    return account.provider === "opencode"
+      ? `Paused · retry in ${relative((account.limitedUntil ?? now) - now)}`
+      : `Limit reached · resets in ${relative((account.limitedUntil ?? now) - now)}`;
   const until = usedUpUntil(windows, now);
   const amount = until === null ? (left === null ? null : `${left}% left`) : `Resets in ${relative(until - now)}`;
   if (health === "paused") return amount === null ? "Paused" : `Paused · ${amount}`;
@@ -45,7 +53,7 @@ export function AccountChoices({
   onChoose,
 }: {
   accounts: AiAccount[];
-  nextId: number;
+  nextId?: number;
   busy: boolean;
   onChoose: (account: AiAccount) => void;
 }) {
@@ -103,7 +111,7 @@ export function AccountChoices({
   );
 }
 
-/** Signs in a new Claude or ChatGPT account without leaving the picker. */
+/** Signs in a new provider account without leaving the picker. */
 export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) => void; onCancel: () => void }) {
   const [choice, setChoice] = useState<{ provider: Provider; alternative: boolean } | null>(null);
   const done = () => choice && onDone(choice.provider);
@@ -125,7 +133,7 @@ export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) 
       </div>
       {!choice ? (
         <div className="flex flex-col gap-1.5">
-          {(["claude", "codex"] as const).map((provider) => (
+          {(["claude", "codex", "opencode"] as const).map((provider) => (
             <button
               key={provider}
               type="button"
@@ -135,14 +143,16 @@ export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) 
               <ProviderGlyph provider={provider} />
               {providerName[provider]}
               <span className="ml-auto text-caption font-normal text-fg-subtle">
-                {provider === "claude" ? "Pro, Max or Team" : "Plus or Pro"}
+                {provider === "claude" ? "Pro, Max or Team" : provider === "codex" ? "Plus or Pro" : "API key"}
               </span>
             </button>
           ))}
         </div>
       ) : (
         <>
-          {choice.provider === "codex" ? (
+          {choice.provider === "opencode" ? (
+            <OpenCodeKeySignIn onDone={done} onCancel={back} />
+          ) : choice.provider === "codex" ? (
             <CodexSignIn mode={choice.alternative ? "device" : "browser"} onDone={done} onCancel={back} />
           ) : choice.alternative ? (
             <ClaudeTokenSignIn onDone={done} onCancel={back} />

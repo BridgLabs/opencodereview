@@ -33,7 +33,7 @@ export interface Settings {
 
 export interface AiAccount {
   id: number;
-  provider: "claude" | "codex";
+  provider: "claude" | "codex" | "opencode";
   label: string;
   priority: number;
   enabled: boolean;
@@ -61,6 +61,12 @@ export interface ReviewEngine {
   effort: string;
   label: string;
   models: EngineModel[];
+  catalogue?: {
+    status: "empty" | "loading" | "ready" | "error";
+    id: string | null;
+    error: string | null;
+  };
+  selectionValid?: boolean;
 }
 
 export interface UsageWindow {

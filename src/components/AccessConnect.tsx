@@ -321,6 +321,66 @@ export function ClaudeTokenSignIn({
   );
 }
 
+/** Connects an OpenCode Go API key without placing it in query or browser storage. */
+export function OpenCodeKeySignIn({
+  accountId,
+  onDone,
+  onCancel,
+}: {
+  accountId?: number;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [apiKey, setApiKey] = useState("");
+  const save = useMutation({
+    mutationFn: () => setupApi.opencodeKeySave(apiKey.trim(), accountId),
+    onSuccess: () => {
+      setApiKey("");
+      onDone();
+    },
+  });
+  return (
+    <SignInFrame
+      hint="Create an API key in OpenCode Go and paste it here. Extra Usage can incur additional charges; OpenCodeReview cannot enforce subscription-only use."
+      problems={
+        save.error && (
+          <Problem>
+            {/failed to fetch|networkerror|load failed/i.test(save.error.message)
+              ? offlineMessage
+              : "Could not save this API key. Check it and try again."}
+          </Problem>
+        )
+      }
+    >
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!save.isPending && apiKey.trim()) save.mutate();
+        }}
+      >
+        <input
+          aria-label="OpenCode Go API key"
+          type="password"
+          className={codeInput}
+          value={apiKey}
+          autoComplete="off"
+          spellCheck={false}
+          disabled={save.isPending}
+          placeholder="Paste API key"
+          onChange={(event) => setApiKey(event.target.value)}
+        />
+        <button type="button" className={quietButton} disabled={save.isPending} onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className={brandButton} disabled={!apiKey.trim() || save.isPending}>
+          {save.isPending ? "Saving…" : "Connect"}
+        </button>
+      </form>
+    </SignInFrame>
+  );
+}
+
 /** Signs in to Codex right away, in the browser or with a one-time code, saving it to `accountId` or to a new account. */
 export function CodexSignIn({
   accountId,

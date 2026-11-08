@@ -7,7 +7,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import type { ReviewContextPlan, ReviewRun, ReviewRunStage } from "../../types";
+import type { ReviewChunkProgress, ReviewContextPlan, ReviewPhase, ReviewRun, ReviewRunStage } from "../../types";
 import type { ReviewFlowNode } from "../lib/reviewFlow";
 import { ReviewFlow } from "./ReviewFlow";
 import { ContextPhaseDetails } from "./ReviewFlowNodes";
@@ -247,6 +247,84 @@ describe("review scope selection", () => {
 });
 
 describe("review inspector navigation", () => {
+  it("shows execution time separately from queue time and explains cancelled chunks", () => {
+    const queuedAt = 1_794_150_859_484;
+    const finishedAt = 1_794_152_260_000;
+    const phase: ReviewPhase = {
+      id: "chunks",
+      label: "Chunks",
+      status: "failed",
+      chunks: Array.from({ length: 7 }, (_, index) => {
+        const id = index + 1;
+        const cancelled = [1, 4, 5, 6, 7].includes(id);
+        const startedAt = id === 2 ? 1_794_150_863_495 : id === 3 ? 1_794_151_358_473 : null;
+        const chunkFinishedAt = id === 2 ? 1_794_151_356_844 : finishedAt;
+        return {
+          id,
+          status: (cancelled ? "cancelled" : id === 2 ? "done" : "failed") as ReviewChunkProgress["status"],
+          queuedAt,
+          startedAt,
+          executionFinishedAt: startedAt === null ? null : chunkFinishedAt,
+          finishedAt: chunkFinishedAt,
+          fileCount: 3,
+          cached: false,
+          attempts: cancelled ? 0 : 1,
+          log: "",
+          error: cancelled ? "Cancelled after another chunk failed" : id === 3 ? "Stage inference timed out" : null,
+        };
+      }),
+    };
+    const run = {
+      id: 41,
+      prId: 1,
+      status: "failed",
+      finishedAt,
+      errorMessage: "Stage inference timed out",
+      inputTokens: 301_289,
+      outputTokens: 156_864,
+      cacheReadTokens: 11_895_680,
+    } as ReviewRun;
+    const stages = [2, 3, 1, 4, 5, 6, 7].map((chunkId, index) => ({
+      id: index + 1,
+      runId: 41,
+      prId: 1,
+      stage: "chunk",
+      chunkId,
+      model: "claude-opus-5-5",
+      status: chunkId === 2 ? "done" : chunkId === 3 ? "failed" : "cancelled",
+      inputTokens: chunkId === 3 ? 181_078 : chunkId === 2 ? 120_211 : 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      promptBytes: 0,
+      diffBytes: 0,
+      contextBytes: 0,
+      fileCount: 3,
+      relatedFileCount: 0,
+      createdAt: 1_794_150_859_870,
+      finishedAt,
+    })) as ReviewRunStage[];
+
+    const failedHtml = renderView("chunk:3", { run, runStatus: "failed", phases: [phase], stages });
+    const failed = new DOMParser().parseFromString(failedHtml, "text/html");
+    const failedTimes = failed.querySelector(".review-stage-times")?.textContent ?? "";
+    expect(failedTimes).toContain("15m 1s");
+    expect(failedTimes).toContain("queued 8m 18s");
+    expect(failedTimes).not.toContain("23m 20s");
+    expect(failed.querySelector(".review-stage-error")?.textContent).toContain("Stage inference timed out");
+    expect(failed.querySelector(".review-stage-executions")?.textContent).not.toContain("23m 20s");
+    expect(failed.body.textContent).toContain("No retained output for this chunk.");
+
+    const cancelledHtml = renderView("chunk:1", { run, runStatus: "failed", phases: [phase], stages });
+    const cancelled = new DOMParser().parseFromString(cancelledHtml, "text/html");
+    expect(cancelled.querySelector(".review-stage-times")?.textContent).toBe("queued 23m 20s");
+    expect(cancelled.body.textContent).toContain("Cancelled after another chunk failed");
+    expect(cancelled.body.textContent).toContain("No model output: this chunk was cancelled before it started.");
+    expect(cancelled.body.textContent).not.toContain("No retained output for this chunk.");
+    expect(cancelled.querySelector(".review-stage-executions")).toBeNull();
+    expect(cancelled.querySelector(".review-stage-error")).toBeNull();
+  });
+
   it.each(["context", "merge"])("keeps the latest completed %s stage green while the next stage runs", (id) => {
     const style = document.createElement("style");
     style.textContent = [

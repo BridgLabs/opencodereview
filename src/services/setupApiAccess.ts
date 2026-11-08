@@ -44,8 +44,14 @@ export const setupApiAccess = {
     http<AiAccount[]>("/accounts/order", { method: "POST", body: JSON.stringify({ ids }) }),
   deleteAccount: (id: number) => http<AiAccount[]>(`/accounts/${id}`, { method: "DELETE" }),
   reviewEngines: () => http<ReviewEngine[]>("/review-engines"),
-  saveReviewEngine: (engine: { provider: string; model: string; effort: string }) =>
-    http<ReviewEngine[]>("/review-engines", { method: "POST", body: JSON.stringify(engine) }),
+  saveReviewEngine: (engine: {
+    provider: AiAccount["provider"];
+    model: string;
+    effort: string;
+    catalogueId?: string;
+  }) => http<ReviewEngine[]>("/review-engines", { method: "POST", body: JSON.stringify(engine) }),
+  refreshOpenCodeCatalogue: () =>
+    http<{ ok: true }>("/review-engines/opencode/refresh", { method: "POST", body: JSON.stringify({}) }),
   claudeAuthStatus: () => http<{ loggedIn: boolean; message: string; version?: string | null }>("/auth/claude/status"),
   claudeAuthStart: async (accountId?: number) => {
     await http<{ running: boolean }>("/auth/claude/cancel", { method: "POST", body: JSON.stringify({}) }).catch(
@@ -94,6 +100,11 @@ export const setupApiAccess = {
     http<{ ok: boolean }>("/auth/claude/token", {
       method: "POST",
       body: JSON.stringify(accountId ? { token, accountId } : { token }),
+    }),
+  opencodeKeySave: (apiKey: string, accountId?: number) =>
+    http<{ ok: true; accountId: number; signedIn: true }>("/auth/opencode/key", {
+      method: "POST",
+      body: JSON.stringify(accountId === undefined ? { apiKey } : { apiKey, accountId }),
     }),
   codexAuthStart: async (accountId?: number, mode: "browser" | "device" = "browser") => {
     await http<{ running: boolean }>("/auth/codex/cancel", { method: "POST", body: JSON.stringify({}) }).catch(

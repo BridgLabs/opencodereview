@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, LogIn, Pencil, Play, Plus, Smartphone, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { ClaudeSignIn, ClaudeTokenSignIn, CodexSignIn } from "../../components/AccessConnect";
+import { ClaudeSignIn, ClaudeTokenSignIn, CodexSignIn, OpenCodeKeySignIn } from "../../components/AccessConnect";
 import { BrandLoading } from "../../components/BrandLoading";
 import { cx, DSButton, DSError, DSInput, DSMenu, DSSwitchIndicator } from "../../components/DesignSystem";
 import { setupApi } from "../../services/setupApi";
@@ -31,10 +31,12 @@ type Provider = AiAccount["provider"];
 export const providerName: Record<Provider, string> = {
   claude: "Claude",
   codex: "ChatGPT",
+  opencode: "OpenCode Go",
 };
 
-/** Claude's asterisk or Codex's knot. */
+/** Provider mark. */
 export function ProviderGlyph({ provider }: { provider: Provider }) {
+  if (provider === "opencode") return <span className="text-sm font-bold text-fg">Go</span>;
   return provider === "codex" ? (
     <svg
       viewBox="0 0 24 24"
@@ -142,7 +144,9 @@ export function accountStatusText(account: AiAccount, now = Date.now()) {
     case "paused":
       return "Paused · reviews skip this account";
     case "resting":
-      return `Usage limit reached · resets in ${relative((account.limitedUntil ?? now) - now)}`;
+      return account.provider === "opencode"
+        ? `Paused · retry in ${relative((account.limitedUntil ?? now) - now)}`
+        : `Usage limit reached · resets in ${relative((account.limitedUntil ?? now) - now)}`;
     default:
       return account.lastUsedAt ? `Ready · last used ${relative(now - account.lastUsedAt)} ago` : "Ready";
   }
@@ -158,6 +162,7 @@ function AccountRow({
   onSignIn,
   onRemove,
   onPick,
+  canRunReviews,
 }: {
   account: AiAccount;
   usage?: AccountUsage;
@@ -168,10 +173,12 @@ function AccountRow({
   onSignIn: () => void;
   onRemove: () => void;
   onPick: () => void;
+  canRunReviews: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(account.label);
   const health = accountHealth(account);
+  const selectionRequired = account.provider === "opencode" && !canRunReviews;
   return (
     <div
       className="account-row flex items-center gap-3 border-b border-line px-4 py-3 last:border-b-0"
@@ -219,7 +226,7 @@ function AccountRow({
               {account.label !== providerName[account.provider] && (
                 <span className="flex-none text-caption text-fg-subtle">{providerName[account.provider]}</span>
               )}
-              {next && (
+              {next && canRunReviews && (
                 <span
                   className="flex-none self-center rounded-full bg-brand-soft px-2 py-0.5 text-caption font-semibold text-brand-hover"
                   title="The next review starts on this account"
@@ -228,14 +235,22 @@ function AccountRow({
                 </span>
               )}
             </div>
-            {health !== "ready" && (
+            {(health !== "ready" || selectionRequired) && (
               <div
                 className={cx(
                   "truncate text-caption",
-                  health === "signed-out" ? "text-danger" : health === "resting" ? "text-warning" : "text-fg-subtle",
+                  selectionRequired
+                    ? "text-warning"
+                    : health === "signed-out"
+                      ? "text-danger"
+                      : health === "resting"
+                        ? "text-warning"
+                        : "text-fg-subtle",
                 )}
               >
-                {accountStatusText(account)}
+                {selectionRequired
+                  ? "Model required · reviews cannot use this account yet"
+                  : accountStatusText(account)}
               </div>
             )}
             <UsageMeters usage={usage} />
@@ -265,14 +280,16 @@ function AccountRow({
             vertical
             size="iconSm"
             items={[
-              ...(next
+              ...(next && canRunReviews
                 ? []
                 : [
                     {
                       label: "Use for new reviews",
-                      hint: "New reviews start on this account",
+                      hint: selectionRequired
+                        ? "Choose a model before using this account"
+                        : "New reviews start on this account",
                       icon: <Play />,
-                      disabled: busy || health === "signed-out" || health === "resting",
+                      disabled: busy || health === "signed-out" || health === "resting" || selectionRequired,
                       onSelect: onPick,
                     },
                   ]),
@@ -327,7 +344,7 @@ function addOptions(provider: Provider, start: (code?: boolean) => void) {
  * Settings: the AI accounts reviews can use, in the order they are tried. With `provider`, only
  * that provider's accounts, still ordered within the global list.
  */
-export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
+export function AccountsPanel({ provider, engineValid }: { provider?: Provider; engineValid?: boolean } = {}) {
   const queryClient = useQueryClient();
   const accountsQuery = useQuery({
     queryKey: ACCOUNTS_QUERY_KEY,
@@ -361,6 +378,7 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
   const all = accountsQuery.data ?? [];
   const accounts = provider ? all.filter((account) => account.provider === provider) : all;
   const next = nextAccountId(all);
+  const canRunReviews = provider !== "opencode" || engineValid !== false;
   const busy = update.isPending || reorder.isPending || remove.isPending;
   const pick = async (account: AiAccount) => {
     if (!account.enabled) await update.mutateAsync({ id: account.id, enabled: true });
@@ -373,8 +391,9 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
         <div>
           <h2 className="text-small font-semibold text-fg">Accounts</h2>
           <p className="mt-0.5 max-w-2xl text-caption text-fg-subtle">
-            New reviews start on the account marked Next review. When it hits its usage limit, they continue on the next
-            account of the same provider, and only then on another provider's.
+            {provider === "opencode" && !canRunReviews
+              ? "Choose a model before reviews can use these accounts."
+              : "New reviews start on the account marked Next review. When it hits its usage limit, they continue on the next account of the same provider, and only then on another provider's."}
           </p>
         </div>
         {!signIn && provider && accounts.length > 0 && (
@@ -457,6 +476,7 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
               account={account}
               usage={usageQueryResult.data?.find((usage) => usage.accountId === account.id)}
               next={account.id === next}
+              canRunReviews={canRunReviews}
               busy={busy}
               onToggle={() => update.mutate({ id: account.id, enabled: !account.enabled })}
               onRename={(label) => update.mutate({ id: account.id, label })}
@@ -495,7 +515,17 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
                 ? `Sign in again to “${accounts.find((account) => account.id === signIn.accountId)?.label ?? providerName[signIn.provider]}”`
                 : `Add a ${providerName[signIn.provider]} account`}
             </h3>
-            {signIn.provider === "codex" ? (
+            {signIn.provider === "opencode" ? (
+              <OpenCodeKeySignIn
+                key={signIn.accountId === undefined ? "new" : `account-${signIn.accountId}`}
+                accountId={signIn.accountId}
+                onDone={() => {
+                  setSignIn(null);
+                  refresh();
+                }}
+                onCancel={() => setSignIn(null)}
+              />
+            ) : signIn.provider === "codex" ? (
               <CodexSignIn
                 accountId={signIn.accountId}
                 mode={signIn.code ? "device" : "browser"}

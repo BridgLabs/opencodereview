@@ -7,6 +7,7 @@ import {
   CodexSignIn,
   CopyCode,
   friendlyError,
+  OpenCodeKeySignIn,
   useGithubFlow,
 } from "../components/AccessConnect";
 import { BrandLoadingIcon } from "../components/BrandLoading";
@@ -134,11 +135,12 @@ export function GithubStep({
   );
 }
 
-type SignIn = { provider: AiProvider["provider"]; method: "oauth" | "code" };
+type SignIn = { provider: AiProvider["provider"]; method: "oauth" | "code" | "key" };
 
 const planDetail: Record<AiProvider["provider"], string> = {
   claude: "Pro, Max or Team plan",
   codex: "ChatGPT Plus or Pro plan",
+  opencode: "OpenCode Go API key",
 };
 
 /** The second way into each provider, offered from the row's menu. */
@@ -157,6 +159,12 @@ const alternative: Record<
     hint: "Enter a one-time code on any device",
     icon: <Smartphone />,
     method: "code",
+  },
+  opencode: {
+    label: "Enter an API key",
+    hint: "Connect an OpenCode Go API key",
+    icon: <KeyRound />,
+    method: "key",
   },
 };
 
@@ -190,7 +198,7 @@ export function PlanStep({ onBack, onContinue }: { onBack: () => void; onContinu
   const hint = signIn ? "Finish signing in above." : ready ? "You can add more accounts later in Settings." : undefined;
   return (
     <>
-      <StepHeader title="Connect your plan" subtitle="Reviews run on the AI plan you already pay for." />
+      <StepHeader title="Connect your plan" subtitle="Choose an account or API key for reviews." />
       {providers.isLoading ? (
         <p className="flex items-center justify-center gap-2 text-small text-fg-muted">
           <BrandLoadingIcon />
@@ -212,7 +220,7 @@ export function PlanStep({ onBack, onContinue }: { onBack: () => void; onContinu
                         {
                           label: "Add another account",
                           icon: <Plus />,
-                          hint: "Reviews switch to it when this one hits a limit",
+                          hint: "Reviews can switch to it if this account cannot continue",
                           onSelect: () => setSignIn({ provider: provider.provider, method: "oauth" }),
                         },
                       ]
@@ -260,7 +268,9 @@ export function PlanStep({ onBack, onContinue }: { onBack: () => void; onContinu
                 menu={open ? undefined : menu}
               >
                 {open &&
-                  (provider.provider === "codex" ? (
+                  (provider.provider === "opencode" ? (
+                    <OpenCodeKeySignIn onDone={finish} onCancel={() => setSignIn(null)} />
+                  ) : provider.provider === "codex" ? (
                     <CodexSignIn
                       mode={open.method === "code" ? "device" : "browser"}
                       onDone={finish}
