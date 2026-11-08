@@ -1,0 +1,6 @@
+{
+  "name": "ocr-opencode-guard",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./server.js" }
+}

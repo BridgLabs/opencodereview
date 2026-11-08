@@ -5,9 +5,13 @@ use std::path::{Component, Path};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod egress;
+#[cfg(unix)]
+mod opencode_health;
+mod opencode_tool;
 pub(crate) mod runner;
 
 pub use egress::serve as serve_egress;
+pub use opencode_tool::serve as serve_opencode_tool;
 pub use runner::guard_tool;
 pub use runner::serve as serve_runner;
 
@@ -20,11 +24,27 @@ pub fn engine_version() -> String {
 
 fn executor_fingerprint() -> String {
     let mut hash = Sha256::new();
+    for checksum in crate::providers::opencode::CLI_SHA256 {
+        hash.update(checksum);
+    }
     for source in [
         include_bytes!("../review/mod.rs").as_slice(),
         include_bytes!("mod.rs").as_slice(),
         include_bytes!("runner.rs").as_slice(),
+        include_bytes!("egress.rs").as_slice(),
         include_bytes!("read_commands.rs").as_slice(),
+        include_bytes!("opencode_tool.rs").as_slice(),
+        include_bytes!("runner_opencode.rs").as_slice(),
+        include_bytes!("opencode_health.rs").as_slice(),
+        include_bytes!("../providers/opencode.rs").as_slice(),
+        include_bytes!("../providers/go_catalogue.rs").as_slice(),
+        include_bytes!("../providers/engines.rs").as_slice(),
+        include_bytes!("../review/usage.rs").as_slice(),
+        include_bytes!("../../../docker/opencode-guard/health.js").as_slice(),
+        include_bytes!("../../../docker/opencode-guard/server.js").as_slice(),
+        include_bytes!("../../../docker/opencode-guard/catalogue.js").as_slice(),
+        include_bytes!("../../../docker/opencode-guard/package.json").as_slice(),
+        include_bytes!("../../../docker/opencode-guard/opencode.json").as_slice(),
         include_bytes!("../review/evidence.rs").as_slice(),
         include_bytes!("../review/warnings.rs").as_slice(),
         include_bytes!("../review_archive/mod.rs").as_slice(),

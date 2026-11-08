@@ -4,6 +4,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libs
 COPY Cargo.toml Cargo.lock ./
 COPY backend ./backend
 COPY assets ./assets
+COPY docker/opencode-guard ./docker/opencode-guard
 RUN --mount=type=cache,id=ocr-cargo-registry,target=/usr/local/cargo/registry,sharing=locked --mount=type=cache,id=ocr-cargo-target,target=/app/target,sharing=locked CARGO_BUILD_JOBS=2 cargo test --locked --lib --no-run --message-format=json-render-diagnostics > /tmp/test-build.json && binary=$(sed -n 's/.*"profile":{[^}]*"test":true.*"executable":"\([^"]*\)".*/\1/p' /tmp/test-build.json) && test -n "$binary" && test -x "$binary" && cp "$binary" /usr/local/bin/ocr-review-tests
 
 FROM debian:bookworm-slim

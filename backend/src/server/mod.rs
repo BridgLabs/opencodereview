@@ -27,6 +27,9 @@ mod accounts;
 mod claude_auth;
 mod codex_auth;
 mod indexing;
+mod opencode_auth;
+#[cfg(test)]
+mod opencode_auth_tests;
 mod polling;
 mod publication;
 mod queue_acknowledgements;
@@ -112,6 +115,7 @@ impl ServerConfig {
 }
 
 pub(crate) struct ServerState {
+    pub(crate) go_catalogue: Arc<crate::providers::go_catalogue::Discovery>,
     pub(crate) config: ServerConfig,
     index_jobs: Arc<Mutex<HashMap<i64, Arc<AtomicBool>>>>,
     index_progress: Arc<Mutex<HashMap<i64, IndexProgressEvent>>>,
@@ -134,6 +138,7 @@ pub(crate) type SharedState = Arc<ServerState>;
 impl ServerState {
     pub(crate) fn new(config: ServerConfig) -> Self {
         Self {
+            go_catalogue: crate::providers::go_catalogue::Discovery::new(),
             config,
             index_jobs: Arc::new(Mutex::new(HashMap::new())),
             index_progress: Arc::new(Mutex::new(HashMap::new())),

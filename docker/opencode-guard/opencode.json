@@ -1,0 +1,48 @@
+{
+  "update": "disable",
+  "share": "disabled",
+  "snapshots": false,
+  "warming": false,
+  "default_agent": "ocr-review",
+  "plugins": ["-*", "opencode.config.agent", "opencode.config.provider", "opencode.models.dev", "/opt/ocr/opencode-guard"],
+  "permissions": [
+    { "action": "*", "resource": "*", "effect": "deny" },
+    { "action": "ocr_read", "resource": "*", "effect": "allow" },
+    { "action": "ocr_grep", "resource": "*", "effect": "allow" },
+    { "action": "ocr_glob", "resource": "*", "effect": "allow" },
+    { "action": "ocr_bash", "resource": "*", "effect": "allow" },
+    { "action": "ocr_write", "resource": "*", "effect": "allow" }
+  ],
+  "agents": {
+    "ocr-review": {
+      "mode": "primary",
+      "permissions": [
+        { "action": "*", "resource": "*", "effect": "deny" },
+        { "action": "ocr_read", "resource": "*", "effect": "allow" },
+        { "action": "ocr_grep", "resource": "*", "effect": "allow" },
+        { "action": "ocr_glob", "resource": "*", "effect": "allow" },
+        { "action": "ocr_bash", "resource": "*", "effect": "allow" },
+        { "action": "ocr_write", "resource": "*", "effect": "allow" }
+      ]
+    }
+  },
+  "policies": [
+    { "action": "provider.use", "resource": "*", "effect": "deny" },
+    { "action": "provider.use", "resource": "opencode-go", "effect": "allow" },
+    { "action": "integration.connect", "resource": "*", "effect": "deny" },
+    { "action": "integration.use", "resource": "*", "effect": "deny" },
+    { "action": "integration.use", "resource": "opencode-go", "effect": "allow" },
+    { "action": "plugin.use", "resource": "*", "effect": "deny" },
+    { "action": "plugin.use", "resource": "/opt/ocr/opencode-guard", "effect": "allow" },
+    { "action": "mcp.use", "resource": "*", "effect": "deny" },
+    { "action": "skill.use", "resource": "*", "effect": "deny" },
+    { "action": "websearch.use", "resource": "*", "effect": "deny" },
+    { "action": "tool.use", "resource": "*", "effect": "deny" },
+    { "action": "tool.use", "resource": "ocr_read:*", "effect": "allow" },
+    { "action": "tool.use", "resource": "ocr_grep:*", "effect": "allow" },
+    { "action": "tool.use", "resource": "ocr_glob:*", "effect": "allow" },
+    { "action": "tool.use", "resource": "ocr_bash:*", "effect": "allow" },
+    { "action": "tool.use", "resource": "ocr_write:*", "effect": "allow" }
+  ],
+  "providers": { "opencode-go": {} }
+}

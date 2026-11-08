@@ -12,8 +12,11 @@ fn main() {
             Ok(())
         }
         Some("runner") => opencodereview_server::sandbox::serve_runner(),
+        Some("opencode-tool") => std::process::exit(opencodereview_server::sandbox::serve_opencode_tool(
+            std::io::stdin().lock(),
+        )),
         Some("egress") => opencodereview_server::sandbox::serve_egress(),
-        _ => Err("Usage: ocr-sandbox runner|egress|engine-version|tool-guard".to_string()),
+        _ => Err("Usage: ocr-sandbox runner|egress|engine-version|tool-guard|opencode-tool".to_string()),
     };
     if let Err(error) = result {
         eprintln!("Sandbox stopped: {error}");

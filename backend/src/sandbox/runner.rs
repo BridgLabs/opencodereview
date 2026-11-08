@@ -12,12 +12,16 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+#[path = "runner_opencode.rs"]
+mod opencode;
 #[path = "read_commands.rs"]
-mod read_commands;
+pub(super) mod read_commands;
 
 pub(crate) const SNAPSHOT_READ_INSTRUCTIONS: &str = read_commands::INSTRUCTIONS;
 
 const MAX_FRAME: usize = 48 * 1024 * 1024;
+const STAGE_EXECUTION_TIMEOUT: Duration = Duration::from_secs(1800);
 const UID: u32 = 10001;
 const SESSION: &str = "/scratch/session";
 const CLI: &str = "/opt/claude/bin/claude";
@@ -25,7 +29,7 @@ const CODEX_CLI: &str = "/opt/codex/bin/codex";
 const TRANSCRIPT: &str = "/scratch/transcript.jsonl";
 /// Codex keeps its home, sign-in and final message here, owned by the model UID.
 const CODEX_HOME: &str = "/scratch/session/codex";
-const PROVIDERS: &[&str] = &["claude", "codex"];
+const PROVIDERS: &[&str] = &["claude", "codex", "opencode"];
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "operation", deny_unknown_fields)]
@@ -56,6 +60,8 @@ pub(crate) enum Request {
         /// The reasoning effort for `model`; empty means the model's default.
         #[serde(default)]
         effort: String,
+        #[serde(default)]
+        go_snapshot: Option<Box<crate::providers::go_catalogue::Snapshot>>,
     },
 }
 
@@ -269,6 +275,7 @@ pub(crate) fn stage_request(
         account,
         provider: provider.into(),
         effort: String::new(),
+        go_snapshot: None,
     };
     validate(&request)?;
     Ok(request)
@@ -288,6 +295,29 @@ pub(crate) fn set_engine(request: &mut Request, model: &str, effort: &str) -> Re
     validate(request)
 }
 
+pub(crate) fn set_go_snapshot(
+    request: &mut Request,
+    snapshot: crate::providers::go_catalogue::Snapshot,
+) -> Result<(), String> {
+    if let Request::Run {
+        model,
+        effort,
+        provider,
+        go_snapshot,
+        ..
+    } = request
+    {
+        if provider != "opencode" {
+            return Err("Unexpected Go metadata for another provider".into());
+        }
+        snapshot.validate(model, effort)?;
+        *go_snapshot = Some(Box::new(snapshot));
+        Ok(())
+    } else {
+        Err("Go metadata requires a stage request".into())
+    }
+}
+
 fn validate(request: &Request) -> Result<(), String> {
     if let Request::Run {
         model,
@@ -297,9 +327,17 @@ fn validate(request: &Request) -> Result<(), String> {
         archive_id,
         account,
         provider,
+        effort,
+        go_snapshot,
         ..
     } = request
     {
+        if let Some(snapshot) = go_snapshot {
+            if provider != "opencode" {
+                return Err("Unexpected Go catalogue".into());
+            }
+            snapshot.validate(model, effort)?;
+        }
         if *account <= 0 || !PROVIDERS.contains(&provider.as_str()) {
             return Err("Invalid account identity".into());
         }
@@ -404,15 +442,31 @@ pub(crate) fn preflight_at(
 
 #[cfg(unix)]
 fn exchange(
-    mut stream: UnixStream,
+    stream: UnixStream,
     request: &Request,
     stage: &Path,
     transcript_path: &Path,
     cancel: &AtomicBool,
     on_start: &mut dyn FnMut(),
 ) -> Result<(), String> {
-    send(&mut stream, request)?;
     let started = Instant::now();
+    exchange_with_clock(stream, request, stage, transcript_path, cancel, on_start, || {
+        started.elapsed()
+    })
+}
+
+#[cfg(unix)]
+fn exchange_with_clock(
+    mut stream: UnixStream,
+    request: &Request,
+    stage: &Path,
+    transcript_path: &Path,
+    cancel: &AtomicBool,
+    on_start: &mut dyn FnMut(),
+    mut now: impl FnMut() -> Duration,
+) -> Result<(), String> {
+    send(&mut stream, request)?;
+    let mut deadline = now() + Duration::from_secs(950);
     let mut running = false;
     let mut cancelling = false;
     loop {
@@ -422,15 +476,17 @@ fn exchange(
                 .map_err(|_| "Runner cancellation channel disconnected")?;
             cancelling = true;
         }
-        if started.elapsed() > Duration::from_secs(950) {
+        if now() >= deadline {
             return Err("Runner timed out; connection closed".into());
         }
         match receive(&mut stream)? {
             Response::Ready if matches!(request, Request::Run { preflight: true, .. }) && !running => return Ok(()),
             Response::Started if !running && !matches!(request, Request::Run { preflight: true, .. }) => {
                 running = true;
+                deadline = now() + STAGE_EXECUTION_TIMEOUT + Duration::from_secs(50);
                 on_start();
             }
+            Response::Started if running => {}
             Response::Pulse if running => {}
             Response::Finished {
                 report,
@@ -656,6 +712,13 @@ fn cli_command() -> Command {
 
 #[cfg(unix)]
 pub(crate) fn read_output(path: &Path, limit: u64) -> Result<Option<String>, String> {
+    read_output_bytes(path, limit)?
+        .map(|bytes| String::from_utf8(bytes).map_err(|_| "Runner output is not UTF8".into()))
+        .transpose()
+}
+
+#[cfg(unix)]
+fn read_output_bytes(path: &Path, limit: u64) -> Result<Option<Vec<u8>>, String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(meta) => meta,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -673,9 +736,7 @@ pub(crate) fn read_output(path: &Path, limit: u64) -> Result<Option<String>, Str
     if bytes.len() as u64 > limit {
         return Err("Runner output exceeds byte budget".into());
     }
-    String::from_utf8(bytes)
-        .map(Some)
-        .map_err(|_| "Runner output is not UTF8".into())
+    Ok(Some(bytes))
 }
 
 #[derive(Deserialize)]
@@ -878,12 +939,23 @@ fn run(
         account,
         provider,
         effort,
+        go_snapshot,
     } = request
     else {
         return Err("Invalid runner operation".into());
     };
-    // Only models OpenCodeReview offers for the provider reach a CLI.
-    let (model, effort) = crate::providers::engines::resolve(&provider, &model, &effort)?;
+    let (model, effort) = if provider == "opencode" {
+        go_snapshot
+            .as_ref()
+            .ok_or("OpenCode Go frozen catalogue is required")?
+            .validate(&model, &effort)?;
+        (model, effort)
+    } else {
+        if go_snapshot.is_some() {
+            return Err("Unexpected Go catalogue".into());
+        }
+        crate::providers::engines::resolve_model(&provider, &model, &effort)?
+    };
     let archive = archive.ok_or("Frozen archive must be installed before a stage")?;
     if archive_id.as_deref() != Some(archive.descriptor().id.as_str()) {
         return Err("Stage archive identity mismatch".into());
@@ -947,7 +1019,22 @@ fn run(
         bounded(&mut read, Path::new("/scratch"), &AtomicBool::new(false), 10)
             .map_err(|_| "Frozen source is not readable and immutable for model UID")?;
     }
+    let mut opencode = if provider == "opencode" {
+        Some(opencode::Session::new(
+            account,
+            go_snapshot.as_ref().ok_or("OpenCode Go catalogue unavailable")?,
+        )?)
+    } else {
+        None
+    };
     let (mut command, signed_in) = match provider.as_str() {
+        "opencode" => (
+            opencode
+                .as_ref()
+                .ok_or("OpenCode session unavailable")?
+                .command(&model, &effort)?,
+            None,
+        ),
         "codex" => {
             let (command, auth) = codex_session(account, &model, &effort)?;
             (command, Some(auth))
@@ -973,38 +1060,50 @@ fn run(
         .spawn()
         .map_err(|_| "Isolation runtime unavailable: cannot start the unprivileged model CLI")?;
     let started = Instant::now();
-    let outcome = (|| {
-        send(stream, &Response::Started)?;
-        loop {
-            check_control(stream)?;
-            if started.elapsed() > Duration::from_secs(900) {
-                return Err("Stage inference timed out".into());
-            }
-            for (name, limit) in [(TRANSCRIPT, 32_000_000), ("/scratch/stderr", 8_000_000)] {
-                if fs::symlink_metadata(name).is_ok_and(|m| !m.is_file() || m.len() > limit) {
-                    return Err("Stage output limit exceeded".into());
-                }
-            }
-            match child.try_wait() {
-                Ok(Some(status)) if status.success() => return Ok(()),
-                Ok(Some(_)) => {
-                    let stderr = read_output(Path::new("/scratch/stderr"), 8_000_000)?.unwrap_or_default();
-                    let stdout = read_output(Path::new(TRANSCRIPT), 32_000_000)?.unwrap_or_default();
-                    return Err(match provider.as_str() {
-                        "codex" => crate::providers::codex::failure(&stdout, &stderr),
-                        _ => crate::providers::claude::failure(&stdout, &stderr),
-                    });
-                }
-                Ok(None) => {
-                    send(stream, &Response::Pulse)?;
-                    std::thread::sleep(Duration::from_millis(500));
-                }
-                Err(_) => return Err("Runner child supervision failed".into()),
-            }
-        }
-    })();
-    terminate(&mut child)?;
-    let mut transcript = read_output(Path::new(TRANSCRIPT), 32_000_000)?;
+    let outcome = send(stream, &Response::Started).and_then(|()| {
+        supervise(
+            &mut child,
+            stream,
+            opencode.as_mut(),
+            &provider,
+            [
+                (Path::new(TRANSCRIPT), 32_000_000),
+                (Path::new("/scratch/stderr"), 8_000_000),
+            ],
+            (
+                STAGE_EXECUTION_TIMEOUT,
+                || started.elapsed(),
+                || std::thread::sleep(Duration::from_millis(500)),
+            ),
+        )
+    });
+    if opencode.is_some() {
+        opencode::terminate(&mut child)?;
+    } else {
+        terminate(&mut child)?;
+    }
+    let mut transcript = if opencode.is_some() && outcome.is_err() {
+        opencode::read_failed_transcript()?
+    } else {
+        read_output(Path::new(TRANSCRIPT), 32_000_000)?
+    };
+    if let Some(mut session) = opencode {
+        let result = session.finish(outcome, &mut transcript, &model);
+        let (report, decisions, error) = match result {
+            Ok((report, decisions)) => (Some(report), decisions, None),
+            Err(error) => (None, None, Some(error)),
+        };
+        return send(
+            stream,
+            &Response::Finished {
+                report,
+                decisions,
+                transcript,
+                error,
+                credential: None,
+            },
+        );
+    }
     let Some(auth) = signed_in else {
         let result = outcome.and_then(|()| final_response(transcript.as_deref()));
         let (report, decisions, error) = match result {
@@ -1073,6 +1172,60 @@ fn run(
             credential: refreshed,
         },
     )
+}
+
+#[cfg(unix)]
+fn supervise(
+    child: &mut std::process::Child,
+    stream: &mut UnixStream,
+    mut opencode: Option<&mut opencode::Session>,
+    provider: &str,
+    outputs: [(&Path, u64); 2],
+    (limit, mut now, mut wait): (Duration, impl FnMut() -> Duration, impl FnMut()),
+) -> Result<(), String> {
+    loop {
+        check_control(stream)?;
+        if let Some(session) = opencode.as_deref_mut() {
+            session.health.poll()?;
+            if let Some(error) = session.failure()? {
+                session.health.poll()?;
+                if !session.health.ready() {
+                    return Err("OpenCode guard readiness missing".into());
+                }
+                return Err(error);
+            }
+        }
+        if now() >= limit {
+            return Err("Stage inference timed out".into());
+        }
+        for (name, limit) in outputs {
+            if fs::symlink_metadata(name).is_ok_and(|m| !m.is_file() || m.len() > limit) {
+                return Err("Stage output limit exceeded".into());
+            }
+        }
+        let status = child.try_wait();
+        if let (Some(session), Ok(Some(status))) = (opencode.as_deref_mut(), &status) {
+            session.exit_code = status.code();
+        }
+        match status {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(_)) => {
+                let stderr = read_output(outputs[1].0, 8_000_000)?.unwrap_or_default();
+                let stdout = read_output(outputs[0].0, 32_000_000)?.unwrap_or_default();
+                return Err(match provider {
+                    "codex" => crate::providers::codex::failure(&stdout, &stderr),
+                    "opencode" => crate::providers::opencode::failure(&stdout)
+                        .unwrap_or_else(|| "OpenCode execution failed".into()),
+                    _ => crate::providers::claude::failure(&stdout, &stderr),
+                });
+            }
+            Ok(None) => {
+                send(stream, &Response::Pulse)?;
+                wait();
+            }
+            Err(_) => return Err("Runner child supervision failed".into()),
+        }
+    }
 }
 
 #[cfg(unix)]

@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY Cargo.toml Cargo.lock ./
 COPY backend ./backend
 COPY assets ./assets
+COPY docker/opencode-guard ./docker/opencode-guard
 ARG CARGO_TARGET_CACHE=ocr-cargo-target
 # Cargo reads these from the environment. Builds keep two jobs and full optimization; the CI
 # smoke sets more jobs and opt-level 0, since it checks the sandbox, not speed.
@@ -67,6 +68,34 @@ RUN case "$TARGETARCH" in \
   && ln -s /opt/codex/bin/codex /usr/local/bin/codex \
   && test "$(/opt/codex/bin/codex --version | cut -d ' ' -f2)" = "$CODEX_CLI_VERSION"
 LABEL ai.codex.cli.version="${CODEX_CLI_VERSION}"
+ARG OPENCODE_CLI_VERSION=2.2.6
+ARG OPENCODE_CLI_SHA256_AMD64=dfcd69f1d511ae10ed626768b41d84b8100cc4aa64cecb69da38ba7a29d33551
+ARG OPENCODE_CLI_SHA256_ARM64=22352e200630ec61a48a65b9f5c2b627328ae5002658d81c067f67c5fb689898
+RUN case "$TARGETARCH" in \
+      amd64) platform=linux-x64; checksum="$OPENCODE_CLI_SHA256_AMD64" ;; \
+      arm64) platform=linux-arm64; checksum="$OPENCODE_CLI_SHA256_ARM64" ;; \
+      *) echo "Unsupported OpenCode CLI architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+  && mkdir -p /opt/opencode/bin \
+  && curl -fsSL --retry 3 "https://registry.npmjs.org/@opencode/cli-${platform}/-/cli-${platform}-${OPENCODE_CLI_VERSION}.tgz" -o /tmp/opencode.tgz \
+  && printf '%s  /tmp/opencode.tgz\n' "$checksum" | sha256sum -c - \
+  && tar -xzf /tmp/opencode.tgz -C /opt/opencode/bin --strip-components=2 package/bin/opencode \
+  && chmod 0755 /opt/opencode/bin/opencode \
+  && ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode \
+  && mkdir -m 0700 /tmp/opencode-version \
+  && printf '{"update":"disable","plugins":["-*"]}\n' > /tmp/opencode-version/config.json \
+  && test "$(env -i PATH=/usr/bin:/bin HOME=/tmp/opencode-version/home \
+       XDG_CONFIG_HOME=/tmp/opencode-version/config XDG_DATA_HOME=/tmp/opencode-version/data \
+       XDG_STATE_HOME=/tmp/opencode-version/state XDG_CACHE_HOME=/tmp/opencode-version/cache \
+       OPENCODE_CONFIG=/tmp/opencode-version/config.json OPENCODE_CONFIG_PROJECT_DISABLE=1 \
+       OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_MODELS_FETCH=1 OPENCODE_FILEWATCHER_DISABLE=1 \
+       /opt/opencode/bin/opencode --version)" = "opencode v${OPENCODE_CLI_VERSION}" \
+  && rm -rf /tmp/opencode.tgz /tmp/opencode-version
+LABEL ai.opencode.cli.version="${OPENCODE_CLI_VERSION}"
+COPY --chown=0:0 docker/opencode-guard /opt/ocr/opencode-guard
+RUN mkdir -p /etc/opencode \
+  && cp /opt/ocr/opencode-guard/opencode.json /etc/opencode/opencode.json \
+  && chmod -R a-w,a+rX /opt/ocr/opencode-guard /etc/opencode
 ENV DISABLE_AUTOUPDATER=1
 WORKDIR /app
 COPY --from=server /app/assets ./assets

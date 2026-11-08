@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const ERROR: &str =
     "Frozen reviews permit only bounded snapshot reads, fixed-text searches and directory listings through exec";
@@ -53,10 +53,30 @@ fn quoted(input: &str) -> Result<(String, &str), String> {
 }
 
 pub(super) fn validate(command: &str, roots: &[&Path]) -> Result<(), String> {
+    parse(command, roots).map(|_| ())
+}
+
+pub(crate) enum SnapshotCommand {
+    Read {
+        path: PathBuf,
+        offset: usize,
+        limit: usize,
+    },
+    Search {
+        path: PathBuf,
+        pattern: String,
+        limit: usize,
+    },
+    List {
+        path: PathBuf,
+    },
+}
+
+pub(crate) fn parse(command: &str, roots: &[&Path]) -> Result<SnapshotCommand, String> {
     if command.len() > 8192 || command.chars().any(char::is_control) {
         return Err(ERROR.into());
     }
-    let (path, tail) = if let Some(arguments) = command.strip_prefix("/usr/bin/sed -n ") {
+    let (path, tail, operation) = if let Some(arguments) = command.strip_prefix("/usr/bin/sed -n ") {
         let (range, tail) = quoted(arguments)?;
         let (start, end) = range
             .strip_suffix('p')
@@ -71,7 +91,13 @@ pub(super) fn validate(command: &str, roots: &[&Path]) -> Result<(), String> {
         if start == 0 || end < start || end - start > 200 || end > 1_000_000 {
             return Err(ERROR.into());
         }
-        quoted(tail.strip_prefix(" -- ").ok_or(ERROR)?)?
+        let (path, tail) = quoted(tail.strip_prefix(" -- ").ok_or(ERROR)?)?;
+        let operation = SnapshotCommand::Read {
+            path: PathBuf::from(&path),
+            offset: start as usize,
+            limit: (end - start + 1) as usize,
+        };
+        (path, tail, operation)
     } else if let Some(arguments) = command.strip_prefix("/usr/bin/grep -r -n -F -- ") {
         let (query, tail) = quoted(arguments)?;
         if query.is_empty() || query.len() > 256 {
@@ -84,9 +110,18 @@ pub(super) fn validate(command: &str, roots: &[&Path]) -> Result<(), String> {
         {
             return Err(ERROR.into());
         }
-        (path, tail)
+        let operation = SnapshotCommand::Search {
+            path: PathBuf::from(&path),
+            pattern: query,
+            limit: limit.parse().map_err(|_| ERROR)?,
+        };
+        (path, tail, operation)
     } else if let Some(arguments) = command.strip_prefix("/usr/bin/ls -1A -- ") {
-        quoted(arguments)?
+        let (path, tail) = quoted(arguments)?;
+        let operation = SnapshotCommand::List {
+            path: PathBuf::from(&path),
+        };
+        (path, tail, operation)
     } else {
         return Err(ERROR.into());
     };
@@ -106,7 +141,7 @@ pub(super) fn validate(command: &str, roots: &[&Path]) -> Result<(), String> {
     {
         return Err(ERROR.into());
     }
-    Ok(())
+    Ok(operation)
 }
 
 #[cfg(test)]

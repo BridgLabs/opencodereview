@@ -854,7 +854,7 @@ pub(crate) fn run_inner(
     });
 
     // Token usage for this run, parsed from the export transcript before cleanup.
-    let usage = parse_transcript_usage(&transcript_path);
+    let usage = frozen::stage_usage(inputs, &transcript_path);
     record_stage(
         inputs,
         "single",

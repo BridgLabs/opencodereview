@@ -59,7 +59,7 @@ impl Database {
     }
 
     pub fn create_ai_account(&self, provider: &str, label: &str) -> Result<AiAccount, String> {
-        if !matches!(provider, "claude" | "codex") {
+        if !matches!(provider, "claude" | "codex" | "opencode") {
             return Err("Unsupported account provider".into());
         }
         let label = label.trim();
@@ -137,7 +137,11 @@ impl Database {
     pub fn pick_ai_account(&self, excluded: &[i64]) -> Result<Option<AiAccount>, String> {
         let now = now_millis();
         let mut accounts = self.list_ai_accounts()?;
-        accounts.retain(|account| account.enabled && account.status != "auth_failed");
+        accounts.retain(|account| {
+            account.enabled
+                && account.status != "auth_failed"
+                && (account.provider != "opencode" || crate::accounts::has_credential("opencode", account.id))
+        });
         let Some(preferred) = accounts.first().map(|account| account.provider.clone()) else {
             return Ok(None);
         };
@@ -154,6 +158,7 @@ impl Database {
             .list_ai_accounts()?
             .into_iter()
             .filter(|account| account.enabled && account.status == "limited")
+            .filter(|account| account.provider != "opencode" || crate::accounts::has_credential("opencode", account.id))
             .filter_map(|account| account.limited_until)
             .min())
     }
@@ -178,13 +183,13 @@ impl Database {
         Ok(())
     }
 
-    /// Drops accounts and engine choices of providers the app no longer runs, such as Gemini and
-    /// OpenCode, including ones an import of an older database brings back.
+    /// Drops accounts and engine choices of providers the app no longer runs, such as Gemini,
+    /// including ones an import of an older database brings back.
     /// Returns the ids of the accounts it removed.
     pub fn remove_unsupported_ai_accounts(&self) -> Result<Vec<i64>, String> {
         let mut statement = self
             .conn
-            .prepare("DELETE FROM ai_accounts WHERE provider NOT IN ('claude', 'codex') RETURNING id")
+            .prepare("DELETE FROM ai_accounts WHERE provider NOT IN ('claude', 'codex', 'opencode') RETURNING id")
             .map_err(|error| error.to_string())?;
         let removed = statement
             .query_map([], |row| row.get::<_, i64>(0))
@@ -193,7 +198,7 @@ impl Database {
             .map_err(|error| error.to_string())?;
         self.conn
             .execute(
-                "DELETE FROM settings WHERE key LIKE 'review_engine_%' AND key NOT IN ('review_engine_claude', 'review_engine_codex')",
+                "DELETE FROM settings WHERE key LIKE 'review_engine_%' AND key NOT IN ('review_engine_claude', 'review_engine_codex', 'review_engine_opencode')",
                 [],
             )
             .map_err(|error| error.to_string())?;

@@ -1,6 +1,9 @@
 use super::{collect_usage, finalize_usage};
 use std::collections::HashMap;
 
+#[path = "opencode_failover.rs"]
+mod opencode_failover_tests;
+
 #[test]
 fn normalizes_model_labels_to_one_family() {
     use super::normalize_model;

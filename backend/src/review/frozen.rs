@@ -7,14 +7,28 @@ pub struct FrozenContext {
     pub archive: Archive,
     targets: OnceLock<Vec<(PathBuf, String)>>,
     root: OnceLock<PathBuf>,
+    go: OnceLock<Result<Option<crate::providers::go_catalogue::Snapshot>, String>>,
+    engines: Mutex<std::collections::BTreeMap<PathBuf, Vec<serde_json::Value>>>,
 }
 
 impl FrozenContext {
+    pub(super) fn note_engine(&self, transcript: &Path, engine: serde_json::Value) -> Result<(), String> {
+        self.engines
+            .lock()
+            .map_err(|_| "Stage model attribution unavailable")?
+            .entry(transcript.to_path_buf())
+            .or_default()
+            .push(engine);
+        Ok(())
+    }
+
     pub fn new(archive: Archive) -> Self {
         Self {
             archive,
             targets: OnceLock::new(),
             root: OnceLock::new(),
+            go: OnceLock::new(),
+            engines: Mutex::new(std::collections::BTreeMap::new()),
         }
     }
 
@@ -348,8 +362,9 @@ pub fn for_each_prepared_request(
         check_cancel(cancel)?;
         let mut request =
             runner::stage_request(&inputs.model, version, account, provider, root, stage, context, prompt)?;
-        let (model, effort) = engine_for(inputs, provider);
+        let (model, effort) = engine_for(inputs, provider)?;
         runner::set_engine(&mut request, &model, &effort)?;
+        attach_go(inputs, &mut request, provider)?;
         if let runner::Request::Run { files, .. } = &request {
             frozen
                 .archive
@@ -379,6 +394,12 @@ pub fn preflight(
         return Ok(());
     };
     crate::accounts::sandbox_sync::sync_app_auth()?;
+    if frozen.go.get().is_none() {
+        frozen
+            .go
+            .set(prepare_go(inputs))
+            .map_err(|_| "OpenCode Go review catalogue was already frozen")?;
+    }
     let account = next_account(inputs, &[])?;
     let targets = runner_targets(&inputs.model, cancel)?;
     for_each_prepared_request(
@@ -500,8 +521,13 @@ pub(super) fn execute(
                 &context,
                 paths.prompt,
             )?;
-            let (model, effort) = engine_for(inputs, &account.provider);
+            let (model, effort) = engine_for(inputs, &account.provider)?;
             runner::set_engine(&mut request, &model, &effort)?;
+            attach_go(inputs, &mut request, &account.provider)?;
+            frozen.note_engine(
+                paths.transcript,
+                engine_identity(inputs, &account.provider, &model, &effort)?,
+            )?;
             if inputs.db_handle.is_some() {
                 let label = crate::providers::engines::label(&account.provider, &model, &effort);
                 let _ = accounts_db(inputs).and_then(|db| db.set_review_run_model(inputs.run_id, &label));
@@ -613,13 +639,127 @@ fn accounts_db(inputs: &ReviewInputs) -> Result<Database, String> {
 
 /// The model and effort `provider` reviews with, read for each stage so a change in the app
 /// reaches the next stage. Diagnostics, which have no database, use the defaults.
-fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, String) {
-    if inputs.db_handle.is_none() {
-        return crate::providers::engines::default_engine(provider);
+fn engine_for(inputs: &ReviewInputs, provider: &str) -> Result<(String, String), String> {
+    if provider == "opencode" {
+        let snapshot = go_snapshot(inputs)?;
+        return Ok((snapshot.model.id.clone(), snapshot.effort.clone()));
     }
-    accounts_db(inputs)
+    if inputs.db_handle.is_none() {
+        return Ok(crate::providers::engines::default_engine(provider));
+    }
+    Ok(accounts_db(inputs)
         .and_then(|db| db.review_engine(provider))
-        .unwrap_or_else(|_| crate::providers::engines::default_engine(provider))
+        .unwrap_or_else(|_| crate::providers::engines::default_engine(provider)))
+}
+
+fn engine_identity(
+    inputs: &ReviewInputs,
+    provider: &str,
+    model: &str,
+    effort: &str,
+) -> Result<serde_json::Value, String> {
+    Ok(cache_identity(
+        provider,
+        model,
+        effort,
+        if provider == "opencode" {
+            Some(go_snapshot(inputs)?)
+        } else {
+            None
+        },
+    ))
+}
+
+pub(super) fn cache_identity(
+    provider: &str,
+    model: &str,
+    effort: &str,
+    snapshot: Option<&crate::providers::go_catalogue::Snapshot>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "provider": provider,
+        "model": model,
+        "effort": effort,
+        "goSnapshot": snapshot,
+    })
+}
+
+pub(super) fn cache_engine(inputs: &ReviewInputs) -> Result<serde_json::Value, String> {
+    if inputs.frozen.is_none() || inputs.db_handle.is_none() {
+        return Ok(serde_json::json!({"model": inputs.model}));
+    }
+    let account = next_account(inputs, &[])?;
+    let (model, effort) = engine_for(inputs, &account.provider)?;
+    engine_identity(inputs, &account.provider, &model, &effort)
+}
+
+pub(super) fn cache_engine_matches(inputs: &ReviewInputs, directory: &Path, engine: &serde_json::Value) -> bool {
+    inputs.frozen.as_ref().is_none_or(|frozen| {
+        frozen.engines.lock().is_ok_and(|engines| {
+            engines
+                .iter()
+                .filter(|(path, _)| path.starts_with(directory))
+                .flat_map(|(_, history)| history)
+                .all(|actual| actual == engine)
+        })
+    })
+}
+
+pub(super) fn stage_usage(inputs: &ReviewInputs, transcript: &Path) -> RunUsage {
+    let mut usage = parse_transcript_usage(transcript);
+    if let Some(frozen) = &inputs.frozen {
+        usage.model = frozen.engines.lock().ok().and_then(|engines| {
+            engines
+                .get(transcript)
+                .and_then(|history| history.last())
+                .and_then(|engine| engine["model"].as_str().map(str::to_string))
+        });
+    }
+    usage
+}
+
+fn prepare_go(inputs: &ReviewInputs) -> Result<Option<crate::providers::go_catalogue::Snapshot>, String> {
+    if inputs.db_handle.is_none() {
+        return Ok(None);
+    }
+    let preference = {
+        let db = accounts_db(inputs)?;
+        if !db.list_ai_accounts()?.iter().any(|account| {
+            account.provider == "opencode"
+                && account.enabled
+                && account.status != "auth_failed"
+                && crate::accounts::has_credential("opencode", account.id)
+        }) {
+            return Ok(None);
+        }
+        db.go_preference()?
+            .ok_or("Select an OpenCode Go model explicitly in Settings before reviewing")?
+    };
+    // No database is held across public discovery. This transaction also covers Go failover.
+    let catalogue = crate::providers::go_catalogue::download()?;
+    catalogue.select(&preference.0, &preference.1).map(Some)
+}
+
+fn attach_go(inputs: &ReviewInputs, request: &mut runner::Request, provider: &str) -> Result<(), String> {
+    if provider == "opencode" {
+        let snapshot = go_snapshot(inputs)?;
+        runner::set_go_snapshot(request, snapshot.clone())?;
+    }
+    Ok(())
+}
+
+/// An optional Go backup cannot fail another provider's preparation. Freeze its failure too,
+/// and surface it only when Go is actually selected, before any Go inference or classification.
+fn go_snapshot(inputs: &ReviewInputs) -> Result<&crate::providers::go_catalogue::Snapshot, String> {
+    inputs
+        .frozen
+        .as_ref()
+        .and_then(|frozen| frozen.go.get())
+        .ok_or("OpenCode Go review catalogue was not prepared")?
+        .as_ref()
+        .map_err(Clone::clone)?
+        .as_ref()
+        .ok_or_else(|| "OpenCode Go has no frozen confirmed selection; prepare a new review".into())
 }
 
 /// The account a stage runs on: the first ready account by priority, the first account's provider

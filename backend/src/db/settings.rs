@@ -367,6 +367,11 @@ impl Database {
     /// The model and effort reviews use on `provider`; its default when unset or no longer offered.
     pub(crate) fn review_engine(&self, provider: &str) -> Result<(String, String), String> {
         use crate::providers::engines;
+        if provider == "opencode" {
+            return self
+                .go_preference()?
+                .ok_or_else(|| "Select an OpenCode Go model explicitly in Settings before reviewing".into());
+        }
         let stored = self
             .setting(&engines::setting_key(provider))?
             .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok());
@@ -388,6 +393,26 @@ impl Database {
         self.save_setting_value(
             &engines::setting_key(provider),
             &serde_json::json!({ "model": model, "effort": effort }).to_string(),
+        )
+    }
+
+    /// Stored preference only. Discovery and validity never perform HTTP in a database step.
+    pub(crate) fn go_preference(&self) -> Result<Option<(String, String)>, String> {
+        let Some(raw) = self.setting("review_engine_opencode")? else {
+            return Ok(None);
+        };
+        let value: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|_| "Invalid saved OpenCode Go preference; select it again in Settings")?;
+        let model = value["model"].as_str().ok_or("Invalid saved OpenCode Go model")?;
+        let effort = value["effort"].as_str().ok_or("Invalid saved OpenCode Go effort")?;
+        Ok(Some((model.into(), effort.into())))
+    }
+
+    pub(crate) fn save_go_preference(&self, snapshot: &crate::providers::go_catalogue::Snapshot) -> Result<(), String> {
+        snapshot.validate(&snapshot.model.id, &snapshot.effort)?;
+        self.save_setting_value(
+            "review_engine_opencode",
+            &serde_json::json!({"model":snapshot.model.id,"effort":snapshot.effort}).to_string(),
         )
     }
 

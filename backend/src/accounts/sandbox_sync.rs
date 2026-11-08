@@ -6,6 +6,19 @@ use std::sync::Mutex;
 static SYNC: Mutex<()> = Mutex::new(());
 const MAX_AUTH_BYTES: u64 = 128 * 1024;
 
+/// Best-effort callers keep the account auth-failed if revocation cannot complete.
+pub(crate) fn revoke_opencode(id: i64) -> Result<(), String> {
+    let _guard = SYNC.lock().map_err(|_| "App authentication sync unavailable")?;
+    let Some(root) = std::env::var_os("OCR_REVIEW_CLAUDE_AUTH_DIR").map(PathBuf::from) else {
+        return Ok(());
+    };
+    match fs::remove_file(root.join(format!("accounts/{id}/opencode/go-api-key"))) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err("Could not revoke OpenCode Go authentication".into()),
+    }
+}
+
 /// Projects every account's credential into the runners' read-only volume as
 /// `accounts/<id>/<provider>/<credential file>` (see [`crate::accounts`]), and removes
 /// projections of deleted accounts.
@@ -15,6 +28,7 @@ pub(crate) fn sync_app_auth() -> Result<(), String> {
         return Ok(());
     };
     private_dir(&target)?;
+    crate::accounts::remove_unsupported_sign_ins(&target.join("accounts"))?;
     // The single pre-accounts token is no longer projected.
     match fs::remove_file(target.join("claude/oauth-token")) {
         Ok(()) => {}
@@ -30,6 +44,10 @@ pub(crate) fn sync_app_auth() -> Result<(), String> {
         mirror(
             &crate::accounts::codex_auth_path(*id),
             &target.join(format!("accounts/{id}/codex/auth.json")),
+        )?;
+        mirror(
+            &crate::accounts::opencode_key_path(*id),
+            &target.join(format!("accounts/{id}/opencode/go-api-key")),
         )?;
     }
     if let Ok(entries) = fs::read_dir(target.join("accounts")) {

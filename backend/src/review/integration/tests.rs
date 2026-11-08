@@ -42,6 +42,41 @@ fn frozen_inputs(files: &[(String, String)]) -> ReviewInputs {
     inputs
 }
 
+#[test]
+fn chunk_cache_remembers_replaced_engine_on_shared_transcript() {
+    let inputs = frozen_inputs(&[]);
+    let directory = Path::new("/review/chunks/001");
+    let transcript = directory.join("transcript.json");
+    let a = frozen::cache_identity("opencode", "fixture-a", "medium", None);
+    let b = frozen::cache_identity("opencode", "fixture-b", "medium", None);
+    let shared = inputs.clone();
+    let context = shared.frozen.as_ref().unwrap();
+    context.note_engine(&transcript, b).unwrap();
+    context.note_engine(&transcript, a.clone()).unwrap();
+    assert_eq!(
+        frozen::stage_usage(&inputs, &transcript).model.as_deref(),
+        Some("fixture-a")
+    );
+    assert!(!frozen::cache_engine_matches(&inputs, directory, &a));
+
+    let inputs = frozen_inputs(&[]);
+    let context = inputs.frozen.as_ref().unwrap();
+    context.note_engine(&transcript, a.clone()).unwrap();
+    context.note_engine(&transcript, a.clone()).unwrap();
+    assert_eq!(
+        frozen::stage_usage(&inputs, &transcript).model.as_deref(),
+        Some("fixture-a")
+    );
+    assert!(frozen::cache_engine_matches(&inputs, directory, &a));
+    context
+        .note_engine(
+            &directory.join("lens/transcript.json"),
+            frozen::cache_identity("opencode", "fixture-b", "medium", None),
+        )
+        .unwrap();
+    assert!(!frozen::cache_engine_matches(&inputs, directory, &a));
+}
+
 fn added_diff(path: &str) -> String {
     format!("diff --git a/{path} b/{path}\n--- /dev/null\n+++ b/{path}\n@@ -0,0 +1 @@\n+{LINE}")
 }

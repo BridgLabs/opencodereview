@@ -946,7 +946,7 @@ pub(crate) fn read_prepared_text(root: &Path, path: &str) -> Result<String, Erro
 }
 
 #[cfg(unix)]
-fn open_archive(path: &Path, create: bool) -> Result<File, Error> {
+pub(crate) fn open_archive(path: &Path, create: bool) -> Result<File, Error> {
     use std::ffi::CString;
     use std::os::fd::{AsRawFd, FromRawFd};
     use std::os::unix::ffi::OsStrExt;
@@ -996,7 +996,7 @@ fn open_archive(path: &Path, create: bool) -> Result<File, Error> {
 }
 
 #[cfg(not(unix))]
-fn open_archive(_path: &Path, _create: bool) -> Result<File, Error> {
+pub(crate) fn open_archive(_path: &Path, _create: bool) -> Result<File, Error> {
     Err(Error::Preparation)
 }
 

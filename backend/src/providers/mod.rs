@@ -2,3 +2,5 @@
 pub(crate) mod claude;
 pub(crate) mod codex;
 pub(crate) mod engines;
+pub(crate) mod go_catalogue;
+pub(crate) mod opencode;

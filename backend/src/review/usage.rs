@@ -97,6 +97,43 @@ pub fn collect_usage(value: &serde_json::Value, per_model: &mut std::collections
         serde_json::Value::Array(items) => items.iter().collect::<Vec<_>>(),
         value => vec![value],
     };
+    let model = events
+        .iter()
+        .find(|event| event["type"] == "ocr.opencode.model")
+        .and_then(|event| event["model"].as_str())
+        .map(normalize_model)
+        .unwrap_or_else(|| "opencode".into());
+    let mut seen = std::collections::HashSet::new();
+    for event in events.iter().filter(|event| event["type"] == "step_finish") {
+        let Some(id) = event["part"]["id"].as_str() else {
+            continue;
+        };
+        let Some(session) = event["sessionID"].as_str() else {
+            continue;
+        };
+        if !seen.insert((session, id)) {
+            continue;
+        }
+        let usage = &event["part"]["tokens"];
+        // Per-step counts above u32 are impossible for the curated Go context/output limits.
+        let get =
+            |value: &serde_json::Value| value.as_u64().filter(|value| *value <= u32::MAX as u64).unwrap_or(0) as i64;
+        let input = get(&usage["input"]);
+        let output = get(&usage["output"]).saturating_add(get(&usage["reasoning"]));
+        let read = get(&usage["cache"]["read"]);
+        let write = get(&usage["cache"]["write"]);
+        if input == 0 && output == 0 && read == 0 && write == 0 {
+            continue;
+        }
+        let entry = per_model.entry(model.clone()).or_insert_with(|| ModelUsageEntry {
+            model: model.clone(),
+            ..Default::default()
+        });
+        entry.input_tokens = entry.input_tokens.saturating_add(input);
+        entry.output_tokens = entry.output_tokens.saturating_add(output);
+        entry.cache_read_tokens = entry.cache_read_tokens.saturating_add(read);
+        entry.cache_creation_tokens = entry.cache_creation_tokens.saturating_add(write);
+    }
     // Codex reports each turn's totals; its input count includes the cached part.
     for usage in events
         .iter()
@@ -139,5 +176,67 @@ pub fn collect_usage(value: &serde_json::Value, per_model: &mut std::collections
             None if event["usage"].is_object() => add("unknown", &event["usage"], false),
             None => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod opencode_tests {
+    use super::*;
+    #[test]
+    fn opencode_deepseek_usage_uses_actual_selected_model() {
+        let events = if let Ok(path) = std::env::var("OCR_OPENCODE_MODEL_STAGE") {
+            let stage: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+            assert!(stage["error"].is_null());
+            transcript_events(stage["transcript"].as_str().unwrap()).unwrap()
+        } else {
+            serde_json::json!([
+                {"type":"step_finish","sessionID":"session","part":{"id":"one","tokens":{"input":14,"output":5,"reasoning":2,"cache":{"read":3,"write":0}}}},
+                {"type":"step_finish","sessionID":"session","part":{"id":"two","tokens":{"input":14,"output":5,"reasoning":2,"cache":{"read":3,"write":0}}}},
+                {"type":"ocr.opencode.model","model":"deepseek-v4.1-flash"}
+            ])
+        };
+        let mut models = std::collections::HashMap::new();
+        collect_usage(&events, &mut models);
+        let usage = finalize_usage(models);
+        assert_eq!(usage.model.as_deref(), Some("deepseek-v4-1-flash"));
+        assert_eq!(usage.by_model.len(), 1);
+        assert_eq!(
+            (
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cache_read_tokens,
+                usage.cache_creation_tokens
+            ),
+            (28, 14, 6, 0)
+        );
+    }
+    #[test]
+    fn opencode_missing_or_zero_usage_remains_unreported() {
+        let mut models = std::collections::HashMap::new();
+        collect_usage(
+            &serde_json::json!([
+                {"type":"step_finish","sessionID":"session","part":{"id":"missing"}},
+                    {"type":"step_finish","sessionID":"session","part":{"id":"zero","tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}}},
+                    {"type":"step_finish","sessionID":"session","part":{"id":"overflow","tokens":{"input":9223372036854775807i64}}}
+            ]),
+            &mut models,
+        );
+        assert!(finalize_usage(models).by_model.is_empty());
+    }
+    #[test]
+    fn opencode_usage_deduplicates_step_parts_and_includes_reasoning() {
+        let step = serde_json::json!({"type":"step_finish","sessionID":"session","part":{"id":"step","tokens":{"input":14,"output":5,"reasoning":2,"cache":{"read":3,"write":1}}}});
+        let mut models = std::collections::HashMap::new();
+        collect_usage(&serde_json::json!([step.clone(), step]), &mut models);
+        let usage = finalize_usage(models);
+        assert_eq!(
+            (
+                usage.input_tokens,
+                usage.output_tokens,
+                usage.cache_read_tokens,
+                usage.cache_creation_tokens
+            ),
+            (14, 7, 3, 1)
+        );
     }
 }

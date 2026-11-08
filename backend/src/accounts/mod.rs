@@ -1,6 +1,6 @@
 //! Credentials of the AI accounts listed in `ai_accounts`. Each account owns one directory,
 //! `$OCR_DATA_DIR/accounts/<id>/`, holding its provider's credential file:
-//! `claude/oauth-token` or `codex/auth.json`.
+//! `claude/oauth-token`, `codex/auth.json` or `opencode/go-api-key`.
 pub(crate) mod sandbox_sync;
 pub(crate) mod usage;
 
@@ -37,6 +37,47 @@ pub(crate) fn stored_ids() -> Vec<i64> {
 
 pub(crate) fn codex_auth_path(id: i64) -> PathBuf {
     root().join(id.to_string()).join("codex/auth.json")
+}
+
+pub(crate) fn opencode_key_path(id: i64) -> PathBuf {
+    root().join(id.to_string()).join("opencode/go-api-key")
+}
+
+pub(crate) fn validate_opencode_key(key: &str) -> Result<(), String> {
+    if key.is_empty() || key.len() > 4096 || !key.bytes().all(|byte| byte.is_ascii_graphic()) {
+        return Err("Invalid OpenCode Go API key".into());
+    }
+    Ok(())
+}
+
+/// Only explicit keys enter storage. A partial replacement revokes both copies.
+pub(crate) fn store_opencode_key(id: i64, key: &str) -> Result<(), String> {
+    validate_opencode_key(key)?;
+    if std::env::var_os("OCR_REVIEW_CLAUDE_AUTH_DIR").is_none() {
+        return Err("OpenCode Go authentication projection is unavailable".into());
+    }
+    let result = store(&opencode_key_path(id), id, key.as_bytes()).and_then(|()| {
+        if has_credential("opencode", id) {
+            Ok(())
+        } else {
+            Err("OpenCode Go authentication projection did not complete".into())
+        }
+    });
+    if result.is_err() {
+        let _ = fs::remove_file(opencode_key_path(id));
+        let _ = sandbox_sync::revoke_opencode(id);
+    }
+    result
+}
+
+fn read_opencode_key(path: &std::path::Path) -> Option<String> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > 4096 {
+        return None;
+    }
+    let key = fs::read_to_string(path).ok()?;
+    validate_opencode_key(&key).ok()?;
+    Some(key)
 }
 
 pub(crate) fn store_claude_token(id: i64, token: &str) -> Result<(), String> {
@@ -93,6 +134,15 @@ pub(crate) fn has_credential(provider: &str, id: i64) -> bool {
         "claude" => crate::providers::claude::read_token(&claude_token_path(id)).is_ok(),
         "codex" => fs::read_to_string(codex_auth_path(id))
             .is_ok_and(|raw| crate::providers::codex::validate_auth(&raw).is_ok()),
+        "opencode" => {
+            let Some(key) = read_opencode_key(&opencode_key_path(id)) else {
+                return false;
+            };
+            std::env::var_os("OCR_REVIEW_CLAUDE_AUTH_DIR")
+                .map(PathBuf::from)
+                .and_then(|root| read_opencode_key(&root.join(format!("accounts/{id}/opencode/go-api-key"))))
+                .is_some_and(|projected| projected == key)
+        }
         _ => false,
     }
 }
@@ -109,23 +159,42 @@ pub(crate) fn remove_unsupported(db: &Database) -> Result<(), String> {
     Ok(())
 }
 
-/// Deletes the Gemini and OpenCode folders under `root`, and each account folder they leave
-/// empty. Returns whether it deleted any.
+/// Deletes retired sign-ins, preserving only the explicit Go key under OpenCode.
+/// Legacy OpenCode auth.json is never reused. Returns whether it deleted any.
 fn remove_unsupported_sign_ins(root: &std::path::Path) -> Result<bool, String> {
     let mut removed = false;
     let Ok(entries) = fs::read_dir(root) else {
         return Ok(false);
     };
     for account in entries.flatten().map(|entry| entry.path()) {
-        for provider in ["gemini", "opencode"] {
-            match fs::remove_dir_all(account.join(provider)) {
-                Ok(()) => {
-                    removed = true;
-                    let _ = fs::remove_dir(&account);
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(_) => return Err("Could not remove the sign-in of a removed account".into()),
+        match fs::remove_dir_all(account.join("gemini")) {
+            Ok(()) => {
+                removed = true;
+                let _ = fs::remove_dir(&account);
             }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("Could not remove the sign-in of a removed account".into()),
+        }
+        let opencode = account.join("opencode");
+        if let Ok(entries) = fs::read_dir(&opencode) {
+            for entry in entries {
+                let entry = entry.map_err(|_| "Could not inspect a legacy OpenCode sign-in")?;
+                let kind = entry
+                    .file_type()
+                    .map_err(|_| "Could not inspect a legacy OpenCode sign-in")?;
+                if entry.file_name() == "go-api-key" && kind.is_file() {
+                    continue;
+                }
+                let result = if kind.is_dir() {
+                    fs::remove_dir_all(entry.path())
+                } else {
+                    fs::remove_file(entry.path())
+                };
+                result.map_err(|_| "Could not remove a legacy OpenCode sign-in")?;
+                removed = true;
+            }
+            let _ = fs::remove_dir(opencode);
+            let _ = fs::remove_dir(&account);
         }
     }
     Ok(removed)
@@ -154,6 +223,17 @@ pub(crate) fn adopt_legacy_token(db: &Database) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn go_key_validation_rejects_invalid_or_absent_credentials() {
+        assert!(super::validate_opencode_key("synthetic-go-key").is_ok());
+        for key in ["", " ", "two words", "line\nbreak", "\t", "é"] {
+            assert!(super::validate_opencode_key(key).is_err());
+        }
+        assert!(super::validate_opencode_key(&"x".repeat(4097)).is_err());
+        assert!(super::store_opencode_key(i64::MAX, "invalid\nkey").is_err());
+        assert!(!super::has_credential("opencode", i64::MAX));
+    }
+
+    #[test]
     fn only_removed_providers_lose_their_sign_ins() {
         let root = std::env::temp_dir().join(format!("ocr-unsupported-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -161,11 +241,19 @@ mod tests {
             std::fs::create_dir_all(root.join(path)).unwrap();
             std::fs::write(root.join(path).join("secret"), "x").unwrap();
         }
+        std::fs::create_dir_all(root.join("5/opencode")).unwrap();
+        std::fs::write(root.join("5/opencode/go-api-key"), "synthetic-go-key").unwrap();
+        std::fs::write(root.join("5/opencode/auth.json"), "legacy-never-reused").unwrap();
         assert!(super::remove_unsupported_sign_ins(&root).unwrap());
         assert!(root.join("1/claude/secret").exists());
         assert!(root.join("2/codex/secret").exists());
         assert!(!root.join("3").exists());
         assert!(!root.join("4").exists());
+        assert_eq!(
+            std::fs::read_to_string(root.join("5/opencode/go-api-key")).unwrap(),
+            "synthetic-go-key"
+        );
+        assert!(!root.join("5/opencode/auth.json").exists());
         // Nothing left to remove, and a missing root is not an error.
         assert!(!super::remove_unsupported_sign_ins(&root).unwrap());
         std::fs::remove_dir_all(&root).unwrap();

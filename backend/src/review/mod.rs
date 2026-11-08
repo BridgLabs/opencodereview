@@ -369,7 +369,11 @@ fn record_stage(
             pr_id: inputs.pr_id,
             stage: stage.to_string(),
             chunk_id,
-            model: Some(inputs.model.clone()),
+            model: if inputs.frozen.is_some() {
+                usage.model.clone()
+            } else {
+                Some(inputs.model.clone())
+            },
             status: status.to_string(),
             cache_key,
             cache_hit: status == "cached",

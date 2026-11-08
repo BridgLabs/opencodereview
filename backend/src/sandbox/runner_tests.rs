@@ -3,6 +3,214 @@ use serde_json::json;
 
 #[cfg(unix)]
 #[test]
+fn stage_supervision_uses_bounded_execution_time_and_preserves_early_stops() {
+    use std::cell::Cell;
+    for (case, limit, expected, elapsed) in [
+        (
+            "completion",
+            Duration::from_secs(900),
+            Some("Stage inference timed out"),
+            1200,
+        ),
+        ("completion", STAGE_EXECUTION_TIMEOUT, None, 1200),
+        (
+            "silent",
+            STAGE_EXECUTION_TIMEOUT,
+            Some("Stage inference timed out"),
+            1800,
+        ),
+        (
+            "output",
+            STAGE_EXECUTION_TIMEOUT,
+            Some("Stage inference timed out"),
+            1800,
+        ),
+        ("cancel", STAGE_EXECUTION_TIMEOUT, Some("cancelled"), 600),
+        (
+            "disconnect",
+            STAGE_EXECUTION_TIMEOUT,
+            Some("Broker disconnected; inference cancelled"),
+            600,
+        ),
+        (
+            "budget",
+            STAGE_EXECUTION_TIMEOUT,
+            Some("Stage output limit exceeded"),
+            600,
+        ),
+        (
+            "stderr budget",
+            STAGE_EXECUTION_TIMEOUT,
+            Some("Stage output limit exceeded"),
+            600,
+        ),
+    ] {
+        let root = std::env::temp_dir().join(format!("sandbox-timeout-{}", secret().unwrap()));
+        fs::create_dir(&root).unwrap();
+        let stdout = root.join("stdout");
+        let stderr = root.join("stderr");
+        let partial = "{\"partial\":true,\"usage\":{\"input_tokens\":17}}\n";
+        fs::write(&stdout, partial).unwrap();
+        fs::write(&stderr, "").unwrap();
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "read signal; exit 0"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut input = child.stdin.take();
+        let (mut server, client) = UnixStream::pair().unwrap();
+        server.set_nonblocking(true).unwrap();
+        let mut client = Some(client);
+        let clock = Cell::new(Duration::ZERO);
+        let mut waits = 0;
+        let result = supervise(
+            &mut child,
+            &mut server,
+            None,
+            "claude",
+            [(&stdout, 32_000_000), (&stderr, 8_000_000)],
+            (
+                limit,
+                || clock.get(),
+                || {
+                    waits += 1;
+                    assert!(waits < 1000, "fixture child failed to exit");
+                    if case != "completion" || clock.get() < Duration::from_secs(1200) {
+                        clock.set(clock.get() + Duration::from_secs(600));
+                    }
+                    if case == "completion" && clock.get() >= Duration::from_secs(1200) {
+                        drop(input.take());
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    if case == "output" {
+                        fs::OpenOptions::new()
+                            .append(true)
+                            .open(&stdout)
+                            .unwrap()
+                            .write_all(b"pulse\n")
+                            .unwrap();
+                    }
+                    if case.ends_with("budget") {
+                        let (path, length) = if case == "budget" {
+                            (&stdout, 32_000_001)
+                        } else {
+                            (&stderr, 8_000_001)
+                        };
+                        fs::OpenOptions::new()
+                            .write(true)
+                            .open(path)
+                            .unwrap()
+                            .set_len(length)
+                            .unwrap();
+                    }
+                    if case == "cancel" {
+                        client.as_mut().unwrap().write_all(&[1]).unwrap();
+                    }
+                    if case == "disconnect" {
+                        drop(client.take());
+                    } else {
+                        assert!(matches!(
+                            receive::<Response>(client.as_mut().unwrap()).unwrap(),
+                            Response::Pulse
+                        ));
+                    }
+                },
+            ),
+        );
+        assert_eq!(result.as_ref().err().map(String::as_str), expected, "{case}");
+        assert_eq!(clock.get(), Duration::from_secs(elapsed), "{case}");
+        terminate(&mut child).unwrap();
+        assert!(child.try_wait().unwrap().is_some());
+        if case != "budget" {
+            assert!(read_output(&stdout, 32_000_000).unwrap().unwrap().starts_with(partial));
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn broker_execution_deadline_starts_once_and_pulses_do_not_renew_it() {
+    use std::cell::Cell;
+    for (case, times, succeeds) in [
+        ("long stage", vec![0, 0, 0, 1200], true),
+        ("near execution cap", vec![0, 0, 0, 1849], true),
+        ("startup cap", vec![0, 950], false),
+        ("started budget", vec![0, 0, 700, 1900], true),
+        ("delayed start cap", vec![0, 0, 700, 1300, 1900, 2550], false),
+        ("pulse cap", vec![0, 0, 0, 600, 1200, 1850], false),
+        ("duplicate start cap", vec![0, 0, 0, 600, 1200, 1850], false),
+    ] {
+        let root = std::env::temp_dir().join(format!("sandbox-deadline-{}", secret().unwrap()));
+        fs::create_dir(&root).unwrap();
+        let (client, mut server) = UnixStream::pair().unwrap();
+        for stream in [&client, &server] {
+            stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        }
+        let request = Request::Run {
+            archive_id: None,
+            preflight: false,
+            account: 1,
+            provider: "claude".into(),
+            effort: String::new(),
+            go_snapshot: None,
+            model: "fixture".into(),
+            version: "v1".into(),
+            prompt: String::new(),
+            files: BTreeMap::new(),
+        };
+        let starts = Cell::new(0);
+        send(&mut server, &Response::Started).unwrap();
+        if !succeeds && case != "startup cap" {
+            send(&mut server, &Response::Pulse).unwrap();
+            send(
+                &mut server,
+                &if case.starts_with("duplicate") {
+                    Response::Started
+                } else {
+                    Response::Pulse
+                },
+            )
+            .unwrap();
+        }
+        send(
+            &mut server,
+            &Response::Finished {
+                report: None,
+                decisions: None,
+                transcript: Some("partial usage".into()),
+                error: None,
+                credential: None,
+            },
+        )
+        .unwrap();
+        let mut times = times.into_iter();
+        let result = exchange_with_clock(
+            client,
+            &request,
+            &root,
+            &root.join("transcript"),
+            &AtomicBool::new(false),
+            &mut || starts.set(starts.get() + 1),
+            || Duration::from_secs(times.next().expect("unexpected deadline renewal")),
+        );
+        if succeeds {
+            result.unwrap();
+            assert_eq!(fs::read_to_string(root.join("transcript")).unwrap(), "partial usage");
+        } else {
+            assert_eq!(result.unwrap_err(), "Runner timed out; connection closed", "{case}");
+        }
+        assert!(matches!(receive::<Request>(&mut server).unwrap(), Request::Run { .. }));
+        assert_eq!(starts.get(), usize::from(case != "startup cap"), "{case}");
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn isolated_cli_requires_supported_configuration_and_fail_closed_tool_guard() {
     let command = cli_command();
     assert_eq!(command.get_program(), CLI);
@@ -112,6 +320,7 @@ fn round_trip_and_stage_scope_validation() {
         account: 1,
         provider: "claude".into(),
         effort: String::new(),
+        go_snapshot: None,
         model: "model-a".into(),
         version: "v1".into(),
         prompt: "read snapshot".into(),
@@ -128,6 +337,29 @@ fn round_trip_and_stage_scope_validation() {
         files.insert("../auth/worker-token".into(), "invalid".into());
     }
     assert!(validate(&request).is_err());
+}
+
+#[test]
+fn typed_go_ipc_revalidates_tampered_model_metadata() {
+    let catalogue = crate::providers::go_catalogue::fixture("brand-new-model", &["brand-new-effort"], "responses");
+    let snapshot = catalogue.select("brand-new-model", "brand-new-effort").unwrap();
+    let request = Request::Run {
+        archive_id: None,
+        preflight: false,
+        account: 1,
+        provider: "opencode".into(),
+        effort: "brand-new-effort".into(),
+        go_snapshot: Some(Box::new(snapshot)),
+        model: "brand-new-model".into(),
+        version: "fixture-version".into(),
+        prompt: "review".into(),
+        files: BTreeMap::new(),
+    };
+    assert!(validate(&request).is_ok());
+    let mut raw = serde_json::to_value(&request).unwrap();
+    raw["go_snapshot"]["model"]["api"]["responses"]["base_url"] = "https://evil.test/v1".into();
+    let decoded: Request = serde_json::from_value(raw).unwrap();
+    assert!(validate(&decoded).is_err());
 }
 
 #[cfg(unix)]
@@ -163,6 +395,7 @@ fn cancellation_returns_partial_usage_over_private_ipc() {
             account: 1,
             provider: "claude".into(),
             effort: String::new(),
+            go_snapshot: None,
             model: "fixture".into(),
             version: "v1".into(),
             prompt: String::new(),
@@ -524,6 +757,7 @@ fn final_response_materializes_report_and_decisions_without_model_written_files(
             account: 1,
             provider: "claude".into(),
             effort: String::new(),
+            go_snapshot: None,
             model: "fixture".into(),
             version: "v1".into(),
             prompt: String::new(),

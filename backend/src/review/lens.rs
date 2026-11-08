@@ -42,7 +42,7 @@ pub(super) fn run(
     let lens = stage.join("lens");
     let started_at = now_millis();
     let result = execute(inputs, cancel, progress, paths, stage, context, &lens, &mut materialize);
-    let usage = parse_transcript_usage(&lens.join("transcript.json"));
+    let usage = frozen::stage_usage(inputs, &lens.join("transcript.json"));
     record_stage(
         inputs,
         "lens",

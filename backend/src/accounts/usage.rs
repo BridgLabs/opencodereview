@@ -30,6 +30,7 @@ pub(crate) fn usage(id: i64, provider: &str) -> Value {
             }
         }),
         "codex" => codex(id),
+        "opencode" => Err("OpenCode Go plan usage is unavailable".to_string()),
         _ => Err("Unknown provider".to_string()),
     };
     let value = match windows {

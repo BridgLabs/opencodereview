@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libs
 COPY Cargo.toml Cargo.lock ./
 COPY backend ./backend
 COPY assets ./assets
+COPY docker/opencode-guard ./docker/opencode-guard
 ARG CARGO_TARGET_CACHE=ocr-cargo-target
 # Both binaries from one build share the executor fingerprint the runner checks.
 RUN --mount=type=cache,id=ocr-cargo-registry,target=/usr/local/cargo/registry,sharing=locked --mount=type=cache,id=${CARGO_TARGET_CACHE},target=/app/target,sharing=locked CARGO_BUILD_JOBS=2 cargo build --locked --release --bin ocr-sandbox --bin ocr-bench \
@@ -25,7 +26,7 @@ RUN apt-get update \
   && apt-get update \
   && apt-get install -y --no-install-recommends postgresql-17 \
   && rm -rf /var/lib/apt/lists/*
-RUN chmod -R a+rX /opt/claude /opt/codex \
+RUN chmod -R a+rX /opt/claude /opt/codex /opt/opencode \
   && install -d -m 0755 /work /output /scratch /evidence \
   && install -d -m 0700 /ipc
 COPY --from=build /usr/local/bin/ocr-sandbox /usr/local/bin/ocr-bench /usr/local/bin/

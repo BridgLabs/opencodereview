@@ -393,7 +393,7 @@ pub(crate) fn run_sharded_review(
         progress(&sharded_phase_json("validate", "ok"), &format!("Validated {} inline findings: head SHA, diff anchors, JSON and finding templates. Chunk fallback used: {}.", review_comment_count(Some(&comments_json)), used_fallback));
         Ok((body, comments_json, crate::review::warnings::merge(evidence_warnings)))
     });
-    let final_usage = parse_transcript_usage(&transcript);
+    let final_usage = frozen::stage_usage(inputs, &transcript);
     record_stage(
         inputs,
         "final",
@@ -772,7 +772,7 @@ fn run_final_batch(
         )
         .inspect_err(|error| invalid = error != "cancelled")
     });
-    let usage = parse_transcript_usage(&transcript);
+    let usage = frozen::stage_usage(inputs, &transcript);
     record_stage(
         inputs,
         "final",
@@ -1304,13 +1304,14 @@ pub(crate) fn run_review_chunk(
     let chunk_diff = fs::read_to_string(&chunk_diff_path).map_err(|error| error.to_string())?;
     let diff_hash = sha256_hex(&fs::read(&chunk_diff_path).unwrap_or_default());
     let skill_hash = sha256_hex(inputs.skill_content.as_bytes());
+    let cache_engine = frozen::cache_engine(inputs)?;
     let cache_payload = serde_json::json!({
-        "version": 2,
+        "version": 3,
         "archiveId": inputs.frozen.as_ref().map(|frozen| frozen.archive.descriptor().id),
         "repoId": inputs.repo_id,
         "headSha": head_sha,
         "priorSha": incremental_base,
-        "model": inputs.model,
+        "engine": cache_engine,
         "promptVersion": REVIEW_PROMPT_VERSION,
         "skillHash": skill_hash,
         "indexSpecVersion": INDEX_SPEC_VERSION,
@@ -1340,7 +1341,7 @@ pub(crate) fn run_review_chunk(
             )?;
             let comments_json = fs::read_to_string(&comments).map_err(|error| error.to_string())?;
             let usage = RunUsage {
-                model: Some(inputs.model.clone()),
+                model: cache_engine["model"].as_str().map(str::to_string),
                 ..Default::default()
             };
             record_stage(
@@ -1426,7 +1427,7 @@ pub(crate) fn run_review_chunk(
             },
         );
         attempts.push(recovery::Attempt {
-            usage: parse_transcript_usage(&directory.join("transcript.json")),
+            usage: frozen::stage_usage(inputs, &directory.join("transcript.json")),
             metrics: StageMetrics {
                 prompt_bytes: file_bytes(&directory.join("prompt.md")),
                 diff_bytes: file_bytes(&chunk_diff_path),
@@ -1540,7 +1541,7 @@ pub(crate) fn run_review_chunk(
     });
     if inputs.frozen.is_some() {
         if let Some(attempt) = attempts.last_mut() {
-            attempt.usage = parse_transcript_usage(&chunk_dir.join("transcript.json"));
+            attempt.usage = frozen::stage_usage(inputs, &chunk_dir.join("transcript.json"));
             attempt.finished_at = now_millis();
         }
     }
@@ -1560,7 +1561,10 @@ pub(crate) fn run_review_chunk(
         .last()
         .ok_or("Incomplete review: no chunk execution recorded")?
         .metrics;
-    if let Some(db) = (attempts.len() == 1).then(|| inputs.open_db().ok()).flatten() {
+    if let Some(db) = (attempts.len() == 1 && frozen::cache_engine_matches(inputs, &chunk_dir, &cache_engine))
+        .then(|| inputs.open_db().ok())
+        .flatten()
+    {
         let _ = db.upsert_review_chunk_cache(&ReviewChunkCacheInput {
             cache_key,
             repo_id: inputs.repo_id,
@@ -1569,7 +1573,7 @@ pub(crate) fn run_review_chunk(
             chunk_id: chunk.id as i64,
             head_sha: head_sha.to_string(),
             prior_sha: incremental_base.map(str::to_string),
-            model: inputs.model.clone(),
+            model: cache_engine["model"].as_str().unwrap_or_default().to_string(),
             prompt_version: REVIEW_PROMPT_VERSION.to_string(),
             skill_hash,
             index_spec_version: INDEX_SPEC_VERSION,

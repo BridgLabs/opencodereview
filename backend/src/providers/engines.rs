@@ -46,7 +46,8 @@ const fn model(
     }
 }
 
-pub(crate) const PROVIDERS: &[(&str, &str)] = &[("claude", "Claude"), ("codex", "ChatGPT")];
+pub(crate) const PROVIDERS: &[(&str, &str)] =
+    &[("claude", "Claude"), ("codex", "ChatGPT"), ("opencode", "OpenCode Go")];
 
 pub(crate) fn models(provider: &str) -> &'static [EngineModel] {
     match provider {
@@ -56,7 +57,7 @@ pub(crate) fn models(provider: &str) -> &'static [EngineModel] {
     }
 }
 
-/// The provider's default model and effort.
+/// Static provider defaults. Go requires an explicit catalogue-confirmed preference.
 pub(crate) fn default_engine(provider: &str) -> (String, String) {
     models(provider)
         .first()
@@ -67,6 +68,17 @@ pub(crate) fn default_engine(provider: &str) -> (String, String) {
 /// Checks `model` and `effort` for `provider` and returns them, an empty effort becoming the
 /// model's default.
 pub(crate) fn resolve(provider: &str, model: &str, effort: &str) -> Result<(String, String), String> {
+    if !PROVIDERS.iter().any(|(id, _)| *id == provider) {
+        return Err(format!("{provider} is not an enabled review provider"));
+    }
+    resolve_model(provider, model, effort)
+}
+
+/// Static model validation. Go uses its independently validated frozen catalogue instead.
+pub(crate) fn resolve_model(provider: &str, model: &str, effort: &str) -> Result<(String, String), String> {
+    if provider == "opencode" {
+        return Err("OpenCode Go requires a fresh catalogue and explicit selection".into());
+    }
     let entry = models(provider)
         .iter()
         .find(|entry| entry.id == model)
@@ -110,11 +122,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_provider_defaults_to_a_valid_engine() {
-        for (provider, _) in PROVIDERS {
+    fn static_providers_default_to_a_valid_engine() {
+        for provider in ["claude", "codex"] {
             let (model, effort) = default_engine(provider);
             assert_eq!(resolve(provider, &model, &effort).unwrap(), (model, effort));
         }
+    }
+
+    #[test]
+    fn go_has_no_static_inventory_or_implicit_default() {
+        assert!(models("opencode").is_empty());
+        assert_eq!(default_engine("opencode"), (String::new(), String::new()));
+        assert!(resolve("opencode", "new-model", "new-effort").is_err());
     }
 
     #[test]

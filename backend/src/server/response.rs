@@ -268,7 +268,7 @@ pub(crate) fn write_response(
     };
     let cors = cors_origin.map(|origin| format!("access-control-allow-origin: {origin}\r\naccess-control-allow-methods: GET,POST,PUT,DELETE,OPTIONS\r\naccess-control-allow-headers: content-type,authorization,x-flow-secret\r\n")).unwrap_or_default();
     let head = format!(
-        "HTTP/1.1 {} {}\r\ncontent-type: {}\r\ncontent-length: {}\r\n{}connection: close\r\n\r\n",
+        "HTTP/1.1 {} {}\r\ncontent-type: {}\r\ncontent-length: {}\r\ncache-control: no-store\r\n{}connection: close\r\n\r\n",
         response.status,
         reason,
         response.content_type,
