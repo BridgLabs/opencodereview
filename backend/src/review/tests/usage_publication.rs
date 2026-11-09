@@ -773,8 +773,12 @@ fn finding_selection_is_versioned_and_locked_during_publication() {
     // Another review of the posted commit and base is refused with the reason, not a generic one.
     assert!(db
         .review_post_refusal(run_id, true)
-        .unwrap()
         .starts_with("Review, finding selection"));
+    // A run that cannot be read still gets the general refusal, never a database error.
+    assert_eq!(
+        db.review_post_refusal(i64::MAX, false),
+        crate::db::post_refusal(false, false)
+    );
     let other: i64 = db
         .handle()
         .open()
@@ -790,7 +794,6 @@ fn finding_selection_is_versioned_and_locked_during_publication() {
     for automatic in [true, false] {
         assert!(db
             .review_post_refusal(other, automatic)
-            .unwrap()
             .starts_with("A review of this commit was already posted to GitHub."));
     }
     drop(db);

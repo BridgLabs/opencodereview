@@ -131,7 +131,8 @@ pub(crate) fn decide_review_http(
             )
         })?;
         if !began {
-            return Err(with_db_raw(state, |db| db.review_post_refusal(run.id, false))?);
+            return Err(with_db_raw(state, |db| Ok(db.review_post_refusal(run.id, false)))
+                .unwrap_or_else(|_| crate::db::post_refusal(false, false).to_string()));
         }
         let _ = with_db_raw(state, |db| {
             db.set_review_run_comments_json(run.id, &draft.annotated_comments_json)

@@ -1011,7 +1011,7 @@ pub(crate) fn auto_post_review(
         "auto",
         selection_revision,
     )? {
-        return Err(db.review_post_refusal(run.id, true)?);
+        return Err(db.review_post_refusal(run.id, true));
     }
     db.set_review_run_comments_json(run.id, &draft.annotated_comments_json)?;
     let duplicate_only = !should_post && draft.suppressed_count > 0;

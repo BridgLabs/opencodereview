@@ -1,5 +1,15 @@
 use super::*;
 
+/// The message for a post `try_begin_review_post` refused: `posted` when another review of the
+/// same commit and base is already on GitHub, `automatic` for the auto-post flow.
+pub(crate) fn post_refusal(posted: bool, automatic: bool) -> &'static str {
+    match (posted, automatic) {
+        (true, _) => "A review of this commit was already posted to GitHub. A new commit can be reviewed and posted again.",
+        (false, true) => "Review, finding selection, or automatic publishing settings changed, or publication is already in progress. Reload before retrying.",
+        (false, false) => "This review or its finding selection changed, or publication is already in progress. Reload before retrying.",
+    }
+}
+
 impl Database {
     /// Serializes changes to one pull request's review state. SQLite let one writer in at a time;
     /// Postgres lets concurrent transactions interleave their checks and writes, which could post
@@ -738,9 +748,10 @@ impl Database {
     }
 
     /// Why `try_begin_review_post` refused `run_id`, worded for the user. A post of a commit and
-    /// base another review already posted is the common case, so it gets its own message.
-    pub fn review_post_refusal(&self, run_id: i64, automatic: bool) -> Result<String, String> {
-        let posted: bool = self
+    /// base another review already posted is the common case, so it gets its own message. When
+    /// that cannot be read the refusal keeps its general wording.
+    pub fn review_post_refusal(&self, run_id: i64, automatic: bool) -> String {
+        let posted = self
             .conn
             .query_row(
                 "SELECT EXISTS (
@@ -753,13 +764,8 @@ impl Database {
                 params![run_id],
                 |row| row.get(0),
             )
-            .map_err(|error| error.to_string())?;
-        Ok(match (posted, automatic) {
-            (true, _) => "A review of this commit was already posted to GitHub. A new commit can be reviewed and posted again.",
-            (false, true) => "Review, finding selection, or automatic publishing settings changed, or publication is already in progress. Reload before retrying.",
-            (false, false) => "This review or its finding selection changed, or publication is already in progress. Reload before retrying.",
-        }
-        .to_string())
+            .unwrap_or(false);
+        post_refusal(posted, automatic).to_string()
     }
 
     pub fn reset_review_posting(&self, run_id: i64) -> Result<(), String> {
