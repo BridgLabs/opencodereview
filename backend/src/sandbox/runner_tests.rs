@@ -156,7 +156,7 @@ fn printing_prepared_files_keeps_the_stage_request_valid() {
         model: "model-a".into(),
         version: "v1".into(),
         prompt,
-        files: BTreeMap::from([("context/changed/file.ts".into(), source)]),
+        files: BTreeMap::from([("context/PR_DIFF.patch".into(), source)]),
     };
     let mut request = run("read snapshot".into(), "source".into());
     print_prepared_files(&mut request).unwrap();
@@ -164,7 +164,7 @@ fn printing_prepared_files_keeps_the_stage_request_valid() {
         unreachable!()
     };
     assert!(prompt.starts_with("read snapshot\n# Prepared files"));
-    assert!(prompt.contains("==> /work/context/changed/file.ts <==\n     1\tsource\n"));
+    assert!(prompt.contains("==> /work/context/PR_DIFF.patch <==\n     1\tsource\n"));
     // A file the prompt has no room for stays on disk only, and the request still passes.
     let mut request = run("p".repeat(150_000), "x\n".repeat(30_000));
     print_prepared_files(&mut request).unwrap();

@@ -90,7 +90,7 @@ const BATCHED_COMMANDS: &str = "\nSnapshot access through the shell tool is read
 /// The stage prompt as OpenCode gets it: the same review, with the prepared files printed at its
 /// end and reading rules that let one step read several files.
 pub(crate) fn adapt_prompt(prompt: &str, files: &BTreeMap<String, String>) -> String {
-    let (printed, left) = super::inline::select(files, INLINE_BYTES, str::len);
+    let (printed, left) = super::inline::select(files, INLINE_BYTES, str::len, super::inline::rank);
     let reading = if printed.is_empty() {
         BATCHED_READING
     } else {

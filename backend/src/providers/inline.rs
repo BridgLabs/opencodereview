@@ -10,11 +10,11 @@ const PROMPT_LIMIT: usize = 200_000;
 /// Rendered bytes of prepared files printed into a Claude or Codex prompt, about 40,000 tokens.
 const RENDERED_BYTES: usize = 160_000;
 
-const READING: &str = "The prepared files are printed at the end of this prompt with line numbers, so do not read them again; read only the prepared files listed there as not printed. Then search for relevant callers, guards and tests. Line numbers are not part of the code: quotes must be the exact text of the line, without its number.";
+const READING: &str = "The pull request text, the review methodology, the orientation files and the diff are printed at the end of this prompt with line numbers, so do not read them again. Changed, related and convention files are not printed: read them in bounded line ranges when a check needs more than the diff shows, and search for relevant callers, guards and tests. Line numbers are not part of the code: quotes must be the exact text of the line, without its number.";
 
 /// Where a prepared file goes in the printed evidence, or `None` for files the model reads only
 /// when it needs them (stage metadata, related files).
-fn rank(name: &str) -> Option<u8> {
+pub(crate) fn rank(name: &str) -> Option<u8> {
     let name = name.strip_prefix("context/").unwrap_or(name);
     Some(match name {
         "PR.md" => 0,
@@ -29,6 +29,20 @@ fn rank(name: &str) -> Option<u8> {
     })
 }
 
+/// [`rank`] for Claude and Codex, which re-read the whole prompt on every round trip and read
+/// source in ranges: only what every stage reads whole is printed. The diff already shows the
+/// changed lines, so changed files and conventions stay on disk, read when a check needs them.
+fn lean_rank(name: &str) -> Option<u8> {
+    let name = name.strip_prefix("context/").unwrap_or(name);
+    Some(match name {
+        "PENDING_REVIEW.md" => 4,
+        "STAGE.json" => 6,
+        _ if name.starts_with("integration/") => 7,
+        _ if name.starts_with("conventions/") || name.starts_with("changed/") => return None,
+        _ => return rank(name).map(|rank| if rank >= 4 { rank + 1 } else { rank }),
+    })
+}
+
 /// Bytes `content` takes once printed: its text, a header and a number before each line.
 fn rendered(content: &str) -> usize {
     content.len() + 8 * content.lines().count() + 300
@@ -39,6 +53,7 @@ pub(crate) fn select(
     files: &BTreeMap<String, String>,
     budget: usize,
     cost: fn(&str) -> usize,
+    rank: fn(&str) -> Option<u8>,
 ) -> (Vec<(&str, &str)>, Vec<&str>) {
     let mut ranked = files
         .iter()
@@ -86,7 +101,7 @@ pub(crate) fn section(printed: &[(&str, &str)], left: &[&str]) -> String {
 /// prompt with no room for any file is returned as it is.
 pub(crate) fn adapt_prompt(prompt: &str, files: &BTreeMap<String, String>) -> String {
     let budget = RENDERED_BYTES.min(PROMPT_LIMIT.saturating_sub(prompt.len() + READING.len() + 2_000));
-    let (printed, left) = select(files, budget, rendered);
+    let (printed, left) = select(files, budget, rendered, lean_rank);
     if printed.is_empty() {
         return prompt.to_string();
     }
@@ -120,8 +135,10 @@ mod tests {
                 "context/changed/src/a.rs".to_string(),
                 "fn a() {}\n\tguard();".to_string(),
             ),
-            ("context/changed/src/big.rs".to_string(), "x\n".repeat(RENDERED_BYTES)),
+            ("context/conventions/AGENTS.md".to_string(), "Rules".to_string()),
             ("context/related/src/caller.rs".to_string(), "a();".to_string()),
+            ("context/PENDING_REVIEW.md".to_string(), "Open finding".to_string()),
+            ("context/STAGE.json".to_string(), "{}".to_string()),
         ]);
         let adapted = adapt_prompt(&prompt, &files);
         assert!(adapted.contains(READING) && !adapted.contains(crate::review::evidence::PROGRESSIVE_READING));
@@ -134,10 +151,21 @@ mod tests {
             assert!(adapted.contains(kept), "{kept}");
         }
         let printed = &adapted[adapted.find("\n# Prepared files").unwrap()..];
+        let order = [
+            "PR.md",
+            "skill/SKILL.md",
+            "PENDING_REVIEW.md",
+            "PR_DIFF.patch",
+            "STAGE.json",
+        ]
+        .map(|name| printed.find(&format!("==> /work/context/{name} <==")).unwrap());
+        assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "{order:?}");
         assert!(printed.contains("==> /work/context/skill/SKILL.md <==\n     1\tRule\n"));
-        assert!(printed.contains("     2\t\tguard();\n"));
-        assert!(printed.contains("Not printed, read them when needed: /work/context/changed/src/big.rs."));
-        assert!(!printed.contains("caller.rs"));
+        assert!(printed.contains("     1\t+fn a() {}\n"));
+        // Source and conventions stay on disk: every round trip would carry them again.
+        for left in ["changed/src/a.rs", "conventions/AGENTS.md", "related/src/caller.rs"] {
+            assert!(!printed.contains(left), "{left}");
+        }
         assert!(adapted.len() <= PROMPT_LIMIT);
     }
 
@@ -146,7 +174,7 @@ mod tests {
         let prompt = stage_prompt();
         assert_eq!(adapt_prompt(&prompt, &BTreeMap::new()), prompt);
         // Many short lines: the line numbers count toward the budget, so the prompt still fits.
-        let files = BTreeMap::from([("context/changed/a.rs".to_string(), "\n".repeat(150_000))]);
+        let files = BTreeMap::from([("context/PR_DIFF.patch".to_string(), "\n".repeat(150_000))]);
         assert_eq!(adapt_prompt(&prompt, &files), prompt);
         let long = format!("{prompt}{}", "p".repeat(PROMPT_LIMIT - prompt.len() - 100));
         let files = BTreeMap::from([("context/PR.md".to_string(), "Body".to_string())]);
