@@ -163,6 +163,7 @@ pub(crate) fn final_text(raw: &str) -> Result<(String, String), String> {
                     part["reason"].as_str().ok_or(error)?.to_string(),
                 ))
             }
+            Some("retry") => finish = None,
             Some("step_start" | "tool_use" | "reasoning") => {}
             _ => return Err(error.into()),
         }
@@ -254,6 +255,31 @@ mod tests {
             crate::providers::claude::Failure::UsageLimit { .. }
         ));
     }
+    #[test]
+    fn opencode_recovered_retry_requires_a_later_terminal_response() {
+        let retry =
+            serde_json::json!({"type":"retry","sessionID":"session","error":{"type":"provider.error","status":503}})
+                .to_string();
+        let text = serde_json::json!({"type":"text","sessionID":"session","part":{"id":"answer","messageID":"message","text":"report"}}).to_string();
+        let stop = serde_json::json!({"type":"step_finish","sessionID":"session","part":{"messageID":"message","reason":"stop"}}).to_string();
+        assert!(failure(&retry).is_none());
+        assert_eq!(
+            final_text(&format!("{retry}\n{text}\n{stop}")).unwrap(),
+            ("session".into(), "report".into())
+        );
+        for raw in [
+            format!("{retry}\n{text}"),
+            format!("{text}\n{stop}\n{retry}"),
+            format!("{retry}\n{text}\n{}", stop.replace("stop", "length")),
+            format!("{retry}\n{text}\n{}", stop.replace("message\"", "other\"")),
+            format!("{retry}\n{text}\n{stop}\n{{"),
+            format!("{retry}\n{text}\n{stop}\n{}", retry.replace("retry", "error")),
+            format!("{}\n{text}\n{stop}", retry.replace("session\"", "other\"")),
+        ] {
+            assert!(final_text(&raw).is_err(), "{raw}");
+        }
+    }
+
     #[test]
     fn opencode_terminal_text_ignores_intermediate_steps_and_duplicate_text() {
         let raw = [
