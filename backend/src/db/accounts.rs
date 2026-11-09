@@ -135,10 +135,23 @@ impl Database {
     /// elapsed count as available again. The first usable account's provider goes first, so a
     /// limit moves reviews to that provider's other accounts before another provider's.
     pub fn pick_ai_account(&self, excluded: &[i64]) -> Result<Option<AiAccount>, String> {
+        self.pick_ai_account_preferring(excluded, None)
+    }
+
+    /// [`Self::pick_ai_account`], trying `preferred`'s accounts first instead of the first
+    /// account's provider: a review keeps the provider it started on.
+    pub fn pick_ai_account_preferring(
+        &self,
+        excluded: &[i64],
+        preferred: Option<&str>,
+    ) -> Result<Option<AiAccount>, String> {
         let now = now_millis();
         let mut accounts = self.list_ai_accounts()?;
         accounts.retain(|account| account.enabled && account.status != "auth_failed");
-        let Some(preferred) = accounts.first().map(|account| account.provider.clone()) else {
+        let Some(preferred) = preferred
+            .map(str::to_string)
+            .or_else(|| accounts.first().map(|account| account.provider.clone()))
+        else {
             return Ok(None);
         };
         // A stable sort keeps the priority order inside each group.

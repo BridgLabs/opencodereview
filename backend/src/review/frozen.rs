@@ -629,9 +629,13 @@ fn accounts_db(inputs: &ReviewInputs) -> Result<Database, String> {
     inputs.open_db()
 }
 
-/// The model and effort `provider` reviews with, read for each stage so a change in the app
-/// reaches the next stage. Diagnostics, which have no database, use the defaults.
+/// The model and effort `provider` reviews with: the ones the review started with, so a change in
+/// the app reaches only reviews that start later. Without a pinned choice the current one is read,
+/// and diagnostics, which have no database, use the defaults.
 fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, String) {
+    if let Some(engine) = inputs.engines.as_ref().and_then(|pinned| pinned.engine(provider)) {
+        return engine;
+    }
     if inputs.db_handle.is_none() {
         return crate::providers::engines::default_engine(provider);
     }
@@ -644,7 +648,8 @@ fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, String) {
 /// before the other, skipping the ones this stage already tried.
 fn next_account(inputs: &ReviewInputs, tried: &[i64]) -> Result<crate::db::AiAccount, String> {
     let db = accounts_db(inputs)?;
-    if let Some(account) = db.pick_ai_account(tried)? {
+    let preferred = inputs.engines.as_ref().and_then(|pinned| pinned.provider.as_deref());
+    if let Some(account) = db.pick_ai_account_preferring(tried, preferred)? {
         return Ok(account);
     }
     Err(match db.next_ai_account_reset()? {

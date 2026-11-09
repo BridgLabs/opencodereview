@@ -2125,6 +2125,39 @@ fn accounts_of_removed_providers_are_dropped() {
 }
 
 #[test]
+fn a_review_keeps_the_provider_and_engines_it_started_with() {
+    let db = Db::for_test().open().unwrap();
+    let claude = db.create_ai_account("claude", "Work").unwrap();
+    let codex = db.create_ai_account("codex", "Codex").unwrap();
+    db.save_review_engine("claude", "claude-sonnet-5-5", "high").unwrap();
+    let pinned = crate::review::PinnedEngines::current(&db).unwrap();
+    assert_eq!(pinned.provider.as_deref(), Some("claude"));
+    // The app switches to ChatGPT while the review runs.
+    db.reorder_ai_accounts(&[codex.id, claude.id]).unwrap();
+    db.save_review_engine("claude", "claude-opus-5-5", "low").unwrap();
+    assert_eq!(db.pick_ai_account(&[]).unwrap().unwrap().id, codex.id);
+    assert_eq!(
+        db.pick_ai_account_preferring(&[], pinned.provider.as_deref())
+            .unwrap()
+            .unwrap()
+            .id,
+        claude.id
+    );
+    assert_eq!(
+        pinned.engine("claude"),
+        Some(("claude-sonnet-5-5".to_string(), "high".to_string()))
+    );
+    // Once the pinned provider's accounts are used up, the review still fails over.
+    assert_eq!(
+        db.pick_ai_account_preferring(&[claude.id], Some("claude"))
+            .unwrap()
+            .unwrap()
+            .id,
+        codex.id
+    );
+}
+
+#[test]
 fn ai_accounts_are_picked_by_priority_and_rest_after_limits() {
     let db = Db::for_test().open().unwrap();
     assert!(db.pick_ai_account(&[]).unwrap().is_none());

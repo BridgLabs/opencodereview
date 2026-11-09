@@ -198,6 +198,39 @@ pub struct ReviewInputs {
     pub archive_dir: PathBuf,
     /// The time this review has, when it has a fixed one (`ocr-bench`); None runs every step.
     pub budget: Option<std::sync::Arc<budget::Budget>>,
+    /// The provider and engines chosen when the review started, which every stage keeps even if
+    /// the choice in the app changes meanwhile. None reads the current choice at each stage.
+    pub engines: Option<std::sync::Arc<PinnedEngines>>,
+}
+
+/// The engine choice a review started with: the provider whose accounts go first, and each
+/// provider's model and effort, for stages that fail over to another provider.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PinnedEngines {
+    pub provider: Option<String>,
+    pub engines: Vec<(String, String, String)>,
+}
+
+impl PinnedEngines {
+    /// The current choice in `db`, to keep for a review starting now.
+    pub(crate) fn current(db: &Database) -> Result<Self, String> {
+        let provider = db.pick_ai_account(&[])?.map(|account| account.provider);
+        let engines = crate::providers::engines::PROVIDERS
+            .iter()
+            .map(|(provider, _)| {
+                db.review_engine(provider)
+                    .map(|(model, effort)| (provider.to_string(), model, effort))
+            })
+            .collect::<Result<_, String>>()?;
+        Ok(Self { provider, engines })
+    }
+
+    pub(crate) fn engine(&self, provider: &str) -> Option<(String, String)> {
+        self.engines
+            .iter()
+            .find(|(known, _, _)| known == provider)
+            .map(|(_, model, effort)| (model.clone(), effort.clone()))
+    }
 }
 
 impl ReviewInputs {
