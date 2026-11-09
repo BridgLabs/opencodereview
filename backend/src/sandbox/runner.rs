@@ -1100,7 +1100,7 @@ fn run(
     archive
         .materialize_new(Path::new("/evidence/snapshot"), &AtomicBool::new(false))
         .map_err(|e| e.to_string())?;
-    for (name, content) in files {
+    for (name, content) in &files {
         let path = Path::new("/work").join(name);
         private_dir(path.parent().ok_or("Missing evidence parent")?, 0o755)?;
         fs::OpenOptions::new()
@@ -1114,9 +1114,9 @@ fn run(
             })
             .map_err(|e| e.to_string())?;
     }
-    // OpenCode runs each tool call as its own step; its prompt lets one step read several files.
+    // OpenCode runs each tool call as its own step; its prompt carries the prepared files.
     let prompt = if provider == "opencode" {
-        crate::providers::opencode::adapt_prompt(&prompt)
+        crate::providers::opencode::adapt_prompt(&prompt, &files)
     } else {
         prompt
     };

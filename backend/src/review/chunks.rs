@@ -14,18 +14,36 @@ pub(crate) fn should_chunk_prepared_review(
                     > crate::review::policy::MAX_PROMPT_BYTES)
 }
 
-pub(crate) fn should_run_sharded_review(inputs: &ReviewInputs, reviewable_files: usize) -> bool {
-    let chunk_size = if inputs.review_chunk_size == 0 {
+/// OpenCode models think much slower than Claude and Codex, so a review that starts on OpenCode
+/// splits into chunks of at most this many files, run in parallel, once it has more than this many.
+pub(crate) const OPENCODE_CHUNK_SIZE: usize = 3;
+
+fn starts_on_opencode(inputs: &ReviewInputs) -> bool {
+    inputs.engines.as_ref().and_then(|engines| engines.provider.as_deref()) == Some("opencode")
+}
+
+pub(crate) fn review_chunk_size(inputs: &ReviewInputs) -> usize {
+    let size = if inputs.review_chunk_size == 0 {
         DEFAULT_REVIEW_CHUNK_SIZE
     } else {
         inputs.review_chunk_size.clamp(2, 20)
     };
+    if starts_on_opencode(inputs) {
+        size.min(OPENCODE_CHUNK_SIZE)
+    } else {
+        size
+    }
+}
+
+pub(crate) fn should_run_sharded_review(inputs: &ReviewInputs, reviewable_files: usize) -> bool {
+    let chunk_size = review_chunk_size(inputs);
     if reviewable_files <= chunk_size {
         return false;
     }
     match inputs.review_depth_mode.as_str() {
         "economic" => false,
         "deep" => true,
+        "auto" if starts_on_opencode(inputs) => true,
         "auto" => reviewable_files >= inputs.review_deep_threshold.max(chunk_size + 1),
         _ => reviewable_files >= DEFAULT_REVIEW_SHARD_THRESHOLD.max(chunk_size + 1),
     }
@@ -48,11 +66,7 @@ pub(crate) fn run_sharded_review(
         &sharded_phase_json("chunks", "running"),
         "Creating risk-aware review chunks...",
     );
-    let chunk_size = if inputs.review_chunk_size == 0 {
-        DEFAULT_REVIEW_CHUNK_SIZE
-    } else {
-        inputs.review_chunk_size.clamp(2, 20)
-    };
+    let chunk_size = review_chunk_size(inputs);
     let parallel_chunks = if inputs.review_parallel_chunks == 0 {
         DEFAULT_MAX_PARALLEL_REVIEW_CHUNKS
     } else {

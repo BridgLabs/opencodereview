@@ -377,6 +377,39 @@ fn auto_sharding_uses_current_review_scope() {
 }
 
 #[test]
+fn a_review_on_opencode_shards_into_smaller_chunks() {
+    let mut inputs = review_inputs("auto", 10, super::DEFAULT_REVIEW_CHUNK_SIZE);
+    let pinned = |provider: &str| {
+        Some(std::sync::Arc::new(super::PinnedEngines {
+            provider: Some(provider.to_string()),
+            engines: Vec::new(),
+        }))
+    };
+    inputs.engines = pinned("opencode");
+    assert_eq!(super::review_chunk_size(&inputs), super::chunks::OPENCODE_CHUNK_SIZE);
+    assert!(!super::should_run_sharded_review(
+        &inputs,
+        super::chunks::OPENCODE_CHUNK_SIZE
+    ));
+    assert!(super::should_run_sharded_review(
+        &inputs,
+        super::chunks::OPENCODE_CHUNK_SIZE + 1
+    ));
+    // Economic stays one execution, and a smaller configured chunk size still applies.
+    inputs.review_depth_mode = "economic".into();
+    assert!(!super::should_run_sharded_review(&inputs, 20));
+    inputs.review_chunk_size = 2;
+    assert_eq!(super::review_chunk_size(&inputs), 2);
+    // Claude and Codex keep the configured plan.
+    for provider in ["claude", "codex"] {
+        let mut inputs = review_inputs("auto", 10, super::DEFAULT_REVIEW_CHUNK_SIZE);
+        inputs.engines = pinned(provider);
+        assert_eq!(super::review_chunk_size(&inputs), super::DEFAULT_REVIEW_CHUNK_SIZE);
+        assert!(!super::should_run_sharded_review(&inputs, 9));
+    }
+}
+
+#[test]
 fn deep_does_not_shard_single_chunk_scope() {
     let inputs = review_inputs("deep", 20, super::DEFAULT_REVIEW_CHUNK_SIZE);
 
