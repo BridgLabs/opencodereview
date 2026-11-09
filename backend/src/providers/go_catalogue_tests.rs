@@ -204,6 +204,44 @@ fn advertised_reasoning_budget_is_independent_of_visible_output_limit() {
 }
 
 #[test]
+fn malformed_models_do_not_hide_supported_models_or_weaken_snapshots() {
+    let stable = fixture("stable-model", &[], "responses");
+    let mut original = serde_json::to_value(&stable.models[0]).unwrap();
+    original["status"] = Value::Null;
+    for (path, value) in [
+        ("/id", json!("../unsafe")),
+        ("/id", Value::Null),
+        ("/api", Value::Null),
+        ("/limit", json!({"context":65536,"output":8192,"new_field":true})),
+        ("/status", json!("preview")),
+        ("/capabilities/reasoning", Value::Null),
+        ("/release_date", Value::Null),
+        ("/api/responses/base_url", json!("https://opencode.ai/new-path")),
+    ] {
+        let mut unsupported = original.clone();
+        unsupported["id"] = json!("unsupported-model");
+        *unsupported
+            .pointer_mut(path)
+            .unwrap_or_else(|| panic!("missing {path}")) = value;
+        let bytes = serde_json::to_vec(&json!({"object":"list","data":[unsupported,original]})).unwrap();
+        let catalogue = Catalogue::parse(&bytes).unwrap();
+        assert_eq!(catalogue.models, stable.models, "{path}");
+        assert_eq!(catalogue.id, stable.id);
+        assert!(catalogue.select("unsupported-model", "").is_err());
+        let bytes = serde_json::to_vec(&json!({"object":"list","data":[unsupported]})).unwrap();
+        assert!(Catalogue::parse(&bytes).is_err());
+    }
+    let snapshot = stable.select("stable-model", "").unwrap();
+    let mut encoded = serde_json::to_value(&snapshot).unwrap();
+    encoded["model"]["limit"]["new_field"] = json!(true);
+    assert!(serde_json::from_value::<Snapshot>(encoded).is_err());
+    let mut bad = snapshot;
+    bad.model.status = Some("preview".into());
+    bad.id = digest(&(bad.catalogue_id.as_str(), &bad.model, bad.effort.as_str())).unwrap();
+    assert!(bad.validate("stable-model", "").is_err());
+}
+
+#[test]
 fn ambiguous_multi_transport_model_does_not_hide_other_models() {
     let stable = fixture("single-route-model", &["new-effort"], "responses")
         .models

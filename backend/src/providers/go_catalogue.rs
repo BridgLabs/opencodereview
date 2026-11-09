@@ -329,14 +329,18 @@ impl Catalogue {
         let mut seen = BTreeSet::new();
         let mut models = Vec::new();
         for source in data {
-            let id = source["id"].as_str().ok_or(INVALID)?;
-            if !selector(id) || !seen.insert(id) {
+            let Some(id) = source["id"].as_str().filter(|id| selector(id)) else {
+                continue;
+            };
+            if !seen.insert(id) {
                 return Err(INVALID.into());
             }
             if source["type"] != "chat" || source["capabilities"]["tools"]["supported"] != true {
                 continue;
             }
-            let api = source["api"].as_object().ok_or(INVALID)?;
+            let Some(api) = source["api"].as_object() else {
+                continue;
+            };
             // Do not guess a transport, and never pass arbitrary metadata/configuration through.
             let supported = api
                 .iter()
@@ -356,13 +360,17 @@ impl Catalogue {
                 continue;
             }
             let (protocol, transport) = supported[0];
-            let model: Model = serde_json::from_value(json!({
+            let Ok(model) = serde_json::from_value::<Model>(json!({
                 "id":id,"name":source["name"],"type":"chat","release_date":source["release_date"],"family":source["family"],"status":source["status"],
                 "modalities":source["modalities"],"limit":source["limit"],
                 "capabilities":{"tools":{"supported":true},"reasoning":source["capabilities"]["reasoning"],"temperature":source["capabilities"]["temperature"]},
                 "api":{(protocol):transport}
-            })).map_err(|_| INVALID)?;
-            model.validate()?;
+            })) else {
+                continue;
+            };
+            if model.validate().is_err() {
+                continue;
+            }
             models.push(model);
         }
         if models.is_empty() {
