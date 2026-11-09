@@ -400,7 +400,7 @@ pub fn preflight(
             .set(prepare_go(inputs))
             .map_err(|_| "OpenCode Go review catalogue was already frozen")?;
     }
-    let account = next_account(inputs, &[])?;
+    let account = next_prepared_account(inputs, &[])?;
     let targets = runner_targets(&inputs.model, cancel)?;
     for_each_prepared_request(
         inputs,
@@ -763,20 +763,12 @@ fn go_snapshot(inputs: &ReviewInputs) -> Result<&crate::providers::go_catalogue:
 
 /// The account a stage runs on: the first ready account by priority, the first account's provider
 /// before the other, skipping the ones this stage already tried.
-fn next_account(inputs: &ReviewInputs, tried: &[i64]) -> Result<crate::db::AiAccount, String> {
-    pick_account(inputs, tried, false)
-}
-
 fn next_prepared_account(inputs: &ReviewInputs, tried: &[i64]) -> Result<crate::db::AiAccount, String> {
-    pick_account(inputs, tried, true)
-}
-
-fn pick_account(inputs: &ReviewInputs, tried: &[i64], prepared: bool) -> Result<crate::db::AiAccount, String> {
     let db = accounts_db(inputs)?;
     let mut excluded = tried.to_vec();
     let mut unavailable = None;
     while let Some(account) = db.pick_ai_account(&excluded)? {
-        if prepared && account.provider == "opencode" {
+        if account.provider == "opencode" {
             let preparation = inputs
                 .frozen
                 .as_ref()

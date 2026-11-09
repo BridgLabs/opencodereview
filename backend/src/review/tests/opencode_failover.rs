@@ -65,6 +65,9 @@ fn opencode_review_failover_attributes_tokens_and_never_replays_infrastructure_f
         "removed",
         "missing",
         "discovery",
+        "missing-third",
+        "discovery-third",
+        "removed-third",
         "claude-missing",
         "codex-missing",
         "claude-discovery",
@@ -290,7 +293,7 @@ fn run_case(outcome: &str) {
     if outcome.contains("discovery") {
         crate::providers::go_catalogue::install_test_error("Synthetic Go catalogue unavailable");
     } else {
-        crate::providers::go_catalogue::install_test_source(if outcome == "removed" {
+        crate::providers::go_catalogue::install_test_source(if outcome.starts_with("removed") {
             crate::providers::go_catalogue::fixture("replacement-review-model", &[], "responses")
         } else {
             catalogue
@@ -381,6 +384,15 @@ fn run_case(outcome: &str) {
         .collect();
     if matches!(outcome, "removed" | "missing" | "discovery") {
         assert!(result.is_err(), "an unusable selected Go engine must stop preparation");
+        let error = result.err().unwrap();
+        assert!(
+            error.contains(match outcome {
+                "missing" => "Select an OpenCode Go model explicitly",
+                "discovery" => "Synthetic Go catalogue unavailable",
+                _ => "OpenCode Go model is no longer available",
+            }),
+            "{error}"
+        );
         assert!(
             attempts.is_empty(),
             "invalid saved Go selection must not invoke any inference or failover"
@@ -428,10 +440,17 @@ fn run_case(outcome: &str) {
     }
     if let Some(third) = third {
         result.expect("unavailable Go must not hide the prepared third provider");
-        assert_eq!(attempts.len(), 2);
-        assert_eq!(attempts[0]["account"], first.id);
-        assert_eq!(attempts[1]["account"], third.id);
-        assert_eq!(db.ai_account(first.id).unwrap().status, "limited");
+        if primary_provider == "opencode" {
+            assert_eq!(attempts.len(), 1);
+            assert_eq!(attempts[0]["account"], third.id);
+            assert_eq!(db.ai_account(first.id).unwrap().status, "ok");
+            assert!(db.ai_account(first.id).unwrap().last_used_at.is_none());
+        } else {
+            assert_eq!(attempts.len(), 2);
+            assert_eq!(attempts[0]["account"], first.id);
+            assert_eq!(attempts[1]["account"], third.id);
+            assert_eq!(db.ai_account(first.id).unwrap().status, "limited");
+        }
         assert_eq!(db.ai_account(second.id).unwrap().status, "ok");
         assert!(db.ai_account(second.id).unwrap().last_used_at.is_none());
         assert!(db.ai_account(third.id).unwrap().last_used_at.is_some());
