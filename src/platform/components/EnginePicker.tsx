@@ -11,9 +11,11 @@ import { AccountChoices, AddAccount } from "./EngineAccounts";
 export const ENGINES_QUERY_KEY = ["review-engines"] as const;
 
 type Provider = AiAccount["provider"];
-const PROVIDERS: Provider[] = ["claude", "codex"];
+const PROVIDERS: Provider[] = ["claude", "codex", "opencode"];
 
 const effortLabel: Record<string, string> = {
+  none: "None",
+  minimal: "Minimal",
   low: "Low",
   medium: "Medium",
   high: "High",
@@ -213,7 +215,13 @@ export function EnginePicker() {
                     </button>
                   );
                 })}
-                {models.length === 0 && <p className="px-2 py-3 text-caption text-fg-subtle">No model matches.</p>}
+                {models.length === 0 && (
+                  <p className="px-2 py-3 text-caption text-fg-subtle">
+                    {shown.models.length === 0
+                      ? `${shown.name}'s model list couldn't be loaded. Check the connection and reopen this menu.`
+                      : "No model matches."}
+                  </p>
+                )}
               </div>
               {shownModel && shownModel.efforts.length > 0 && (
                 <div className="flex flex-col gap-2 border-t border-line px-4 py-3">

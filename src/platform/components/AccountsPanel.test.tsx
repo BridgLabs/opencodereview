@@ -28,6 +28,10 @@ vi.mock("../../services/setupApi", () => ({
     codexAuthStart: vi.fn(),
     codexAuthEvents: vi.fn(),
     codexAuthCancel: vi.fn(),
+    opencodeKeySave: vi.fn(),
+    opencodeAuthStart: vi.fn(),
+    opencodeAuthEvents: vi.fn(),
+    opencodeAuthCancel: vi.fn(),
   },
 }));
 
@@ -209,6 +213,71 @@ it("adds a ChatGPT account with a one-time code from the add menu", async () => 
     await vi.waitFor(() =>
       expect(container.querySelector('[aria-label="Codex sign-in code"]')?.textContent).toBe("7KQ2-9XWPL"),
     );
+  } finally {
+    await unmount();
+  }
+});
+
+it("signs in to OpenCode with a one-time code from the add menu", async () => {
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(1)]);
+  vi.mocked(setupApi.opencodeAuthStart).mockResolvedValue(undefined);
+  vi.mocked(setupApi.opencodeAuthEvents).mockResolvedValue({
+    running: true,
+    events: [
+      {
+        kind: "prompt",
+        url: "https://opencode.ai/console/device?user_code=MCTD-DMGG&client_id=opencode-cli",
+        code: "MCTD-DMGG",
+      },
+    ],
+  });
+  const { container, unmount } = await renderPanel();
+  try {
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Add account"]')!.click());
+    await act(async () =>
+      [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+        .find((entry) => entry.textContent?.startsWith("OpenCodeOpenCode Go plan"))!
+        .click(),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(setupApi.opencodeAuthStart).toHaveBeenCalledWith(undefined);
+    await vi.waitFor(() =>
+      expect(container.querySelector('[aria-label="OpenCode sign-in code"]')?.textContent).toBe("MCTD-DMGG"),
+    );
+    expect(
+      [...container.querySelectorAll("a")].find((link) => link.textContent?.includes("Open sign-in page"))?.href,
+    ).toBe("https://opencode.ai/console/device?user_code=MCTD-DMGG&client_id=opencode-cli");
+  } finally {
+    await unmount();
+  }
+});
+
+it("adds an OpenCode API key from the menu", async () => {
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(1)]);
+  vi.mocked(setupApi.opencodeKeySave).mockResolvedValue({ ok: true });
+  const { container, unmount } = await renderPanel();
+  try {
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Add account"]')!.click());
+    await act(async () =>
+      [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+        .find((entry) => entry.textContent?.startsWith("OpenCode with a key"))!
+        .click(),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(container.textContent).toContain("Add an OpenCode API key");
+    const key = container.querySelector<HTMLInputElement>('input[aria-label="OpenCode API key"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(key, "sk-opencode-fixture-key");
+      key.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () =>
+      [...container.querySelectorAll("button")].find((button) => button.textContent === "Save key")!.click(),
+    );
+    expect(setupApi.opencodeKeySave).toHaveBeenCalledWith("sk-opencode-fixture-key", undefined);
   } finally {
     await unmount();
   }
