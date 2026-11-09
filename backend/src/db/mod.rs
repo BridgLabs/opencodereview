@@ -86,6 +86,9 @@ pub struct Settings {
     /// Runs one more execution per review stage that looks for what the first pass usually
     /// misses (tests, docs, maintainability, API shape) and adds only new findings.
     pub review_lens_pass: bool,
+    /// Prints the prepared files (pull request text, skill, diff, changed files) into Claude and
+    /// Codex stage prompts, instead of leaving the model to read each one. OpenCode always gets them.
+    pub review_inline_evidence: bool,
     /// Lists the review's lower-priority suggestions (tests, docs, naming) in a collapsed section
     /// of its summary. Off by default: a review then posts only its findings and questions.
     pub review_suggestions_enabled: bool,

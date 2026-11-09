@@ -293,6 +293,14 @@ pub(crate) fn set_engine(request: &mut Request, model: &str, effort: &str) -> Re
     validate(request)
 }
 
+/// Prints the stage's prepared files into its prompt (`providers::inline`), for Claude and Codex.
+pub(crate) fn print_prepared_files(request: &mut Request) -> Result<(), String> {
+    if let Request::Run { prompt, files, .. } = request {
+        *prompt = crate::providers::inline::adapt_prompt(prompt, files);
+    }
+    validate(request)
+}
+
 fn validate(request: &Request) -> Result<(), String> {
     if let Request::Run {
         model,

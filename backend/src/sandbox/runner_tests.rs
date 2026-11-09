@@ -146,6 +146,32 @@ fn round_trip_and_stage_scope_validation() {
 
 #[cfg(unix)]
 #[test]
+fn printing_prepared_files_keeps_the_stage_request_valid() {
+    let run = |prompt: String, source: String| Request::Run {
+        archive_id: None,
+        preflight: false,
+        account: 1,
+        provider: "claude".into(),
+        effort: String::new(),
+        model: "model-a".into(),
+        version: "v1".into(),
+        prompt,
+        files: BTreeMap::from([("context/changed/file.ts".into(), source)]),
+    };
+    let mut request = run("read snapshot".into(), "source".into());
+    print_prepared_files(&mut request).unwrap();
+    let Request::Run { prompt, .. } = &request else {
+        unreachable!()
+    };
+    assert!(prompt.starts_with("read snapshot\n# Prepared files"));
+    assert!(prompt.contains("==> /work/context/changed/file.ts <==\n     1\tsource\n"));
+    // A file the prompt has no room for stays on disk only, and the request still passes.
+    let mut request = run("p".repeat(150_000), "x\n".repeat(30_000));
+    print_prepared_files(&mut request).unwrap();
+    assert!(matches!(&request, Request::Run { prompt, .. } if prompt.len() == 150_000));
+}
+
+#[test]
 fn cancellation_returns_partial_usage_over_private_ipc() {
     let root = std::env::temp_dir().join(format!("sandbox-ipc-{}", secret().unwrap()));
     fs::create_dir(&root).unwrap();

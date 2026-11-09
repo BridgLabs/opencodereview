@@ -46,7 +46,7 @@ bench/                                   Public benchmark adapters (ReviewBench,
 - Accounts are tried in priority order, the first usable account's provider before the other (`pick_ai_account`, mirrored by `nextAccountId` in the UI); a usage limit rests the account and the same stage reruns on the next one.
 - Usage is reported in tokens only. Do not add currency or cost estimates.
 - GitHub access goes through the authenticated `gh` CLI. Do not add OpenCodeReview-managed GitHub tokens.
-- Configuration lives in Settings (Providers, Repository access, PR selection, Integrations) and the top-bar engine picker. Review execution and publishing are otherwise fixed defaults, except whether suggestions are posted (PR selection → Review comments → Post suggestions, off by default). `review_lens_pass` and `review_focus_files` are stored settings with no Settings screen; only `ocr-bench` turns them on.
+- Configuration lives in Settings (Providers, Repository access, PR selection, Integrations) and the top-bar engine picker. Review execution and publishing are otherwise fixed defaults, except whether suggestions are posted (PR selection → Review comments → Post suggestions, off by default). `review_lens_pass`, `review_focus_files` and `review_inline_evidence` are stored settings with no Settings screen; only `ocr-bench` turns them on.
 - The index is file metadata, a package and import graph and lightweight symbols. Symbol extraction is not an AST parser; do not describe it as one.
 - Never check out or switch a user's branch for PR context. Use fetch, diff and show against refs.
 - Long-running work never runs synchronously in a request. Use background jobs with visible state and actionable errors, and clean up timers, subprocesses and file handles.

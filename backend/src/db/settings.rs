@@ -66,6 +66,9 @@ impl Database {
             .filter(|value| *value >= 0)
             .unwrap_or(0);
         let review_lens_pass = self.setting("review_lens_pass")?.is_some_and(|value| value == "true");
+        let review_inline_evidence = self
+            .setting("review_inline_evidence")?
+            .is_some_and(|value| value == "true");
         let review_suggestions_enabled = self
             .setting("review_suggestions_enabled")?
             .map(|value| value == "true")
@@ -137,6 +140,7 @@ impl Database {
             review_max_files,
             review_focus_files,
             review_lens_pass,
+            review_inline_evidence,
             review_suggestions_enabled,
             dismiss_stale_approvals,
             auto_index_stale_repos,
@@ -171,6 +175,7 @@ impl Database {
         "review_max_files",
         "review_focus_files",
         "review_lens_pass",
+        "review_inline_evidence",
         "review_suggestions_enabled",
         "dismiss_stale_approvals",
         "auto_index_stale_repos",
@@ -221,7 +226,11 @@ impl Database {
         if key == "review_focus_files" && value.parse::<i64>().ok().filter(|value| *value >= 0).is_none() {
             return Err("review_focus_files must be zero or a positive number of files.".to_string());
         }
-        if matches!(key, "review_lens_pass" | "review_suggestions_enabled") && !matches!(value, "true" | "false") {
+        if matches!(
+            key,
+            "review_lens_pass" | "review_inline_evidence" | "review_suggestions_enabled"
+        ) && !matches!(value, "true" | "false")
+        {
             return Err(format!("{key} must be true or false."));
         }
         self.conn

@@ -729,3 +729,33 @@ fn the_final_phase_shows_queued_once_the_last_running_batch_finishes() {
     assert_eq!(tail, "1 waits");
     assert!(phase.contains(queued), "shown once nothing runs: {shown:?}");
 }
+
+#[test]
+fn prepared_files_are_printed_only_with_the_setting_and_for_other_providers_than_opencode() {
+    let prints = super::frozen::prints_prepared_files;
+    let mut inputs = review_inputs("auto", 0, 0);
+    assert!(!prints(&inputs, "claude"));
+    let db = crate::db::Db::for_test();
+    inputs.db_handle = Some(db.clone());
+    assert!(!prints(&inputs, "claude"));
+    let settings = db.open().unwrap();
+    assert!(settings.save_setting("review_inline_evidence", "yes").is_err());
+    settings.save_setting("review_inline_evidence", "true").unwrap();
+    drop(settings);
+    assert!(prints(&inputs, "claude") && prints(&inputs, "codex"));
+    // OpenCode's runner prints them already.
+    assert!(!prints(&inputs, "opencode"));
+    // A chunk reviewed with the files printed is never reused for a review that reads them.
+    let key =
+        |inputs: &super::ReviewInputs| super::chunks::with_engine(serde_json::json!({}), inputs)["engine"][3].clone();
+    inputs.engines = Some(std::sync::Arc::new(super::PinnedEngines {
+        provider: Some("claude".into()),
+        engines: vec![("claude".into(), "claude-opus-5-5".into(), "medium".into())],
+    }));
+    assert_eq!(key(&inputs), crate::providers::inline::PROMPT_ADAPTATION);
+    db.open()
+        .unwrap()
+        .save_setting("review_inline_evidence", "false")
+        .unwrap();
+    assert_eq!(key(&inputs), "");
+}

@@ -368,6 +368,9 @@ pub fn for_each_prepared_request(
             runner::stage_request(&inputs.model, version, account, provider, root, stage, context, prompt)?;
         let (model, effort) = engine_for(inputs, provider);
         runner::set_engine(&mut request, &model, &effort)?;
+        if prints_prepared_files(inputs, provider) {
+            runner::print_prepared_files(&mut request)?;
+        }
         if let runner::Request::Run { files, .. } = &request {
             frozen
                 .archive
@@ -520,6 +523,9 @@ pub(super) fn execute(
             )?;
             let (model, effort) = engine_for(inputs, &account.provider);
             runner::set_engine(&mut request, &model, &effort)?;
+            if prints_prepared_files(inputs, &account.provider) {
+                runner::print_prepared_files(&mut request)?;
+            }
             if inputs.db_handle.is_some() {
                 let label = crate::providers::engines::label(&account.provider, &model, &effort);
                 let _ = accounts_db(inputs).and_then(|db| db.set_review_run_model(inputs.run_id, &label));
@@ -642,6 +648,16 @@ pub(crate) fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, Stri
     accounts_db(inputs)
         .and_then(|db| db.review_engine(provider))
         .unwrap_or_else(|_| crate::providers::engines::default_engine(provider))
+}
+
+/// Whether `provider`'s stage prompts get the prepared files printed by `review_inline_evidence`.
+/// OpenCode's prompts always carry them, printed by the runner.
+pub(crate) fn prints_prepared_files(inputs: &ReviewInputs, provider: &str) -> bool {
+    provider != "opencode"
+        && inputs
+            .open_db()
+            .and_then(|db| db.settings())
+            .is_ok_and(|settings| settings.review_inline_evidence)
 }
 
 /// The account a stage runs on: the first ready account by priority, the first account's provider

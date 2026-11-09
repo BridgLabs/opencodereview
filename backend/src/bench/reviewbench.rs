@@ -103,6 +103,11 @@ pub fn run_from_env() -> Result<(), String> {
         ),
         ("RB_CONFIG_LENS_PASS", "review_lens_pass", "true".to_string()),
         (
+            "RB_CONFIG_INLINE_EVIDENCE",
+            "review_inline_evidence",
+            "false".to_string(),
+        ),
+        (
             "RB_CONFIG_SUGGESTIONS",
             "review_suggestions_enabled",
             "false".to_string(),

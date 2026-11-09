@@ -1266,6 +1266,8 @@ pub(crate) fn with_engine(mut payload: serde_json::Value, inputs: &ReviewInputs)
     let (model, effort) = pinned.engine(&provider).unwrap_or_default();
     let runtime = if provider == "opencode" {
         crate::providers::opencode::PROMPT_ADAPTATION
+    } else if super::frozen::prints_prepared_files(inputs, &provider) {
+        crate::providers::inline::PROMPT_ADAPTATION
     } else {
         ""
     };
