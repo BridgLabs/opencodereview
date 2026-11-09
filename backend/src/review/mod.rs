@@ -384,6 +384,26 @@ fn validate_review_stage_inputs(context: &Path, additional_inputs: Option<&Path>
     crate::review::policy::validate_prepared_inputs(context_bytes + additional, prompt_bytes)
 }
 
+/// The model a stage ran on. Claude's transcript names it; Codex's and OpenCode's only name the
+/// provider, whose model is the one the review uses for it. Without a transcript, the model of the
+/// provider the review started on.
+fn stage_model(inputs: &ReviewInputs, usage: &RunUsage) -> String {
+    let provider = match usage.model.as_deref() {
+        Some(provider @ ("codex" | "opencode")) => provider,
+        Some(model) => return model.to_string(),
+        None => match inputs.engines.as_ref().and_then(|pinned| pinned.provider.as_deref()) {
+            Some(provider) => provider,
+            None => return inputs.model.clone(),
+        },
+    };
+    let (model, _) = frozen::engine_for(inputs, provider);
+    if model.is_empty() {
+        provider.to_string()
+    } else {
+        model
+    }
+}
+
 fn record_stage(
     inputs: &ReviewInputs,
     stage: &str,
@@ -402,7 +422,7 @@ fn record_stage(
             pr_id: inputs.pr_id,
             stage: stage.to_string(),
             chunk_id,
-            model: Some(inputs.model.clone()),
+            model: Some(stage_model(inputs, usage)),
             status: status.to_string(),
             cache_key,
             cache_hit: status == "cached",

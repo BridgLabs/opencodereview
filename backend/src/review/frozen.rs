@@ -632,7 +632,7 @@ fn accounts_db(inputs: &ReviewInputs) -> Result<Database, String> {
 /// The model and effort `provider` reviews with: the ones the review started with, so a change in
 /// the app reaches only reviews that start later. Without a pinned choice the current one is read,
 /// and diagnostics, which have no database, use the defaults.
-fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, String) {
+pub(crate) fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, String) {
     if let Some(engine) = inputs.engines.as_ref().and_then(|pinned| pinned.engine(provider)) {
         return engine;
     }

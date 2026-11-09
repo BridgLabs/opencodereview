@@ -2378,3 +2378,32 @@ fn opencode_step_finish_events_sum_tokens() {
     );
     assert_eq!(usage.model.as_deref(), Some("opencode"));
 }
+
+#[test]
+fn stages_record_the_model_they_ran_on() {
+    let mut inputs = review_inputs("auto", 0, 0);
+    inputs.engines = Some(std::sync::Arc::new(super::PinnedEngines {
+        provider: Some("opencode".into()),
+        engines: vec![
+            ("opencode".into(), "opencode/deepseek-v4.1-flash".into(), "high".into()),
+            ("codex".into(), "gpt-5.5".into(), "medium".into()),
+        ],
+    }));
+    let usage = |model: Option<&str>| super::RunUsage {
+        model: model.map(str::to_string),
+        ..Default::default()
+    };
+    assert_eq!(
+        super::stage_model(&inputs, &usage(Some("opencode"))),
+        "opencode/deepseek-v4.1-flash"
+    );
+    assert_eq!(super::stage_model(&inputs, &usage(Some("codex"))), "gpt-5.5");
+    assert_eq!(
+        super::stage_model(&inputs, &usage(Some("claude-opus-5-5"))),
+        "claude-opus-5-5"
+    );
+    assert_eq!(
+        super::stage_model(&inputs, &usage(None)),
+        "opencode/deepseek-v4.1-flash"
+    );
+}
