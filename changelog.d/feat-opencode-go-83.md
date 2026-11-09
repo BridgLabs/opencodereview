@@ -12,3 +12,7 @@
 - Separate chunk caches by provider, model, effort and frozen Go metadata; do not reuse mixed-engine results.
 - Separate chunk execution time from time spent waiting for a runner, and show cancellation reasons.
 - Allow review stages up to 30 minutes of inference with a fixed deadline that activity cannot extend.
+- Keep supported Go models available when discovery includes unsupported entries, and accept successful retries.
+- Read bounded windows from large evidence files without treating ordinary Unicode escape text as leaked credentials.
+- Require a confirmed Go model before selecting an account for reviews, and report rejected model saves.
+- Skip unavailable Go backups during failover without refreshing the review's frozen catalogue.
