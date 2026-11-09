@@ -31,12 +31,11 @@ fn escaped_ascii_contains(text: &str, secrets: &[String]) -> Result<bool, ()> {
         let mut index = 0;
         let mut changed = false;
         while index < inspected.len() {
-            if inspected[index..].starts_with(b"\\u") {
-                let escape = inspected.get(index + 2..index + 6).ok_or(())?;
+            if let Some(escape) = inspected
+                .get(index + 2..index + 6)
+                .filter(|escape| inspected[index..].starts_with(b"\\u") && escape.iter().all(u8::is_ascii_hexdigit))
+            {
                 let hex = std::str::from_utf8(escape).map_err(|_| ())?;
-                if !escape.iter().all(u8::is_ascii_hexdigit) {
-                    return Err(());
-                }
                 let code = u16::from_str_radix(hex, 16).map_err(|_| ())?;
                 if code <= 0x7f {
                     normalized.push(code as u8);
@@ -119,8 +118,6 @@ fn redact_text(text: &str, secrets: &[String], depth: usize) -> Result<(String, 
             }
         } else {
             let mut line = line.to_string();
-            // Detection only: never normalize evidence bytes. Each pass shrinks ASCII
-            // escapes; malformed escapes or exhausted inspection fail closed.
             found |= escaped_ascii_contains(&line, secrets)?;
             for secret in secrets {
                 let mut escaped = secret.clone();
@@ -504,7 +501,26 @@ mod tests {
             redact_text(safe, std::slice::from_ref(&key), 0).unwrap(),
             (safe.into(), false)
         );
-        assert!(redact_text(r"prefix \u00xz suffix", std::slice::from_ref(&key), 0).is_err());
+        for safe in [
+            r"prefix \u00xz suffix",
+            r"\u{1F600}",
+            r"\usepackage",
+            r"\url",
+            r"C:\users\",
+            r"trailing \u",
+        ] {
+            for text in [safe.to_string(), serde_json::json!({"body":safe}).to_string()] {
+                assert_eq!(
+                    redact_text(&text, std::slice::from_ref(&key), 0).unwrap(),
+                    (text, false)
+                );
+            }
+            assert!(
+                redact_text(&format!("{safe} {encoded}"), std::slice::from_ref(&key), 0)
+                    .unwrap()
+                    .1
+            );
+        }
         let exhausted = "prefix \\u005c".to_string() + &"u005c".repeat(65) + "u0070 suffix";
         assert!(redact_text(&exhausted, &[key], 0).is_err());
     }
