@@ -370,6 +370,16 @@ fn frozen_evidence_binds_a_quote_cited_without_revision_to_the_head_that_holds_i
     materialize().unwrap();
     let rebound: Value = serde_json::from_str(&fs::read_to_string(&report_path).unwrap()).unwrap();
     assert_eq!(rebound["findings"][0]["evidence"][2]["revision"], HEAD);
+    // An explicit null source is no source: the quote is bound and its miscounted line corrected.
+    write(vec![
+        code.clone(),
+        code.clone(),
+        json!({"path":"src/media.ts","source":null,"line":2,"quote":"let value = 1;"}),
+    ]);
+    materialize().unwrap();
+    let rebound: Value = serde_json::from_str(&fs::read_to_string(&report_path).unwrap()).unwrap();
+    assert_eq!(rebound["findings"][0]["evidence"][2]["revision"], HEAD);
+    assert_eq!(rebound["findings"][0]["evidence"][2]["line"], 1);
     let elsewhere = json!({"path":"src/media.ts","line":1,"quote":"let other = 2;"});
     write(vec![code.clone(), code.clone(), elsewhere]);
     assert_eq!(

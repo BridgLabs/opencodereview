@@ -449,7 +449,7 @@ impl<'a> EvidenceResolver<'a> {
                         ) else {
                             continue;
                         };
-                        if reference.get("source").is_some() {
+                        if !reference["source"].is_null() {
                             continue;
                         }
                         let content = match archive.resolve(revision, path) {
