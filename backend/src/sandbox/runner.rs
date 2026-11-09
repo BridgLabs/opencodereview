@@ -850,6 +850,7 @@ fn wrap_report(value: serde_json::Value) -> serde_json::Value {
 /// suggestion, and mark suggestions and questions with the `kind` only findings carry. Only values
 /// equal to the report's own are dropped; anything else is left for validation to reject.
 fn drop_repeated_identity(report: &mut serde_json::Value) {
+    numeric_version(report);
     let identity = ["contractVersion", "snapshotId"].map(|key| (key, report.get(key).cloned()));
     for (list, kind) in [
         ("findings", None),
@@ -860,6 +861,9 @@ fn drop_repeated_identity(report: &mut serde_json::Value) {
             continue;
         };
         for point in points.iter_mut().filter_map(serde_json::Value::as_object_mut) {
+            if let Some(version) = point.get_mut("contractVersion") {
+                numeric_version_value(version);
+            }
             for (key, value) in &identity {
                 if value.is_some() && point.get(*key) == value.as_ref() {
                     point.remove(*key);
@@ -869,6 +873,20 @@ fn drop_repeated_identity(report: &mut serde_json::Value) {
                 point.remove("kind");
             }
         }
+    }
+}
+
+/// Other CLIs sometimes write the contract version as a string (`"2"`); a whole number in a string
+/// becomes the number, anything else is left for validation to reject.
+fn numeric_version(object: &mut serde_json::Value) {
+    if let Some(version) = object.get_mut("contractVersion") {
+        numeric_version_value(version);
+    }
+}
+
+fn numeric_version_value(version: &mut serde_json::Value) {
+    if let Some(number) = version.as_str().and_then(|text| text.trim().parse::<u32>().ok()) {
+        *version = number.into();
     }
 }
 
@@ -1020,6 +1038,10 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
     }
     let decisions = if lenient {
         decisions
+            .map(|mut value| {
+                numeric_version(&mut value);
+                value
+            })
             .filter(|value| !value.is_null() && value.as_array().is_none_or(|items| !items.is_empty()))
             // Decisions holding only the frozen identity are no decisions.
             .filter(|value| {

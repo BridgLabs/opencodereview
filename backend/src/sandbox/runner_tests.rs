@@ -702,3 +702,33 @@ fn final_response_of_other_clis_drops_the_identity_repeated_in_every_point() {
     );
     assert!(decisions.is_some());
 }
+
+#[test]
+fn final_response_of_other_clis_reads_a_contract_version_written_as_a_string() {
+    let report = json!({"contractVersion":"2","snapshotId":"s","reviewedFiles":["a.rs"],"missingEvidence":[],"findings":[
+        {"contractVersion":"2","snapshotId":"s","kind":"finding"}
+    ]});
+    let decision = json!({"candidateId":"candidate-1","decision":"discard","reason":"Guard"});
+    let output =
+        json!({"report":report,"findingDecisions":{"contractVersion":"2","snapshotId":"s","decisions":[decision]}});
+    let (actual, decisions) = parse_final_response(&output.to_string(), true).unwrap();
+    let actual = serde_json::from_str::<serde_json::Value>(&actual).unwrap();
+    assert_eq!(actual["contractVersion"], 2);
+    assert_eq!(actual["findings"][0], json!({"kind":"finding"}));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&decisions.unwrap()).unwrap()["contractVersion"],
+        2
+    );
+    // Only a whole number is read; Claude's output stays as written.
+    let odd = json!({"report":{"contractVersion":"v2","reviewedFiles":[],"missingEvidence":[],"findings":[]}});
+    let (odd, _) = parse_final_response(&odd.to_string(), true).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&odd).unwrap()["contractVersion"],
+        "v2"
+    );
+    let (strict, _) = parse_final_response(&json!({"report":report}).to_string(), false).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&strict).unwrap()["contractVersion"],
+        "2"
+    );
+}
