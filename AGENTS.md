@@ -6,7 +6,7 @@ Guide for contributors and AI coding agents working on OpenCodeReview. Read it b
 
 ```text
 src/, src/platform/                      React frontend: onboarding, reviews, indexing, skills, settings
-backend/src/providers/                   AI CLIs: claude.rs (CLI arguments, tool policy), codex.rs, engines.rs (models)
+backend/src/providers/                   AI CLIs: claude.rs (CLI arguments, tool policy), codex.rs, opencode.rs, engines.rs (models)
 backend/src/accounts/                    AI account credentials, plan usage, sign-in projection into runners
 backend/src/sandbox/                     ocr-sandbox: runner, egress proxy, read commands, tool guard
 backend/src/review/                      Review orchestration, scope, coverage, evidence, findings, validation
@@ -41,7 +41,7 @@ bench/                                   Public benchmark adapters (ReviewBench,
 ## Product rules
 
 - OpenCodeReview is reviews, indexing and skills. Do not add unrelated product areas without a discussion in an issue first.
-- Reviews run Claude Code (`claude --print`) or Codex (`codex exec`). Each provider's model and effort come from the list in `backend/src/providers/engines.rs`, picked in the top-bar engine picker (`EnginePicker`, stored as `review_engine_<provider>`). The first entry is the default: Claude Opus 5.5 at medium effort, and Codex's own default model at medium. Add models only to that list; do not add other providers without a product discussion.
+- Reviews run Claude Code (`claude --print`), Codex (`codex exec`) or OpenCode (`opencode run --standalone`, OpenCode Go or Zen models only, signed in to the OpenCode console with a device code or with an API key; trusted configuration and `policies` in `opencode.rs`, project configuration disabled). Each provider's model and effort come from the list in `backend/src/providers/engines.rs`, picked in the top-bar engine picker (`EnginePicker`, stored as `review_engine_<provider>`). The first entry is the default: Claude Opus 5.5 at medium effort, and Codex's own default model at medium. Add models only to that list; do not add other providers without a product discussion. OpenCode is the exception: its models come from OpenCode's public Go and Zen model lists on opencode.ai (`opencode_catalogue.rs`, refreshed hourly, free models left out), checked by the server; runners check only the `<provider>/<model>` shape.
 - All AI CLIs are baked into the image at pinned, checksum-verified versions. Do not add runtime CLI installs or auto-updates.
 - Accounts are tried in priority order, the first usable account's provider before the other (`pick_ai_account`, mirrored by `nextAccountId` in the UI); a usage limit rests the account and the same stage reruns on the next one.
 - Usage is reported in tokens only. Do not add currency or cost estimates.
