@@ -809,8 +809,9 @@ struct FinalResponse {
 }
 
 /// Other CLIs sometimes write the report without its wrapper, or some report fields (such as an
-/// empty `requestedFiles`) beside it instead of inside it. The report's own values win, and the
-/// report is validated as usual afterwards.
+/// empty `requestedFiles`) beside it instead of inside it. A field the report already holds with
+/// another value stays outside, so the response is rejected instead of one of the two being
+/// dropped; the report is validated as usual afterwards.
 fn wrap_report(value: serde_json::Value) -> serde_json::Value {
     const WRAPPER: [&str; 4] = ["report", "findingDecisions", "contractVersion", "snapshotId"];
     let serde_json::Value::Object(mut fields) = value else {
@@ -832,6 +833,10 @@ fn wrap_report(value: serde_json::Value) -> serde_json::Value {
         .collect::<Vec<_>>();
     if let Some(serde_json::Value::Object(_)) = fields.get("report") {
         for key in stray {
+            let held = fields["report"].get(&key);
+            if held.is_some_and(|held| held != &fields[&key]) {
+                continue;
+            }
             let value = fields.remove(&key).expect("a listed field");
             if let Some(serde_json::Value::Object(report)) = fields.get_mut("report") {
                 report.entry(key).or_insert(value);

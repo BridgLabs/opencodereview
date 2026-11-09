@@ -636,7 +636,7 @@ fn a_fence_mentioned_inside_the_report_is_not_read_as_one() {
 fn final_response_of_other_clis_takes_report_fields_written_beside_or_without_the_wrapper() {
     let report = json!({"reviewedFiles":["a.ts"],"missingEvidence":[],"findings":[]});
     let decision = json!({"candidateId":"candidate-1","decision":"keep","commentIndex":0,"reason":"Verified"});
-    let beside = json!({"report":report,"requestedFiles":[],"findings":["ignored"]}).to_string();
+    let beside = json!({"report":report,"requestedFiles":[],"findings":[]}).to_string();
     let (actual, _) = parse_final_response(&beside, true).unwrap();
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
@@ -656,6 +656,9 @@ fn final_response_of_other_clis_takes_report_fields_written_beside_or_without_th
         assert!(parse_final_response(&strict, false).is_err(), "{strict}");
     }
     assert!(parse_final_response(&json!({"title":"x"}).to_string(), true).is_err());
+    // Findings written beside a report that holds other findings are never dropped: the response fails.
+    let conflict = json!({"report":report,"findings":[{"title":"lost"}]}).to_string();
+    assert!(parse_final_response(&conflict, true).is_err());
 }
 
 #[test]
