@@ -737,6 +737,31 @@ impl Database {
         Ok(changed == 1)
     }
 
+    /// Why `try_begin_review_post` refused `run_id`, worded for the user. A post of a commit and
+    /// base another review already posted is the common case, so it gets its own message.
+    pub fn review_post_refusal(&self, run_id: i64, automatic: bool) -> Result<String, String> {
+        let posted: bool = self
+            .conn
+            .query_row(
+                "SELECT EXISTS (
+                   SELECT 1 FROM review_runs run JOIN review_runs other
+                     ON other.pr_id = run.pr_id AND other.head_sha = run.head_sha AND other.id != run.id
+                   WHERE run.id = $1 AND other.status = 'posted'
+                     AND other.stacked_base_ref IS NOT DISTINCT FROM run.stacked_base_ref
+                     AND other.reviewed_base_sha IS NOT DISTINCT FROM run.reviewed_base_sha
+                 )",
+                params![run_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(match (posted, automatic) {
+            (true, _) => "A review of this commit was already posted to GitHub. A new commit can be reviewed and posted again.",
+            (false, true) => "Review, finding selection, or automatic publishing settings changed, or publication is already in progress. Reload before retrying.",
+            (false, false) => "This review or its finding selection changed, or publication is already in progress. Reload before retrying.",
+        }
+        .to_string())
+    }
+
     pub fn reset_review_posting(&self, run_id: i64) -> Result<(), String> {
         self.conn
             .execute(
