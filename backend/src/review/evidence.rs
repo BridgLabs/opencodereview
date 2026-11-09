@@ -420,6 +420,27 @@ impl<'a> EvidenceResolver<'a> {
                         continue;
                     };
                     for reference in references {
+                        // A code quote cited without its revision is bound to the head only when
+                        // the head holds that exact text there.
+                        if reference.is_object() && reference["revision"].is_null() && reference["source"].is_null() {
+                            let head = &archive.scope().head_sha;
+                            let held = match (
+                                reference["path"].as_str(),
+                                reference["line"].as_u64(),
+                                reference["quote"].as_str(),
+                            ) {
+                                (Some(path), Some(line), Some(quote)) if path != "PR.md" => archive
+                                    .resolve(head, path)
+                                    .ok()
+                                    .and_then(|content| quoted_line(content, line as usize, quote))
+                                    .is_some(),
+                                _ => false,
+                            };
+                            if held {
+                                reference["revision"] = head.clone().into();
+                                moved = true;
+                            }
+                        }
                         let (Some(revision), Some(path), Some(line), Some(quote)) = (
                             reference["revision"].as_str(),
                             reference["path"].as_str(),

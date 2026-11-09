@@ -341,6 +341,44 @@ fn frozen_evidence_rejects_unavailable_optional_context() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn frozen_evidence_binds_a_quote_cited_without_revision_to_the_head_that_holds_it() {
+    let files = vec!["src/media.ts".to_string()];
+    let inputs = frozen_inputs(&[(files[0].clone(), LINE.to_string())]);
+    let (root, context, map, diff) = fixture(-22091, &inputs, &files);
+    frozen::prepare_stage(&inputs, &context, &map.reviewable_files, &diff, MERGE_BASE).unwrap();
+    let code = json!({"path":"src/media.ts","revision":HEAD,"line":1,"quote":"let value = 1;"});
+    let bare = json!({"path":"src/media.ts","line":1,"quote":"let value = 1;"});
+    let report_path = root.join("report.json");
+    let write = |evidence: Vec<Value>| {
+        let report = json!({"contractVersion":2,"snapshotId":snapshot_id(&inputs),"reviewedFiles":files,"missingEvidence":[],"findings":[{"kind":"finding","title":"Missing context","detail":"The changed code needs review","action":"Keep the guard","path":"src/media.ts","line":1,"side":"RIGHT","evidence":evidence,"counterEvidence":[code.clone()]}]});
+        fs::write(&report_path, report.to_string()).unwrap();
+    };
+    let materialize = || {
+        frozen::materialize(
+            &inputs,
+            &report_path,
+            &context,
+            &map.reviewable_files,
+            HEAD,
+            &diff,
+            &root.join("summary.md"),
+            &root.join("comments.json"),
+        )
+    };
+    write(vec![code.clone(), code.clone(), bare]);
+    materialize().unwrap();
+    let rebound: Value = serde_json::from_str(&fs::read_to_string(&report_path).unwrap()).unwrap();
+    assert_eq!(rebound["findings"][0]["evidence"][2]["revision"], HEAD);
+    let elsewhere = json!({"path":"src/media.ts","line":1,"quote":"let other = 2;"});
+    write(vec![code.clone(), code.clone(), elsewhere]);
+    assert_eq!(
+        materialize().unwrap_err(),
+        "Incomplete review: code evidence requires an explicit frozen revision [findings[0].evidence[2]]"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn chunk_result(
     inputs: &ReviewInputs,
     root: &Path,
