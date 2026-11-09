@@ -808,6 +808,39 @@ struct FinalResponse {
     snapshot_id: Option<serde_json::Value>,
 }
 
+/// Other CLIs sometimes write the report without its wrapper, or some report fields (such as an
+/// empty `requestedFiles`) beside it instead of inside it. The report's own values win, and the
+/// report is validated as usual afterwards.
+fn wrap_report(value: serde_json::Value) -> serde_json::Value {
+    const WRAPPER: [&str; 4] = ["report", "findingDecisions", "contractVersion", "snapshotId"];
+    let serde_json::Value::Object(mut fields) = value else {
+        return value;
+    };
+    if !fields.contains_key("report") {
+        if !fields.contains_key("reviewedFiles") {
+            return serde_json::Value::Object(fields);
+        }
+        let decisions = fields.remove("findingDecisions");
+        let mut wrapper = serde_json::Map::from_iter([("report".to_string(), serde_json::Value::Object(fields))]);
+        wrapper.extend(decisions.map(|decisions| ("findingDecisions".to_string(), decisions)));
+        return serde_json::Value::Object(wrapper);
+    }
+    let stray = fields
+        .keys()
+        .filter(|key| !WRAPPER.contains(&key.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if let Some(serde_json::Value::Object(_)) = fields.get("report") {
+        for key in stray {
+            let value = fields.remove(&key).expect("a listed field");
+            if let Some(serde_json::Value::Object(report)) = fields.get_mut("report") {
+                report.entry(key).or_insert(value);
+            }
+        }
+    }
+    serde_json::Value::Object(fields)
+}
+
 /// Escapes backslashes the model left unescaped inside JSON strings, as in a quoted `\d`.
 /// Valid escapes are kept, so quotes still have to match the frozen source exactly.
 fn escape_stray_backslashes(text: &str) -> String {
@@ -904,13 +937,24 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
             )
         })?,
     };
-    let parse = |body: &str| {
-        let mut objects = serde_json::Deserializer::from_str(body).into_iter::<FinalResponse>();
-        objects
+    let invalid = |error: serde_json::Error| format!("Review final response is not valid structured JSON ({error})");
+    let parse = |body: &str| -> Result<(FinalResponse, bool), String> {
+        let closed = |offset: usize| body[offset..].trim_start().starts_with("```");
+        if !lenient {
+            let mut objects = serde_json::Deserializer::from_str(body).into_iter::<FinalResponse>();
+            let response = objects
+                .next()
+                .ok_or_else(|| "Review final response is empty".to_string())?
+                .map_err(invalid)?;
+            return Ok((response, closed(objects.byte_offset())));
+        }
+        let mut objects = serde_json::Deserializer::from_str(body).into_iter::<serde_json::Value>();
+        let value = objects
             .next()
             .ok_or_else(|| "Review final response is empty".to_string())?
-            .map(|response| (response, body[objects.byte_offset()..].trim_start().starts_with("```")))
-            .map_err(|error| format!("Review final response is not valid structured JSON ({error})"))
+            .map_err(invalid)?;
+        let response = serde_json::from_value(wrap_report(value)).map_err(invalid)?;
+        Ok((response, closed(objects.byte_offset())))
     };
     let (response, closed) = parse(&text[start..]).or_else(|error| {
         let escaped = escape_stray_backslashes(&text[start..]);
@@ -918,7 +962,8 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
             .or_else(|_| parse(&drop_unmatched_closers(&escaped)))
             .map_err(|_| error)
     })?;
-    if fence.is_some() && !text.starts_with('{') && !closed {
+    // Other CLIs sometimes stop right after the object; the object itself was read whole.
+    if fence.is_some() && !text.starts_with('{') && !closed && !lenient {
         return Err("Review final response has an unclosed JSON fence".into());
     }
     let unwrap = |value: serde_json::Value| match value {

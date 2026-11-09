@@ -7,3 +7,5 @@
 
 - A chunk reviewed with one provider, model or effort is no longer reused for a review that runs
   on another.
+- An OpenCode or Codex review no longer fails when the model writes report fields beside the
+  report, sends the report without its wrapper, or leaves its JSON fence unclosed.
