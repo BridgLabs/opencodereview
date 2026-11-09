@@ -13,6 +13,9 @@ fn parses_pull_request_urls_and_short_references() {
         ("https://github.com/acme/api/pull/12/files?w=1", "acme/api", 12),
         ("https://ghe.example.com/acme/api/pull/7#discussion", "acme/api", 7),
         ("github.com/acme/api/pull/3", "acme/api", 3),
+        ("//github.com/acme/api/pull/12", "acme/api", 12),
+        ("https:/github.com/acme/api/pull/12", "acme/api", 12),
+        ("https://github.com/acme/pull/pull/4", "acme/pull", 4),
         ("acme/api#45", "acme/api", 45),
         (" Acme/API#1 ", "Acme/API", 1),
     ] {
@@ -29,6 +32,9 @@ fn parses_pull_request_urls_and_short_references() {
         "acme/api#0",
         "acme/api#x",
         "https://github.com/acme/api/issues/1",
+        "https://github.com/api/pull/1",
+        "https://pull/12",
+        "github.com/pull/1",
     ] {
         assert!(parse_pull_request_reference(reference).is_err(), "{reference}");
     }
@@ -62,6 +68,24 @@ fn notifications_get_no_reply_and_unknown_methods_fail() {
     assert_eq!(unknown["error"]["code"], -32601);
     let batch = dispatch(&json!([{"jsonrpc":"2.0","id":1,"method":"ping"}]), &no_tools).unwrap();
     assert_eq!(batch["error"]["code"], -32600);
+    // A request without a usable method still gets its answer; only a client's response gets none.
+    for malformed in [
+        json!({"jsonrpc":"2.0","id":1,"method":null}),
+        json!({"jsonrpc":"2.0","id":1}),
+    ] {
+        let reply = dispatch(&malformed, &no_tools).unwrap();
+        assert_eq!(
+            (&reply["id"], &reply["error"]["code"]),
+            (&json!(1), &json!(-32600)),
+            "{malformed}"
+        );
+    }
+    assert!(dispatch(&json!({"jsonrpc":"2.0","id":1,"result":{}}), &no_tools).is_none());
+    assert!(dispatch(
+        &json!({"jsonrpc":"2.0","id":1,"error":{"code":1,"message":"x"}}),
+        &no_tools
+    )
+    .is_none());
 }
 
 #[test]

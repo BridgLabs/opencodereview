@@ -44,7 +44,12 @@ pub(crate) fn dispatch(message: &Value, call: &ToolCall<'_>) -> Option<Value> {
         return Some(rpc_error(Value::Null, INVALID_REQUEST, "expected one JSON-RPC message"));
     };
     let id = object.get("id").cloned()?;
-    let method = object.get("method").and_then(Value::as_str)?;
+    let method = match object.get("method") {
+        Some(Value::String(method)) => method.as_str(),
+        // A response to a request of ours carries a result or an error and gets no reply.
+        None if object.contains_key("result") || object.contains_key("error") => return None,
+        _ => return Some(rpc_error(id, INVALID_REQUEST, "a request needs a method name")),
+    };
     let params = object.get("params").cloned().unwrap_or(Value::Null);
     let result = match method {
         "initialize" => Ok(initialize_result(&params)),
@@ -207,11 +212,13 @@ pub(crate) fn parse_pull_request_reference(reference: &str) -> Result<(String, i
     let invalid = || format!("not a pull request reference: {reference:?}; use a pull request URL or owner/repo#123");
     let reference = reference.trim();
     let (repository, number) = if reference.contains("/pull/") {
-        let path = reference.split_once("://").map_or(reference, |(_, rest)| rest);
-        // Drop the host, then any query or fragment.
-        let path = path.split_once('/').map_or("", |(_, path)| path);
-        let parts: Vec<&str> = path.split(['?', '#']).next().unwrap_or("").split('/').collect();
-        match parts.as_slice() {
+        // What precedes the host varies (a scheme, a truncated one, a protocol-relative `//` or
+        // nothing), so the scheme and the host are dropped as segments, not by looking for `://`.
+        let path = reference.split(['?', '#']).next().unwrap_or("");
+        let mut parts = path.split('/').filter(|part| !part.is_empty()).peekable();
+        parts.next_if(|part| part.ends_with(':'));
+        parts.next();
+        match parts.collect::<Vec<_>>().as_slice() {
             [owner, repo, "pull", number, ..] => (format!("{owner}/{repo}"), *number),
             _ => return Err(invalid()),
         }
