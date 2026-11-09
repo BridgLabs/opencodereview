@@ -342,8 +342,8 @@ impl Database {
     /// Per-run usage detail for a PR (newest first), each with its per-model split.
     pub fn insert_review_run_stage(&self, stage: &ReviewRunStageInput) -> Result<(), String> {
         self.conn.execute(
-            "INSERT INTO review_run_stages (run_id, pr_id, stage, chunk_id, model, status, cache_key, cache_hit, potential_cache_hit, potential_savings_tokens, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, prompt_bytes, diff_bytes, context_bytes, file_count, related_file_count, created_at, finished_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)",
+            "INSERT INTO review_run_stages (run_id, pr_id, stage, chunk_id, model, status, cache_key, cache_hit, potential_cache_hit, potential_savings_tokens, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, prompt_bytes, diff_bytes, context_bytes, file_count, related_file_count, created_at, finished_at, turns, tool_calls, reasoning_tokens, model_ms)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)",
             params![
                 stage.run_id,
                 stage.pr_id,
@@ -366,6 +366,10 @@ impl Database {
                 stage.related_file_count,
                 stage.started_at,
                 stage.finished_at,
+                stage.turns,
+                stage.tool_calls,
+                stage.reasoning_tokens,
+                stage.model_ms,
             ],
         ).map_err(|error| error.to_string())?;
         Ok(())
@@ -387,7 +391,7 @@ impl Database {
             })
             .map_err(|error| error.to_string())?;
         let mut stmt = self.conn.prepare(
-            "SELECT id, run_id, pr_id, stage, chunk_id, model, status, cache_key, cache_hit, potential_cache_hit, potential_savings_tokens, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, prompt_bytes, diff_bytes, context_bytes, file_count, related_file_count, created_at, finished_at
+            "SELECT id, run_id, pr_id, stage, chunk_id, model, status, cache_key, cache_hit, potential_cache_hit, potential_savings_tokens, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, prompt_bytes, diff_bytes, context_bytes, file_count, related_file_count, created_at, finished_at, turns, tool_calls, reasoning_tokens, model_ms
              FROM review_run_stages WHERE run_id = $1 ORDER BY CASE stage WHEN 'single' THEN 0 WHEN 'chunk' THEN 1 WHEN 'final' THEN 2 ELSE 3 END, COALESCE(chunk_id, 0), id",
         ).map_err(|error| error.to_string())?;
         let stages: Vec<ReviewRunStage> = stmt
@@ -415,6 +419,10 @@ impl Database {
                     related_file_count: row.get(19)?,
                     created_at: row.get(20)?,
                     finished_at: row.get(21)?,
+                    turns: row.get(22)?,
+                    tool_calls: row.get(23)?,
+                    reasoning_tokens: row.get(24)?,
+                    model_ms: row.get(25)?,
                 })
             })
             .map_err(|error| error.to_string())?

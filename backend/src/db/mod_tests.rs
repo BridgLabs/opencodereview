@@ -698,6 +698,10 @@ fn review_stage_breakdown_tracks_cache_candidates() {
         input_tokens: 10,
         output_tokens: 2,
         cache_read_tokens: 0,
+        turns: 7,
+        tool_calls: 9,
+        reasoning_tokens: 40,
+        model_ms: 1500,
         cache_creation_tokens: 0,
         prompt_bytes: 100,
         diff_bytes: 50,
@@ -750,6 +754,16 @@ fn review_stage_breakdown_tracks_cache_candidates() {
     let breakdown = db.review_stage_breakdown(run_id).expect("breakdown");
     assert_eq!(breakdown.stages.len(), 1);
     assert_eq!(breakdown.potential_cache_hits, 1);
+    let stored = &breakdown.stages[0];
+    assert_eq!(
+        (
+            stored.turns,
+            stored.tool_calls,
+            stored.reasoning_tokens,
+            stored.model_ms
+        ),
+        (7, 9, 40, 1500)
+    );
     assert_eq!(breakdown.potential_cache_savings_tokens, 12);
     db.insert_review_run_stage(&ReviewRunStageInput {
         stage: "final".to_string(),

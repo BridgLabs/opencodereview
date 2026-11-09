@@ -31,7 +31,53 @@ pub(crate) fn parse_transcript_usage_single(transcript_path: &Path) -> RunUsage 
     };
     let mut per_model = std::collections::HashMap::new();
     collect_usage(&value, &mut per_model);
-    finalize_usage(per_model)
+    let mut usage = finalize_usage(per_model);
+    usage.activity = collect_activity(&value);
+    usage
+}
+
+/// Counts what one execution did from its events: Claude `assistant` and `result` events, Codex
+/// `item.completed` and `turn.completed` events and OpenCode `step_start`, `tool_use` and
+/// `step_finish` events.
+pub fn collect_activity(value: &serde_json::Value) -> StageActivity {
+    let mut activity = StageActivity::default();
+    let mut messages = std::collections::HashSet::new();
+    let mut step_started = None;
+    for event in value.as_array().into_iter().flatten() {
+        match event["type"].as_str() {
+            // Claude writes one event per content block; blocks of one round trip share its id.
+            Some("assistant") => {
+                if let Some(id) = event["message"]["id"].as_str() {
+                    messages.insert(id);
+                }
+                activity.tool_calls += event["message"]["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|block| block["type"] == "tool_use")
+                    .count() as i64;
+            }
+            Some("result") if event["stats"].is_null() => {
+                activity.model_ms += event["duration_api_ms"].as_i64().unwrap_or(0);
+            }
+            Some("item.completed") if event["item"]["type"] == "command_execution" => activity.tool_calls += 1,
+            Some("turn.completed") => {
+                activity.reasoning_tokens += event["usage"]["reasoning_output_tokens"].as_i64().unwrap_or(0);
+            }
+            Some("step_start") => step_started = event["timestamp"].as_i64(),
+            Some("tool_use") => activity.tool_calls += 1,
+            Some("step_finish") => {
+                activity.turns += 1;
+                activity.reasoning_tokens += event["part"]["tokens"]["reasoning"].as_i64().unwrap_or(0);
+                if let (Some(start), Some(end)) = (step_started.take(), event["timestamp"].as_i64()) {
+                    activity.model_ms += (end - start).max(0);
+                }
+            }
+            _ => {}
+        }
+    }
+    activity.turns += messages.len() as i64;
+    activity
 }
 
 /// Parses a stream-json transcript (one event per line) into an array of events.
