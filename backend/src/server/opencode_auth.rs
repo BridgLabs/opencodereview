@@ -1,0 +1,351 @@
+use super::*;
+use std::fs;
+use std::io::Read;
+use std::sync::OnceLock;
+
+/// OpenCode Console device codes expire after 10 minutes.
+const FLOW_TIMEOUT: Duration = Duration::from_secs(600);
+/// Where the Console asks the user to approve a device code.
+const DEVICE_PAGE: &str = "https://opencode.ai/console/device?";
+
+/// An OpenCode API key, for a new account or to replace `accountId`'s.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OpencodeKey {
+    key: String,
+    account_id: Option<i64>,
+}
+
+/// The Go and Zen model lists answer 401 to a key they don't accept, and cost no tokens.
+const KEY_CHECKS: &[&str] = &[
+    "https://opencode.ai/inference/go/v1/models",
+    "https://opencode.ai/zen/v1/models",
+];
+
+/// Asks OpenCode whether it accepts `key` for Go or Zen.
+fn verify_key(key: &str) -> Result<(), String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let mut last = None;
+    for url in KEY_CHECKS {
+        let Ok(response) = client.get(*url).bearer_auth(key).send() else {
+            last = Some("Could not reach OpenCode to check the key; try again".to_string());
+            continue;
+        };
+        match response.status().as_u16() {
+            200..=299 => return Ok(()),
+            401 | 403 => last = last.or(Some("OpenCode rejected that key".into())),
+            status => last = Some(format!("OpenCode could not check the key (HTTP {status}); try again")),
+        }
+    }
+    Err(last.unwrap_or_else(|| "OpenCode rejected that key".into()))
+}
+
+/// Saves `raw` to `account` (a re-sign-in) or to a new OpenCode account named `label`.
+fn store_account(db_handle: &Db, account: Option<i64>, raw: &str, label: Option<String>) -> Result<(), String> {
+    let db = db_handle.open()?;
+    let id = match account {
+        Some(id) => {
+            if db.ai_account(id)?.provider != "opencode" {
+                return Err("That account is not an OpenCode account".into());
+            }
+            id
+        }
+        None => {
+            let count = db
+                .list_ai_accounts()?
+                .iter()
+                .filter(|account| account.provider == "opencode")
+                .count();
+            let label = label.unwrap_or_else(|| {
+                if count == 0 {
+                    "OpenCode".to_string()
+                } else {
+                    format!("OpenCode {}", count + 1)
+                }
+            });
+            db.create_ai_account("opencode", &label)?.id
+        }
+    };
+    let stored = crate::accounts::store_opencode_auth(id, raw);
+    if stored.is_err() && account.is_none() {
+        let _ = db.delete_ai_account(id);
+    }
+    stored?;
+    db.reset_ai_account_status(id)
+}
+
+/// Saves an OpenCode API key to `accountId` or to a new account, once OpenCode accepts it.
+pub(crate) fn save_opencode_key(request: &Request, state: &SharedState) -> Result<serde_json::Value, String> {
+    require_trusted_origin(request)?;
+    let input: OpencodeKey = serde_json::from_slice(&request.body).map_err(|_| "Invalid OpenCode request")?;
+    let key = input.key.trim();
+    let raw = crate::providers::opencode::auth(key)?;
+    if let Some(id) = input.account_id {
+        if with_db_read_raw(state, |db| db.ai_account(id))?.provider != "opencode" {
+            return Err("That account is not an OpenCode account".into());
+        }
+    }
+    verify_key(key)?;
+    store_account(&state.config.db, input.account_id, &raw, None)?;
+    Ok(serde_json::json!({ "ok": true }))
+}
+
+#[derive(Default)]
+struct Flow {
+    cancel: Option<Arc<AtomicBool>>,
+    events: Vec<serde_json::Value>,
+    secret: Option<String>,
+}
+
+fn flow() -> std::sync::MutexGuard<'static, Flow> {
+    static FLOW: OnceLock<Mutex<Flow>> = OnceLock::new();
+    FLOW.get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn authorized(request: &Request, flow: &Flow) -> Result<(), String> {
+    require_trusted_origin(request)?;
+    match &flow.secret {
+        Some(expected) if request.flow_secret.as_deref() != Some(expected.as_str()) => {
+            Err("forbidden: invalid flow secret".into())
+        }
+        _ => Ok(()),
+    }
+}
+
+/// The one-time code and approval page `opencode auth login opencode --method device` prints.
+pub(crate) fn device_prompt(text: &str) -> Option<(String, String)> {
+    let code = text
+        .lines()
+        .find_map(|line| line.split_once("Enter code:"))
+        .map(|(_, code)| code.trim().to_string())
+        .filter(|code| {
+            !code.is_empty() && code.len() <= 16 && code.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })?;
+    let url = text
+        .split_whitespace()
+        .find(|word| word.starts_with(DEVICE_PAGE))?
+        .to_string();
+    Some((code, url))
+}
+
+/// OpenCode in a private home under `home`, talking to opencode.ai directly.
+fn opencode(home: &std::path::Path) -> Command {
+    let mut command = Command::new("opencode");
+    command
+        .env_clear()
+        .env("PATH", "/usr/local/bin:/usr/bin:/bin")
+        .env("HOME", home)
+        .env("XDG_DATA_HOME", home.join("data"))
+        .env("XDG_CONFIG_HOME", home.join("config"))
+        .env("XDG_CACHE_HOME", home.join("cache"))
+        .env("XDG_STATE_HOME", home.join("state"))
+        .env("NO_COLOR", "1")
+        .envs(crate::providers::opencode::QUIET_ENV.iter().copied())
+        .current_dir(home)
+        .stdin(Stdio::null());
+    command
+}
+
+/// The signed-in Console credential and the email it signed in with.
+fn signed_in(home: &std::path::Path) -> Result<(String, Option<String>), String> {
+    let export = opencode(home)
+        .args([
+            "auth",
+            "export",
+            crate::providers::opencode::CONSOLE_INTEGRATION,
+            "--standalone",
+        ])
+        .output()
+        .map_err(|error| format!("Could not start the OpenCode CLI: {error}"))?;
+    let raw = crate::providers::opencode::exported(&String::from_utf8_lossy(&export.stdout))
+        .ok_or("OpenCode sign-in did not finish. Start again.")?;
+    let label = crate::providers::opencode::account_email(&raw);
+    Ok((raw, label))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct OpencodeAuthStart {
+    account_id: Option<i64>,
+}
+
+/// Starts `opencode auth login opencode --method device` in a fresh home; once the user approves
+/// the code in the OpenCode console, the sign-in is saved to `accountId` when given, otherwise to a
+/// new account.
+pub(crate) fn start_opencode_auth(request: &Request, state: &SharedState) -> Result<serde_json::Value, String> {
+    require_trusted_origin(request)?;
+    let target: OpencodeAuthStart = if request.body.iter().all(u8::is_ascii_whitespace) {
+        OpencodeAuthStart::default()
+    } else {
+        serde_json::from_slice(&request.body).map_err(|_| "Invalid sign-in request")?
+    };
+    let account = target.account_id;
+    if let Some(id) = account {
+        if with_db_read_raw(state, |db| db.ai_account(id))?.provider != "opencode" {
+            return Err("That account is not an OpenCode account".into());
+        }
+    }
+    let db_handle = state.config.db.clone();
+    let mut current = flow();
+    if current.cancel.is_some() {
+        return Ok(serde_json::json!({ "running": true, "flowSecret": current.secret }));
+    }
+    let home = std::env::temp_dir().join(format!("ocr-opencode-auth-{}", crate::sandbox::secret()?));
+    fs::create_dir_all(&home).map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&home, fs::Permissions::from_mode(0o700));
+    }
+    let mut child = opencode(&home)
+        .args([
+            "auth",
+            "login",
+            crate::providers::opencode::CONSOLE_INTEGRATION,
+            "--method",
+            "device",
+            "--standalone",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Could not start the OpenCode CLI: {error}"))?;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let secret = generate_flow_secret();
+    *current = Flow {
+        cancel: Some(cancel.clone()),
+        events: vec![],
+        secret: Some(secret.clone()),
+    };
+    drop(current);
+    let output = Arc::new(Mutex::new(String::new()));
+    for stream in [
+        child.stdout.take().map(|s| Box::new(s) as Box<dyn Read + Send>),
+        child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let output = output.clone();
+        thread::spawn(move || {
+            let mut stream = stream;
+            let mut buffer = [0u8; 4096];
+            while let Ok(read) = stream.read(&mut buffer) {
+                if read == 0 {
+                    break;
+                }
+                if let Ok(mut text) = output.lock() {
+                    if text.len() < 65536 {
+                        text.push_str(&String::from_utf8_lossy(&buffer[..read]));
+                    }
+                }
+            }
+        });
+    }
+    thread::spawn(move || {
+        let pid = child.id();
+        let started = Instant::now();
+        let mut prompted = false;
+        let finish = |event: serde_json::Value| {
+            let _ = fs::remove_dir_all(&home);
+            let mut current = flow();
+            current.events.push(event);
+            current.cancel = None;
+        };
+        loop {
+            if !prompted {
+                let text = strip_terminal(&output.lock().map(|text| text.clone()).unwrap_or_default());
+                if let Some((code, url)) = device_prompt(&text) {
+                    prompted = true;
+                    flow()
+                        .events
+                        .push(serde_json::json!({ "kind": "prompt", "url": url, "code": code }));
+                }
+            }
+            if cancel.load(Ordering::Relaxed) || started.elapsed() > FLOW_TIMEOUT {
+                crate::review::kill_tree(pid, &mut child);
+                let message = if cancel.load(Ordering::Relaxed) {
+                    "Sign-in was cancelled."
+                } else {
+                    "The code expired. Start again."
+                };
+                return finish(serde_json::json!({ "kind": "done", "success": false, "message": message }));
+            }
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let saved = if status.success() {
+                        signed_in(&home).and_then(|(raw, label)| store_account(&db_handle, account, &raw, label))
+                    } else {
+                        Err("OpenCode sign-in did not finish. Start again.".into())
+                    };
+                    return finish(match saved {
+                        Ok(()) => {
+                            serde_json::json!({ "kind": "done", "success": true, "message": "Signed in to OpenCode." })
+                        }
+                        Err(error) => serde_json::json!({ "kind": "done", "success": false, "message": error }),
+                    });
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(500)),
+                Err(error) => {
+                    return finish(
+                        serde_json::json!({ "kind": "done", "success": false, "message": error.to_string() }),
+                    )
+                }
+            }
+        }
+    });
+    Ok(serde_json::json!({ "running": true, "flowSecret": secret }))
+}
+
+pub(crate) fn opencode_auth_events(request: &Request) -> Result<serde_json::Value, String> {
+    let current = flow();
+    authorized(request, &current)?;
+    Ok(serde_json::json!({ "running": current.cancel.is_some(), "events": current.events }))
+}
+
+pub(crate) fn cancel_opencode_auth(request: &Request) -> Result<serde_json::Value, String> {
+    let current = flow();
+    authorized(request, &current)?;
+    if let Some(cancel) = &current.cancel {
+        cancel.store(true, Ordering::Relaxed);
+    }
+    Ok(serde_json::json!({ "running": false }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_key_check_goes_to_a_host_the_review_egress_allows() {
+        for url in KEY_CHECKS {
+            assert_eq!(reqwest::Url::parse(url).unwrap().host_str(), Some("opencode.ai"));
+        }
+        assert!(serde_json::from_str::<OpencodeKey>("{}").is_err());
+        assert!(serde_json::from_str::<OpencodeKey>(r#"{"key":"x","model":"opencode/big-pickle"}"#).is_err());
+        let request: OpencodeKey = serde_json::from_str(r#"{"key":"x","accountId":3}"#).unwrap();
+        assert_eq!(request.account_id, Some(3));
+    }
+
+    #[test]
+    fn the_device_code_and_page_are_read_from_the_login_output() {
+        let text = "┌  Connect an integration\n│\n◇  Authorization started\n│\n●  Enter code: MCTD-DMGG\n│\n●  https://opencode.ai/console/device?user_code=MCTD-DMGG&client_id=opencode-cli\n│\n◇  Waiting for authorization...";
+        assert_eq!(
+            device_prompt(text),
+            Some((
+                "MCTD-DMGG".to_string(),
+                "https://opencode.ai/console/device?user_code=MCTD-DMGG&client_id=opencode-cli".to_string()
+            ))
+        );
+        assert_eq!(device_prompt("●  Enter code: MCTD-DMGG"), None);
+        assert_eq!(
+            device_prompt("●  https://evil.example/console/device?user_code=X\nEnter code: X"),
+            None
+        );
+    }
+}

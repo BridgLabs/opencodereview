@@ -1,6 +1,6 @@
 //! Credentials of the AI accounts listed in `ai_accounts`. Each account owns one directory,
 //! `$OCR_DATA_DIR/accounts/<id>/`, holding its provider's credential file:
-//! `claude/oauth-token` or `codex/auth.json`.
+//! `claude/oauth-token`, `codex/auth.json` or `opencode/auth.json`.
 pub(crate) mod sandbox_sync;
 pub(crate) mod usage;
 
@@ -39,6 +39,10 @@ pub(crate) fn codex_auth_path(id: i64) -> PathBuf {
     root().join(id.to_string()).join("codex/auth.json")
 }
 
+pub(crate) fn opencode_auth_path(id: i64) -> PathBuf {
+    root().join(id.to_string()).join("opencode/auth.json")
+}
+
 pub(crate) fn store_claude_token(id: i64, token: &str) -> Result<(), String> {
     store(&claude_token_path(id), id, token.as_bytes())
 }
@@ -47,6 +51,12 @@ pub(crate) fn store_claude_token(id: i64, token: &str) -> Result<(), String> {
 pub(crate) fn store_codex_auth(id: i64, raw: &str) -> Result<(), String> {
     crate::providers::codex::validate_auth(raw)?;
     store(&codex_auth_path(id), id, raw.as_bytes())
+}
+
+/// Saves an OpenCode account: its API key or Console sign-in.
+pub(crate) fn store_opencode_auth(id: i64, raw: &str) -> Result<(), String> {
+    crate::providers::opencode::validate_auth(raw)?;
+    store(&opencode_auth_path(id), id, raw.as_bytes())
 }
 
 fn store(path: &std::path::Path, id: i64, bytes: &[u8]) -> Result<(), String> {
@@ -93,6 +103,8 @@ pub(crate) fn has_credential(provider: &str, id: i64) -> bool {
         "claude" => crate::providers::claude::read_token(&claude_token_path(id)).is_ok(),
         "codex" => fs::read_to_string(codex_auth_path(id))
             .is_ok_and(|raw| crate::providers::codex::validate_auth(&raw).is_ok()),
+        "opencode" => fs::read_to_string(opencode_auth_path(id))
+            .is_ok_and(|raw| crate::providers::opencode::validate_auth(&raw).is_ok()),
         _ => false,
     }
 }
@@ -109,7 +121,7 @@ pub(crate) fn remove_unsupported(db: &Database) -> Result<(), String> {
     Ok(())
 }
 
-/// Deletes the Gemini and OpenCode folders under `root`, and each account folder they leave
+/// Deletes the Gemini folders under `root`, and each account folder they leave
 /// empty. Returns whether it deleted any.
 fn remove_unsupported_sign_ins(root: &std::path::Path) -> Result<bool, String> {
     let mut removed = false;
@@ -117,7 +129,7 @@ fn remove_unsupported_sign_ins(root: &std::path::Path) -> Result<bool, String> {
         return Ok(false);
     };
     for account in entries.flatten().map(|entry| entry.path()) {
-        for provider in ["gemini", "opencode"] {
+        for provider in ["gemini"] {
             match fs::remove_dir_all(account.join(provider)) {
                 Ok(()) => {
                     removed = true;
@@ -165,7 +177,7 @@ mod tests {
         assert!(root.join("1/claude/secret").exists());
         assert!(root.join("2/codex/secret").exists());
         assert!(!root.join("3").exists());
-        assert!(!root.join("4").exists());
+        assert!(root.join("4/opencode/secret").exists());
         // Nothing left to remove, and a missing root is not an error.
         assert!(!super::remove_unsupported_sign_ins(&root).unwrap());
         std::fs::remove_dir_all(&root).unwrap();

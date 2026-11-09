@@ -25,7 +25,11 @@ const CODEX_CLI: &str = "/opt/codex/bin/codex";
 const TRANSCRIPT: &str = "/scratch/transcript.jsonl";
 /// Codex keeps its home, sign-in and final message here, owned by the model UID.
 const CODEX_HOME: &str = "/scratch/session/codex";
-const PROVIDERS: &[&str] = &["claude", "codex"];
+const OPENCODE_CLI: &str = "/opt/opencode/bin/opencode";
+/// OpenCode keeps its XDG homes and configuration here; an API key arrives in the environment and a
+/// Console sign-in is imported here.
+const OPENCODE_HOME: &str = "/scratch/session/opencode";
+const PROVIDERS: &[&str] = &["claude", "codex", "opencode"];
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "operation", deny_unknown_fields)]
@@ -70,7 +74,8 @@ enum Response {
     Ready,
     Started,
     Pulse,
-    /// `credential` is a Codex sign-in the CLI refreshed during the stage, for the broker to keep.
+    /// `credential` is a Codex or OpenCode Console sign-in the CLI refreshed during the stage, for the
+    /// broker to keep.
     Finished {
         report: Option<String>,
         decisions: Option<String>,
@@ -324,7 +329,7 @@ fn validate(request: &Request) -> Result<(), String> {
             safe_path(name)?;
             if name
                 .split('/')
-                .any(|part| matches!(part, ".devin" | ".agents" | ".claude" | ".git"))
+                .any(|part| matches!(part, ".devin" | ".agents" | ".claude" | ".opencode" | ".git"))
             {
                 return Err("Executable configuration is not snapshot evidence".into());
             }
@@ -440,8 +445,10 @@ fn exchange(
                 credential,
             } if running => {
                 if let (Some(credential), Request::Run { account, provider, .. }) = (credential, request) {
-                    if provider == "codex" {
-                        crate::accounts::store_codex_auth(*account, &credential)?;
+                    match provider.as_str() {
+                        "codex" => crate::accounts::store_codex_auth(*account, &credential)?,
+                        "opencode" => crate::accounts::store_opencode_auth(*account, &credential)?,
+                        _ => {}
                     }
                 }
                 for (path, value, limit) in [
@@ -553,6 +560,116 @@ fn codex_session(account: i64, model: &str, effort: &str) -> Result<(Command, St
             model,
             effort,
         ));
+    Ok((command, auth))
+}
+
+/// Writes `contents` to a new file with `mode`, owned by the model UID when `owned`.
+#[cfg(unix)]
+fn session_file(path: &Path, contents: &str, mode: u32, owned: bool) -> Result<(), String> {
+    fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(mode)
+        .open(path)
+        .and_then(|mut file| file.write_all(contents.as_bytes()))
+        .map_err(|e| e.to_string())?;
+    if owned {
+        std::os::unix::fs::chown(path, Some(UID), Some(UID)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// OpenCode with only the session's private homes, the egress proxy and the trusted configuration,
+/// run as the model UID.
+#[cfg(unix)]
+fn opencode_command(config: &Path) -> Command {
+    let home = Path::new(OPENCODE_HOME);
+    let proxy = std::env::var("OCR_RUNNER_PROXY").unwrap_or_else(|_| "http://review-egress:8790".into());
+    let mut command = Command::new(OPENCODE_CLI);
+    command
+        .env_clear()
+        .env("PATH", "/opt/opencode/bin:/usr/local/bin:/usr/bin:/bin")
+        .env("HOME", home)
+        .env("TMPDIR", "/tmp")
+        .env("XDG_DATA_HOME", home.join("data"))
+        .env("XDG_CONFIG_HOME", home.join("config"))
+        .env("XDG_CACHE_HOME", home.join("cache"))
+        .env("XDG_STATE_HOME", home.join("state"))
+        .env("HTTPS_PROXY", &proxy)
+        .env("HTTP_PROXY", &proxy)
+        .env("NO_COLOR", "1")
+        .env("OPENCODE_CONFIG", config)
+        .envs(crate::providers::opencode::QUIET_ENV.iter().copied())
+        .current_dir("/work")
+        .uid(UID)
+        .gid(UID);
+    command
+}
+
+/// The OpenCode Console sign-in the stage ended with, when OpenCode refreshed the one it started from.
+#[cfg(unix)]
+fn opencode_refreshed(auth: &str) -> Option<String> {
+    crate::providers::opencode::console(auth)?;
+    let mut export = opencode_command(&Path::new(OPENCODE_HOME).join("opencode.json"));
+    export.args([
+        "auth",
+        "export",
+        crate::providers::opencode::CONSOLE_INTEGRATION,
+        "--standalone",
+    ]);
+    let output = bounded(&mut export, Path::new("/scratch"), &AtomicBool::new(false), 30).ok()?;
+    crate::providers::opencode::exported(&String::from_utf8_lossy(&output)).filter(|raw| raw != auth)
+}
+
+/// An OpenCode execution on `account` with `model`: an API key goes in the environment and a
+/// Console sign-in is imported into the session; the trusted configuration is read-only and the
+/// homes are private to the model UID. Returns the command and the account it started from.
+#[cfg(unix)]
+fn opencode_session(account: i64, model: &str, effort: &str) -> Result<(Command, String), String> {
+    let (model, effort) = crate::providers::engines::resolve_offline("opencode", model, effort)?;
+    let auth_root = std::env::var("OCR_RUNNER_AUTH_ROOT").unwrap_or_else(|_| "/claude-auth/app-managed".into());
+    let auth = read_output(
+        &Path::new(&auth_root).join(format!("accounts/{account}/opencode/auth.json")),
+        crate::providers::opencode::MAX_AUTH_BYTES as u64,
+    )
+    .ok()
+    .flatten()
+    .filter(|raw| crate::providers::opencode::validate_auth(raw).is_ok())
+    .ok_or_else(|| crate::providers::claude::Failure::Auth.encode())?;
+    let home = Path::new(OPENCODE_HOME);
+    private_dir(Path::new(SESSION), 0o755)?;
+    for name in ["", "data", "config", "cache", "state"] {
+        let directory = home.join(name);
+        private_dir(&directory, 0o700)?;
+        std::os::unix::fs::chown(&directory, Some(UID), Some(UID)).map_err(|e| e.to_string())?;
+    }
+    let config = home.join("opencode.json");
+    session_file(
+        &config,
+        &crate::providers::opencode::config(&model).to_string(),
+        0o444,
+        false,
+    )?;
+    let mut command = opencode_command(&config);
+    match crate::providers::opencode::console(&auth) {
+        Some(entry) => {
+            let import = home.join("sign-in.json");
+            session_file(&import, &serde_json::json!([entry]).to_string(), 0o600, true)?;
+            let mut load = opencode_command(&config);
+            load.arg("auth").arg("import").arg(&import).arg("--standalone");
+            let loaded = bounded(&mut load, Path::new("/scratch"), &AtomicBool::new(false), 30);
+            let _ = fs::remove_file(&import);
+            loaded.map_err(|_| "Could not load the OpenCode sign-in into the runner".to_string())?;
+        }
+        None => {
+            let key = crate::providers::opencode::key(&auth)
+                .ok_or_else(|| crate::providers::claude::Failure::Auth.encode())?;
+            command.env(crate::providers::opencode::KEY_ENV, key);
+        }
+    }
+    command
+        .process_group(0)
+        .args(crate::providers::opencode::exec_args(&model, &effort));
     Ok((command, auth))
 }
 
@@ -883,7 +1000,7 @@ fn run(
         return Err("Invalid runner operation".into());
     };
     // Only models OpenCodeReview offers for the provider reach a CLI.
-    let (model, effort) = crate::providers::engines::resolve(&provider, &model, &effort)?;
+    let (model, effort) = crate::providers::engines::resolve_offline(&provider, &model, &effort)?;
     let archive = archive.ok_or("Frozen archive must be installed before a stage")?;
     if archive_id.as_deref() != Some(archive.descriptor().id.as_str()) {
         return Err("Stage archive identity mismatch".into());
@@ -952,6 +1069,10 @@ fn run(
             let (command, auth) = codex_session(account, &model, &effort)?;
             (command, Some(auth))
         }
+        "opencode" => {
+            let (command, auth) = opencode_session(account, &model, &effort)?;
+            (command, Some(auth))
+        }
         _ => {
             let mut command = session(account)?;
             inference(&mut command, &model, &effort)?;
@@ -986,12 +1107,28 @@ fn run(
                 }
             }
             match child.try_wait() {
+                // OpenCode reports a provider error as an event and still exits 0.
+                Ok(Some(status))
+                    if status.success()
+                        && provider == "opencode"
+                        && !crate::providers::opencode::errors(
+                            &read_output(Path::new(TRANSCRIPT), 32_000_000)?.unwrap_or_default(),
+                        )
+                        .is_empty() =>
+                {
+                    let stderr = read_output(Path::new("/scratch/stderr"), 8_000_000)?.unwrap_or_default();
+                    return Err(crate::providers::opencode::failure(
+                        &read_output(Path::new(TRANSCRIPT), 32_000_000)?.unwrap_or_default(),
+                        &stderr,
+                    ));
+                }
                 Ok(Some(status)) if status.success() => return Ok(()),
                 Ok(Some(_)) => {
                     let stderr = read_output(Path::new("/scratch/stderr"), 8_000_000)?.unwrap_or_default();
                     let stdout = read_output(Path::new(TRANSCRIPT), 32_000_000)?.unwrap_or_default();
                     return Err(match provider.as_str() {
                         "codex" => crate::providers::codex::failure(&stdout, &stderr),
+                        "opencode" => crate::providers::opencode::failure(&stdout, &stderr),
                         _ => crate::providers::claude::failure(&stdout, &stderr),
                     });
                 }
@@ -1022,28 +1159,37 @@ fn run(
             },
         );
     };
-    // Codex may refresh its sign-in mid-stage; the broker keeps the new one so the next stage
-    // doesn't start from a revoked token.
-    let refreshed = read_output(
-        &Path::new(CODEX_HOME).join("auth.json"),
-        crate::providers::codex::MAX_AUTH_BYTES as u64,
-    )
-    .ok()
-    .flatten()
-    .filter(|raw| *raw != auth && crate::providers::codex::validate_auth(raw).is_ok());
-    let secrets = crate::providers::codex::secrets(&auth)
-        .into_iter()
-        .chain(
-            refreshed
-                .as_deref()
-                .map(crate::providers::codex::secrets)
-                .unwrap_or_default(),
+    // Codex and an OpenCode Console sign-in may refresh mid-stage; the broker keeps the new one so
+    // the next stage doesn't start from a revoked token. An OpenCode key never changes.
+    let opencode = provider == "opencode";
+    let refreshed = if opencode {
+        opencode_refreshed(&auth)
+    } else {
+        read_output(
+            &Path::new(CODEX_HOME).join("auth.json"),
+            crate::providers::codex::MAX_AUTH_BYTES as u64,
         )
+        .ok()
+        .flatten()
+        .filter(|raw| *raw != auth && crate::providers::codex::validate_auth(raw).is_ok())
+    };
+    let secrets_of = if opencode {
+        crate::providers::opencode::secrets
+    } else {
+        crate::providers::codex::secrets
+    };
+    let secrets = secrets_of(&auth)
+        .into_iter()
+        .chain(refreshed.as_deref().map(secrets_of).unwrap_or_default())
         .collect::<Vec<_>>();
     let result = outcome
         .and_then(|()| {
-            let text = read_output(&Path::new(CODEX_HOME).join("last-message.txt"), 4_000_000)?
-                .ok_or("Codex final response is missing")?;
+            let text = if opencode {
+                crate::providers::opencode::final_message(transcript.as_deref().unwrap_or_default())
+            } else {
+                read_output(&Path::new(CODEX_HOME).join("last-message.txt"), 4_000_000)?
+                    .ok_or("Codex final response is missing")?
+            };
             parse_final_response(&text, true)
         })
         .and_then(|(report, decisions)| {

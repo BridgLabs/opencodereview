@@ -76,10 +76,11 @@ pub(crate) fn account_usage(state: &SharedState) -> Result<serde_json::Value, St
     ))
 }
 
-/// The release in `--version` output: `2.1.292 (Claude Code)`, `codex-cli 0.163.0`, `0.63.0` or `1.18.35`.
+/// The release in `--version` output: `2.1.292 (Claude Code)`, `codex-cli 0.163.0`, `0.63.0` or `opencode v2.2.6`.
 pub(crate) fn cli_version(output: &str) -> Option<String> {
     output
         .split_whitespace()
+        .map(|word| word.strip_prefix('v').unwrap_or(word))
         .find(|word| word.contains('.') && word.bytes().all(|byte| byte.is_ascii_digit() || byte == b'.'))
         .map(str::to_string)
 }
@@ -93,7 +94,7 @@ pub(crate) fn review_engines(state: &SharedState) -> Result<serde_json::Value, S
             .map(|(provider, name)| {
                 let (model, effort) = db.review_engine(provider)?;
                 let models = engines::models(provider)
-                    .iter()
+                    .into_iter()
                     .map(|entry| {
                         serde_json::json!({
                             "id": entry.id,
@@ -139,8 +140,9 @@ pub(crate) fn save_review_engine(request: &Request, state: &SharedState) -> Resu
 pub(crate) fn ai_providers(state: &SharedState) -> Result<serde_json::Value, String> {
     let accounts = with_db_read_raw(state, |db| db.list_ai_accounts())?;
     Ok(serde_json::Value::Array(
-        [("claude", "Claude"), ("codex", "ChatGPT")]
-            .into_iter()
+        crate::providers::engines::PROVIDERS
+            .iter()
+            .copied()
             .map(|(provider, name)| {
                 // A scratch home keeps CLIs that log or create state on every start out of the data volume.
                 let home = std::env::temp_dir().join("ocr-cli-version");
@@ -193,10 +195,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cli_version_reads_both_providers() {
+    fn cli_version_reads_every_provider() {
         assert_eq!(cli_version("2.1.292 (Claude Code)\n").as_deref(), Some("2.1.292"));
         assert_eq!(cli_version("codex-cli 0.163.0\n").as_deref(), Some("0.163.0"));
         assert_eq!(cli_version("0.63.0\n").as_deref(), Some("0.63.0"));
+        assert_eq!(cli_version("opencode v2.2.6\n").as_deref(), Some("2.2.6"));
         assert_eq!(cli_version("command not found"), None);
     }
 }

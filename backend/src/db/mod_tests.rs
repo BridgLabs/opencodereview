@@ -2098,6 +2098,7 @@ fn terminal_pr_state_removes_needs_you_pending_actions() {
 fn accounts_of_removed_providers_are_dropped() {
     let db = Db::for_test().open().unwrap();
     let claude = db.create_ai_account("claude", "Work").unwrap();
+    let opencode = db.create_ai_account("opencode", "OpenCode Go").unwrap();
     db.conn
         .execute(
             "INSERT INTO ai_accounts (provider, label, priority, created_at, updated_at) VALUES ('gemini', 'Old', 9, 0, 0)",
@@ -2109,12 +2110,12 @@ fn accounts_of_removed_providers_are_dropped() {
     db.save_review_engine("claude", "claude-sonnet-5-5", "high").unwrap();
     let removed = db.remove_unsupported_ai_accounts().unwrap();
     assert_eq!(removed.len(), 1);
-    assert!(!removed.contains(&claude.id));
+    assert!(!removed.contains(&claude.id) && !removed.contains(&opencode.id));
     assert!(db.remove_unsupported_ai_accounts().unwrap().is_empty());
     let accounts = db.list_ai_accounts().unwrap();
     assert_eq!(
         accounts.iter().map(|account| account.id).collect::<Vec<_>>(),
-        vec![claude.id]
+        vec![claude.id, opencode.id]
     );
     assert_eq!(db.setting("review_engine_gemini").unwrap(), None);
     assert_eq!(
