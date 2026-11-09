@@ -15,6 +15,7 @@ from pathlib import Path
 import shutil
 import signal
 import socket
+import stat
 import ssl
 import struct
 import subprocess
@@ -176,6 +177,11 @@ def main():
         return subprocess.run([args.engine, *command], check=True, capture_output=True, text=True, timeout=60, **kwargs).stdout
     try:
         Path("/tmp/opencode").mkdir(mode=0o700, exist_ok=True)
+        temporary_parent = Path("/tmp/opencode").lstat()
+        if (not stat.S_ISDIR(temporary_parent.st_mode)
+                or temporary_parent.st_uid != os.getuid()
+                or stat.S_IMODE(temporary_parent.st_mode) != 0o700):
+            raise RuntimeError("Unsafe temporary directory /tmp/opencode: expected current UID and mode 0700")
         with tempfile.TemporaryDirectory(prefix=prefix, dir="/tmp/opencode") as temporary:
             root = Path(temporary)
             for name in ["ipc", "work", "output", "scratch", "evidence", "tmp", "system", "provider", "proof", "auth/accounts/1/opencode"]:
