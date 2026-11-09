@@ -159,17 +159,19 @@ export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) 
           ) : (
             <ClaudeSignIn onDone={done} onCancel={back} />
           )}
-          <button
-            type="button"
-            className="cursor-pointer self-start text-caption text-fg-subtle underline-offset-2 hover:text-fg hover:underline"
-            onClick={() => setChoice({ ...choice, alternative: !choice.alternative })}
-          >
-            {choice.alternative
-              ? `Sign in to ${providerName[choice.provider]} in the browser instead`
-              : choice.provider === "claude"
-                ? "Paste a token from claude setup-token instead"
-                : "Sign in with a one-time code instead"}
-          </button>
+          {choice.provider !== "opencode" && (
+            <button
+              type="button"
+              className="cursor-pointer self-start text-caption text-fg-subtle underline-offset-2 hover:text-fg hover:underline"
+              onClick={() => setChoice({ ...choice, alternative: !choice.alternative })}
+            >
+              {choice.alternative
+                ? `Sign in to ${providerName[choice.provider]} in the browser instead`
+                : choice.provider === "claude"
+                  ? "Paste a token from claude setup-token instead"
+                  : "Sign in with a one-time code instead"}
+            </button>
+          )}
         </>
       )}
     </div>

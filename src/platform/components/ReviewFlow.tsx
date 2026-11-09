@@ -174,17 +174,21 @@ export function ReviewFlow({
     ? phase.events.filter((event) => event && typeof event.at === "number" && typeof event.message === "string")
     : [];
   const executions = selectedId ? phaseStages(selectedId, stages) : [];
+  const recordedTokens = (selected?.data.metrics.tokens ?? 0) > 0;
   const chunkNeverStarted = Boolean(
     selected?.data.chunk &&
       selected.data.chunk.startedAt === undefined &&
       selected.data.chunk.attempts === 0 &&
+      !recordedTokens &&
       ["pending", "queued", "cancelled"].includes(selected.data.state),
   );
   const chunkStarted = Boolean(
-    selected?.data.chunk && (selected.data.chunk.startedAt !== undefined || selected.data.chunk.attempts > 0),
+    selected?.data.chunk &&
+      (selected.data.chunk.startedAt !== undefined || selected.data.chunk.attempts > 0 || recordedTokens),
   );
   const hasExecution = selected?.data.chunk
-    ? !chunkNeverStarted && (selected.data.chunk.attempts > 0 || selected.data.chunk.startedAt !== undefined)
+    ? !chunkNeverStarted &&
+      (selected.data.chunk.attempts > 0 || selected.data.chunk.startedAt !== undefined || recordedTokens)
     : executions.length > 0 || (selected?.data.metrics.tokens ?? 0) > 0;
   const executionRows = chunkNeverStarted ? [] : executions;
   const stageNote = selected?.data.chunk?.cached

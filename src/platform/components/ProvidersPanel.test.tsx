@@ -37,7 +37,7 @@ const engine = (provider: AiAccount["provider"], name: string): ReviewEngine => 
   name,
   model: "m1",
   effort: "medium",
-  label: `${name} · Model 1 · medium`,
+  label: provider === "opencode" ? "m1" : `${name} · Model 1 · medium`,
   models: [
     { id: "m1", label: "Model 1", efforts: ["low", "medium", "high"], defaultEffort: "medium" },
     { id: "m2", label: "Model 2", efforts: ["low", "medium"], defaultEffort: "low" },
@@ -197,6 +197,11 @@ it("requires an explicit Settings choice for stale Go model and saves API model,
         catalogueId: "catalogue-live",
       }),
     );
+    await vi.waitFor(() =>
+      expect(
+        [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "deep"),
+      ).toBeDefined(),
+    );
     await act(async () =>
       [...container.querySelectorAll<HTMLButtonElement>("button")]
         .find((button) => button.textContent === "deep")!
@@ -308,6 +313,67 @@ it("shows loading Go catalogue in provider settings without saving a stale model
     await vi.waitFor(() => expect(container.textContent).toContain("Loading OpenCode Go models…"));
     expect(container.querySelector('select[aria-label="OpenCode Go model"]')).toBeNull();
     expect(setupApi.saveReviewEngine).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    client.clear();
+  }
+});
+
+it("keeps provider connection choices available when engine discovery fails", async () => {
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([]);
+  vi.mocked(setupApi.reviewEngines).mockRejectedValue(new Error("catalogue unavailable"));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <ProvidersPanel />
+        </QueryClientProvider>,
+      ),
+    );
+    await vi.waitFor(() => expect(container.textContent).toContain("OpenCode Go API key"));
+    expect(container.textContent).toContain("Claude Pro, Max or Team plan");
+    expect(container.textContent).toContain("ChatGPT Plus or Pro plan");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    client.clear();
+  }
+});
+
+it("shows rejected model save errors", async () => {
+  const go = engine("opencode", "OpenCode Go");
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(23, "opencode", "Go key")]);
+  vi.mocked(setupApi.reviewEngines).mockResolvedValue([go]);
+  vi.mocked(setupApi.saveReviewEngine).mockRejectedValue(new Error("Catalogue changed; refresh and confirm."));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <ProvidersPanel />
+        </QueryClientProvider>,
+      ),
+    );
+    await vi.waitFor(() => expect(container.textContent).toContain("OpenCode Go"));
+    await act(async () =>
+      [...container.querySelectorAll<HTMLButtonElement>("button")]
+        .find((item) => item.textContent?.includes("OpenCode Go"))!
+        .click(),
+    );
+    await act(async () => {
+      const select = container.querySelector<HTMLSelectElement>('select[aria-label="OpenCode Go model"]')!;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, "m2");
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await vi.waitFor(() => expect(container.textContent).toContain("Catalogue changed; refresh and confirm."));
   } finally {
     await act(async () => root.unmount());
     container.remove();

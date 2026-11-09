@@ -59,9 +59,7 @@ export function ProvidersPanel() {
       (engine?.catalogue?.status === "ready" && Boolean(engine.catalogue.id) && engine.selectionValid === true)
     );
   });
-  const others = (engines.data ?? [])
-    .map((engine) => engine.provider)
-    .filter((provider) => !connected.includes(provider));
+  const others = (["claude", "codex", "opencode"] as Provider[]).filter((provider) => !connected.includes(provider));
   const engineLabel = (provider: Provider) =>
     (() => {
       const engine = engines.data?.find((item) => item.provider === provider);
@@ -73,6 +71,10 @@ export function ProvidersPanel() {
         return "Choose model";
       if (provider === "opencode" && engine?.catalogue?.status === "error") return "Models unavailable";
       if (provider === "opencode" && engine?.catalogue?.status !== "ready") return "Loading models…";
+      if (provider === "opencode") {
+        const model = engine?.models.find((item) => item.id === engine.model);
+        return [model?.label, engine?.effort].filter(Boolean).join(" · ");
+      }
       return engine?.label.split(" · ").slice(1).join(" · ");
     })();
   if (open)
@@ -207,6 +209,7 @@ function ProviderDetail({
     mutationFn: (choice: { model: string; effort: string; catalogueId?: string }) =>
       setupApi.saveReviewEngine({ provider, ...choice }),
     onSuccess: (data) => queryClient.setQueryData(ENGINES_QUERY_KEY, data),
+    onError: () => void queryClient.invalidateQueries({ queryKey: ENGINES_QUERY_KEY }),
   });
   const refresh = useMutation({
     mutationFn: setupApi.refreshOpenCodeCatalogue,
@@ -279,6 +282,11 @@ function ProviderDetail({
             </p>
           )}
           <div className={cx(groupClass, "divide-y divide-line")}>
+            {save.error && (
+              <p className="px-4 py-3 text-small text-danger" role="alert">
+                {save.error.message}
+              </p>
+            )}
             <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
               <div>
                 <div className="text-small font-medium text-fg">Model</div>

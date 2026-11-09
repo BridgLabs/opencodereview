@@ -219,7 +219,7 @@ export function EnginePicker() {
               <AccountChoices
                 accounts={all.filter((account) => account.provider === provider)}
                 nextId={shownSelectionValid ? next.id : undefined}
-                busy={choose.isPending}
+                busy={choose.isPending || (provider === "opencode" && !shownSelectionValid)}
                 onChoose={(account) => choose.mutate(account)}
               />
               <div className="flex flex-col gap-2.5 border-t border-line px-4 pt-3 pb-2">

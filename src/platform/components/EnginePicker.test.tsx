@@ -292,6 +292,74 @@ it("requires explicit selection for stale Go model and uses API catalogue defaul
   }
 });
 
+it("blocks account selection until OpenCode Go has a confirmed model", async () => {
+  const invalidGo = {
+    ...engines.find((item) => item.provider === "opencode")!,
+    selectionValid: false,
+    catalogue: { status: "ready" as const, id: "go-catalogue-1", error: null },
+  };
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(8, "opencode", "Go key")]);
+  vi.mocked(setupApi.reviewEngines).mockResolvedValue([invalidGo]);
+  vi.mocked(setupApi.accountUsage).mockResolvedValue([]);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <EnginePicker />
+        </QueryClientProvider>,
+      ),
+    );
+    await vi.waitFor(() => expect(container.querySelector("button[aria-haspopup]")).not.toBeNull());
+    await act(async () => container.querySelector<HTMLButtonElement>("button[aria-haspopup]")!.click());
+    const row = container.querySelector<HTMLButtonElement>('[aria-label="Account"] [role="radio"]')!;
+    expect(row.textContent).toContain("Go key");
+    expect(row.disabled).toBe(true);
+    expect(setupApi.reorderAccounts).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    client.clear();
+  }
+});
+
+it("keeps Go API-key sign-in free of an inactive OAuth toggle", async () => {
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(9, "opencode", "Go key")]);
+  vi.mocked(setupApi.reviewEngines).mockResolvedValue(engines);
+  vi.mocked(setupApi.accountUsage).mockResolvedValue([]);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <EnginePicker />
+        </QueryClientProvider>,
+      ),
+    );
+    await vi.waitFor(() => expect(container.querySelector("button[aria-haspopup]")).not.toBeNull());
+    await act(async () => container.querySelector<HTMLButtonElement>("button[aria-haspopup]")!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add an account"]')!.click());
+    await act(async () =>
+      [...container.querySelectorAll<HTMLButtonElement>("button")]
+        .find((item) => item.textContent?.includes("OpenCode Go"))!
+        .click(),
+    );
+    expect(container.textContent).toContain("API key");
+    expect(container.textContent).not.toContain("one-time code");
+    expect(container.textContent).not.toContain("browser instead");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+    client.clear();
+  }
+});
+
 it("polls only empty/loading Go catalogue states", () => {
   const go = engines.find((item) => item.provider === "opencode")!;
   expect(engineCataloguePollInterval([{ ...go, catalogue: { status: "empty", id: null, error: null } }])).toBe(1000);

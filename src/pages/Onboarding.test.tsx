@@ -3,7 +3,7 @@ import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type SetupStatus, setupApi } from "../services/setupApi";
-import type { AiProvider, Repo, ReviewCard } from "../types";
+import type { AiProvider, Repo, ReviewCard, ReviewEngine } from "../types";
 import { Onboarding } from "./Onboarding";
 
 const navigate = vi.fn();
@@ -16,6 +16,9 @@ vi.mock("../services/setupApi", () => ({
   setupApi: {
     setupStatus: vi.fn(),
     aiProviders: vi.fn(),
+    reviewEngines: vi.fn(),
+    saveReviewEngine: vi.fn(),
+    refreshOpenCodeCatalogue: vi.fn(),
     githubAuthEvents: vi.fn(),
     githubAuthStart: vi.fn(),
     claudeAuthStart: vi.fn(),
@@ -176,6 +179,42 @@ describe("onboarding", () => {
     expect(chatgpt.querySelector("button")).toBeNull();
     expect(button("Continue")?.disabled).toBe(true);
     expect(container.textContent).not.toContain("Connect an AI provider to continue.");
+  });
+
+  it("requires an explicit Go model in onboarding and unlocks Continue after saving it", async () => {
+    const go = provider({ provider: "opencode", name: "OpenCode Go", ready: 1, accounts: 1 });
+    const engine: ReviewEngine = {
+      provider: "opencode",
+      name: "OpenCode Go",
+      model: "",
+      effort: "",
+      label: "",
+      models: [{ id: "go-model", label: "Go Model", efforts: ["balanced"], defaultEffort: "balanced" }],
+      catalogue: { status: "ready", id: "catalogue-1", error: null },
+      selectionValid: false,
+    };
+    vi.mocked(setupApi.aiProviders).mockResolvedValue([go]);
+    vi.mocked(setupApi.reviewEngines).mockResolvedValue([engine]);
+    vi.mocked(setupApi.saveReviewEngine).mockResolvedValue([
+      { ...engine, model: "go-model", effort: "balanced", selectionValid: true },
+    ]);
+    await render(status({ auth: github, nextStep: 2 }));
+    expect(button("Continue")?.disabled).toBe(true);
+    expect(container.textContent).toContain("Choose an OpenCode Go model below");
+    const select = container.querySelector<HTMLSelectElement>('select[aria-label="OpenCode Go model"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, "go-model");
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await vi.waitFor(() =>
+      expect(setupApi.saveReviewEngine).toHaveBeenCalledWith({
+        provider: "opencode",
+        model: "go-model",
+        effort: "balanced",
+        catalogueId: "catalogue-1",
+      }),
+    );
+    await vi.waitFor(() => expect(button("Continue")?.disabled).toBe(false));
   });
 
   it("connects ChatGPT in the browser, or with a one-time code from the row menu", async () => {

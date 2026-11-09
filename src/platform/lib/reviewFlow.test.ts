@@ -411,6 +411,47 @@ describe("individual review chunks", () => {
     }
   });
 
+  it("treats recorded tokens as execution evidence without inventing a start time", () => {
+    const phase: ReviewPhase[] = [
+      {
+        id: "chunks",
+        label: "Chunks",
+        status: "failed",
+        chunks: [
+          {
+            id: 1,
+            status: "cancelled",
+            queuedAt: 1000,
+            startedAt: null,
+            executionFinishedAt: null,
+            finishedAt: 5000,
+            fileCount: 1,
+            cached: false,
+            attempts: 0,
+            log: "",
+            error: null,
+          },
+        ],
+      },
+    ];
+    const stage = {
+      id: 1,
+      runId: 10,
+      stage: "chunk",
+      chunkId: 1,
+      status: "cancelled",
+      inputTokens: 123,
+      createdAt: 1000,
+      finishedAt: 5000,
+    } as ReviewRunStage;
+    const chunk = buildReviewChunks(phase, { ...run, id: 10, status: "failed" } as ReviewRun, [stage]).items[0];
+    expect(chunk).toMatchObject({
+      startedAt: undefined,
+      metrics: { tokens: 123 },
+      detail: "Cancelled · 1 files assigned to this chunk.",
+    });
+  });
+
   it("handles missing status rows and rejects unsafe or unrelated progress text", () => {
     expect(parseChunkProgress("chunks progress: 0/999999999 done, 1 running\nchunk status:\n1 running")).toBeNull();
     expect(parseChunkProgress("Agent quoted: chunks progress: 1/2 done, 1 running")).toBeNull();

@@ -471,7 +471,10 @@ export function buildReviewChunks(
           ? "Verifying quoted evidence, coverage and anchors locally."
           : state === "cancelled" && live?.error
             ? live.error
-            : state === "cancelled" && startedAt === undefined && (live?.attempts ?? old?.attempts ?? 0) === 0
+            : state === "cancelled" &&
+                startedAt === undefined &&
+                (live?.attempts ?? old?.attempts ?? 0) === 0 &&
+                tokens === 0
               ? "Cancelled before it started."
               : state === "unknown"
                 ? "No final status recorded for this chunk. It is not assumed to have failed or completed."

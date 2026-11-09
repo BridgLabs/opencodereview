@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, Plus, Smartphone } from "lucide-react";
 import { useCallback, useState } from "react";
 import {
@@ -12,6 +12,7 @@ import {
 } from "../components/AccessConnect";
 import { BrandLoadingIcon } from "../components/BrandLoading";
 import { ProviderGlyph } from "../platform/components/AccountsPanel";
+import { ENGINES_QUERY_KEY } from "../platform/components/EnginePicker";
 import { setupApi } from "../services/setupApi";
 import type { AiProvider } from "../types";
 import {
@@ -185,6 +186,24 @@ export function PlanStep({ onBack, onContinue }: { onBack: () => void; onContinu
   const queryClient = useQueryClient();
   const [signIn, setSignIn] = useState<SignIn | null>(null);
   const providers = useQuery({ queryKey: PROVIDERS_QUERY_KEY, queryFn: () => setupApi.aiProviders() });
+  const engines = useQuery({
+    queryKey: ENGINES_QUERY_KEY,
+    queryFn: setupApi.reviewEngines,
+    refetchInterval: (query) => {
+      const status = query.state.data?.find((engine) => engine.provider === "opencode")?.catalogue?.status;
+      return status === "empty" || status === "loading" ? 1000 : false;
+    },
+  });
+  const saveGo = useMutation({
+    mutationFn: (choice: { model: string; effort: string; catalogueId: string }) =>
+      setupApi.saveReviewEngine({ provider: "opencode", ...choice }),
+    onSuccess: (data) => queryClient.setQueryData(ENGINES_QUERY_KEY, data),
+    onError: () => void queryClient.invalidateQueries({ queryKey: ENGINES_QUERY_KEY }),
+  });
+  const refreshGo = useMutation({
+    mutationFn: setupApi.refreshOpenCodeCatalogue,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ENGINES_QUERY_KEY }),
+  });
   const refresh = useCallback(() => {
     for (const key of [PROVIDERS_QUERY_KEY, ["setup", "claude-auth"], ["setup", "status"], ["accounts"]])
       void queryClient.invalidateQueries({ queryKey: key });
@@ -194,8 +213,17 @@ export function PlanStep({ onBack, onContinue }: { onBack: () => void; onContinu
     refresh();
   }, [refresh]);
   const list = providers.data ?? [];
-  const ready = list.some((provider) => provider.ready > 0);
-  const hint = signIn ? "Finish signing in above." : ready ? "You can add more accounts later in Settings." : undefined;
+  const goEngine = engines.data?.find((engine) => engine.provider === "opencode");
+  const goConnected = list.some((provider) => provider.provider === "opencode" && provider.ready > 0);
+  const goSelectionValid = goEngine?.selectionValid === true;
+  const ready = list.some((provider) => provider.ready > 0 && (provider.provider !== "opencode" || goSelectionValid));
+  const hint = signIn
+    ? "Finish signing in above."
+    : goConnected && !goSelectionValid
+      ? "Choose an OpenCode Go model below before continuing."
+      : ready
+        ? "You can add more accounts later in Settings."
+        : undefined;
   return (
     <>
       <StepHeader title="Connect your plan" subtitle="Choose an account or API key for reviews." />
@@ -281,6 +309,73 @@ export function PlanStep({ onBack, onContinue }: { onBack: () => void; onContinu
                   ) : (
                     <ClaudeSignIn onDone={finish} onCancel={() => setSignIn(null)} />
                   ))}
+                {provider.provider === "opencode" && connected && !goSelectionValid && (
+                  <fieldset className="grid gap-2" aria-label="Choose OpenCode Go model">
+                    {goEngine?.catalogue?.status === "ready" ? (
+                      <label className="grid gap-1 text-caption text-fg-muted">
+                        Choose a model to enable reviews
+                        <select
+                          aria-label="OpenCode Go model"
+                          className="h-9 rounded-lg border border-line bg-surface-muted px-3 text-small text-fg"
+                          value=""
+                          disabled={saveGo.isPending}
+                          onChange={(event) => {
+                            const engine = goEngine;
+                            const model = engine?.models.find((item) => item.id === event.target.value);
+                            if (model && engine?.catalogue?.id)
+                              saveGo.mutate({
+                                model: model.id,
+                                effort: model.defaultEffort ?? "",
+                                catalogueId: engine.catalogue.id,
+                              });
+                          }}
+                        >
+                          <option value="" disabled>
+                            Choose a model…
+                          </option>
+                          {(goEngine?.models ?? []).map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <p className="text-caption text-fg-muted" role="status">
+                          {engines.error || goEngine?.catalogue?.status === "error"
+                            ? "OpenCode Go models unavailable."
+                            : "Loading OpenCode Go models…"}
+                        </p>
+                        {(engines.error || goEngine?.catalogue?.status === "error") && (
+                          <button
+                            type="button"
+                            className={rowAction}
+                            disabled={refreshGo.isPending}
+                            onClick={() => refreshGo.mutate()}
+                          >
+                            {refreshGo.isPending ? "Refreshing…" : "Retry"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {saveGo.error && (
+                      <p className="text-caption text-danger" role="alert">
+                        {friendlyError(saveGo.error)}
+                      </p>
+                    )}
+                    {engines.error && (
+                      <p className="text-caption text-danger" role="alert">
+                        {friendlyError(engines.error)} Use Retry above to reload models.
+                      </p>
+                    )}
+                    {refreshGo.error && (
+                      <p className="text-caption text-danger" role="alert">
+                        {friendlyError(refreshGo.error)} Try again.
+                      </p>
+                    )}
+                  </fieldset>
+                )}
               </ChoiceRow>
             );
           })}
