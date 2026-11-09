@@ -191,6 +191,53 @@ describe("individual review chunks", () => {
     expect(result.items[0].metrics.durationMs).toBe(2000);
   });
 
+  it.each([
+    { startedAt: null, finishedAt: null, inputTokens: 250, queue: null },
+    { startedAt: null, finishedAt: 6000, inputTokens: 250, queue: null },
+    { startedAt: null, finishedAt: 6000, inputTokens: 0, queue: 5000 },
+    { startedAt: 2000, finishedAt: 6000, inputTokens: 250, queue: 1000 },
+  ])("keeps queue and description consistent with usage: %j", ({ startedAt, finishedAt, inputTokens, queue }) => {
+    const progress = {
+      id: 1,
+      status: "cancelled" as const,
+      queuedAt: 1000,
+      startedAt,
+      executionFinishedAt: null,
+      finishedAt,
+      fileCount: 1,
+      cached: false,
+      attempts: 0,
+      log: "",
+      error: null,
+    };
+    const phase = [{ id: "chunks", label: "Chunks", status: "cancelled", chunks: [progress] }];
+    const stoppedRun = { ...run, status: "cancelled" };
+    const stage = {
+      id: 1,
+      runId: run.id,
+      stage: "chunk",
+      chunkId: 1,
+      status: "cancelled",
+      cacheHit: false,
+      inputTokens,
+      finishedAt,
+    } as ReviewRunStage;
+    const first = buildReviewChunks(phase, stoppedRun, [stage], null, 7000);
+    const next = buildReviewChunks(phase, stoppedRun, [], first, 8000);
+    for (const chunks of [first, next]) {
+      expect(chunks.items[0]).toMatchObject({
+        startedAt: startedAt ?? undefined,
+        finishedAt: finishedAt ?? undefined,
+        queuedDurationMs: queue,
+        metrics: { tokens: inputTokens || null },
+        detail:
+          inputTokens === 0 && startedAt === null
+            ? "Cancelled before it started."
+            : "Cancelled · 1 files assigned to this chunk.",
+      });
+    }
+  });
+
   it("sums recovery attempts without hiding unavailable usage or counting another chunk", () => {
     const progress = {
       id: 1,

@@ -455,16 +455,22 @@ export function buildReviewChunks(
       const executionEnd = live?.executionFinishedAt ?? finishedAt ?? (live && state === "running" ? now : undefined);
       const measured =
         startedAt !== undefined && executionEnd !== undefined ? Math.max(0, executionEnd - startedAt) : null;
+      const recordedTokens = records.reduce((sum, row) => sum + (stageTokens(row) ?? 0), 0);
+      const tokens =
+        recordedTokens > 0 ? recordedTokens : cached ? 0 : records.length ? null : (old?.metrics.tokens ?? null);
       const queueEnd =
         startedAt ??
         finishedAt ??
         (run && ["running", "pending"].includes(run.status) ? now : (run?.finishedAt ?? undefined));
       const queuedDurationMs =
-        live && queueEnd !== undefined ? Math.max(0, queueEnd - live.queuedAt) : (old?.queuedDurationMs ?? null);
+        startedAt === undefined && (tokens ?? 0) > 0
+          ? null
+          : live && queueEnd !== undefined
+            ? Math.max(0, queueEnd - live.queuedAt)
+            : (old?.queuedDurationMs ?? null);
       const durationMs = cached
         ? 0
         : (measured ?? chunkDuration(reported?.duration) ?? old?.metrics.durationMs ?? null);
-      const tokens = records.reduce((sum, row) => sum + (stageTokens(row) ?? 0), 0);
       const detail = cached
         ? "Reused validated snapshot cache; no new inference."
         : validating
@@ -474,7 +480,7 @@ export function buildReviewChunks(
             : state === "cancelled" &&
                 startedAt === undefined &&
                 (live?.attempts ?? old?.attempts ?? 0) === 0 &&
-                tokens === 0
+                (tokens ?? 0) === 0
               ? "Cancelled before it started."
               : state === "unknown"
                 ? "No final status recorded for this chunk. It is not assumed to have failed or completed."
@@ -494,7 +500,7 @@ export function buildReviewChunks(
         reportedTime: !live && measured === null && durationMs !== null,
         metrics: {
           durationMs,
-          tokens: tokens > 0 ? tokens : cached ? 0 : records.length ? null : (old?.metrics.tokens ?? null),
+          tokens,
           partial:
             state !== "completed" ||
             (records.length
