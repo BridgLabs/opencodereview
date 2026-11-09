@@ -16,35 +16,46 @@ pub(crate) struct OpencodeKey {
     account_id: Option<i64>,
 }
 
-/// The Go and Zen model lists answer 401 to a key they don't accept, and cost no tokens.
-const KEY_CHECKS: &[&str] = &[
-    "https://opencode.ai/inference/go/v1/models",
-    "https://opencode.ai/zen/v1/models",
+/// The Go and Zen model lists, with the plan each one bills; they answer 401 to a key they don't
+/// accept, and cost no tokens.
+const KEY_CHECKS: &[(&str, &str)] = &[
+    ("go", "https://opencode.ai/inference/go/v1/models"),
+    ("zen", "https://opencode.ai/zen/v1/models"),
 ];
 
-/// Asks OpenCode whether it accepts `key` for Go or Zen.
-fn verify_key(key: &str) -> Result<(), String> {
+/// The plans OpenCode accepts `key` for, or why it accepts it for none.
+fn verify_key(key: &str) -> Result<Vec<&'static str>, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|error| error.to_string())?;
+    let mut plans = Vec::new();
     let mut last = None;
-    for url in KEY_CHECKS {
+    for (plan, url) in KEY_CHECKS {
         let Ok(response) = client.get(*url).bearer_auth(key).send() else {
             last = Some("Could not reach OpenCode to check the key; try again".to_string());
             continue;
         };
         match response.status().as_u16() {
-            200..=299 => return Ok(()),
+            200..=299 => plans.push(*plan),
             401 | 403 => last = last.or(Some("OpenCode rejected that key".into())),
             status => last = Some(format!("OpenCode could not check the key (HTTP {status}); try again")),
         }
     }
-    Err(last.unwrap_or_else(|| "OpenCode rejected that key".into()))
+    if plans.is_empty() {
+        return Err(last.unwrap_or_else(|| "OpenCode rejected that key".into()));
+    }
+    Ok(plans)
 }
 
 /// Saves `raw` to `account` (a re-sign-in) or to a new OpenCode account named `label`.
-fn store_account(db_handle: &Db, account: Option<i64>, raw: &str, label: Option<String>) -> Result<(), String> {
+fn store_account(
+    db_handle: &Db,
+    account: Option<i64>,
+    raw: &str,
+    label: Option<String>,
+    plans: &[&str],
+) -> Result<(), String> {
     let db = db_handle.open()?;
     let id = match account {
         Some(id) => {
@@ -69,7 +80,8 @@ fn store_account(db_handle: &Db, account: Option<i64>, raw: &str, label: Option<
             db.create_ai_account("opencode", &label)?.id
         }
     };
-    let stored = crate::accounts::store_opencode_auth(id, raw);
+    let stored =
+        crate::accounts::store_opencode_auth(id, raw).and_then(|()| crate::accounts::store_opencode_plans(id, plans));
     if stored.is_err() && account.is_none() {
         let _ = db.delete_ai_account(id);
     }
@@ -88,8 +100,8 @@ pub(crate) fn save_opencode_key(request: &Request, state: &SharedState) -> Resul
             return Err("That account is not an OpenCode account".into());
         }
     }
-    verify_key(key)?;
-    store_account(&state.config.db, input.account_id, &raw, None)?;
+    let plans = verify_key(key)?;
+    store_account(&state.config.db, input.account_id, &raw, None, &plans)?;
     Ok(serde_json::json!({ "ok": true }))
 }
 
@@ -151,8 +163,21 @@ fn opencode(home: &std::path::Path) -> Command {
     command
 }
 
-/// The signed-in Console credential and the email it signed in with.
-fn signed_in(home: &std::path::Path) -> Result<(String, Option<String>), String> {
+/// The plans a workspace has, from the models `opencode models` lists for it: Go models only appear
+/// with a Go subscription.
+pub(crate) fn plans_listed(models: &str) -> Vec<&'static str> {
+    ["go", "zen"]
+        .into_iter()
+        .filter(|plan| {
+            models
+                .lines()
+                .any(|line| crate::providers::opencode_catalogue::plan(line.trim()) == Some(*plan))
+        })
+        .collect()
+}
+
+/// The signed-in Console credential, the email it signed in with and its workspace's plans.
+fn signed_in(home: &std::path::Path) -> Result<(String, Option<String>, Vec<&'static str>), String> {
     let export = opencode(home)
         .args([
             "auth",
@@ -164,8 +189,16 @@ fn signed_in(home: &std::path::Path) -> Result<(String, Option<String>), String>
         .map_err(|error| format!("Could not start the OpenCode CLI: {error}"))?;
     let raw = crate::providers::opencode::exported(&String::from_utf8_lossy(&export.stdout))
         .ok_or("OpenCode sign-in did not finish. Start again.")?;
+    let models = opencode(home)
+        .args(["models", "--standalone"])
+        .output()
+        .map_err(|error| format!("Could not start the OpenCode CLI: {error}"))?;
+    let plans = plans_listed(&String::from_utf8_lossy(&models.stdout));
+    if plans.is_empty() {
+        return Err("Signed in to OpenCode, but its workspace offers no Go or Zen models. Start again.".into());
+    }
     let label = crate::providers::opencode::account_email(&raw);
-    Ok((raw, label))
+    Ok((raw, label, plans))
 }
 
 #[derive(Deserialize, Default)]
@@ -279,7 +312,8 @@ pub(crate) fn start_opencode_auth(request: &Request, state: &SharedState) -> Res
             match child.try_wait() {
                 Ok(Some(status)) => {
                     let saved = if status.success() {
-                        signed_in(&home).and_then(|(raw, label)| store_account(&db_handle, account, &raw, label))
+                        signed_in(&home)
+                            .and_then(|(raw, label, plans)| store_account(&db_handle, account, &raw, label, &plans))
                     } else {
                         Err("OpenCode sign-in did not finish. Start again.".into())
                     };
@@ -323,13 +357,26 @@ mod tests {
 
     #[test]
     fn the_key_check_goes_to_a_host_the_review_egress_allows() {
-        for url in KEY_CHECKS {
+        for (_, url) in KEY_CHECKS {
             assert_eq!(reqwest::Url::parse(url).unwrap().host_str(), Some("opencode.ai"));
         }
         assert!(serde_json::from_str::<OpencodeKey>("{}").is_err());
         assert!(serde_json::from_str::<OpencodeKey>(r#"{"key":"x","model":"opencode/big-pickle"}"#).is_err());
         let request: OpencodeKey = serde_json::from_str(r#"{"key":"x","accountId":3}"#).unwrap();
         assert_eq!(request.account_id, Some(3));
+    }
+
+    #[test]
+    fn a_workspace_has_go_only_when_go_models_are_listed() {
+        assert_eq!(
+            plans_listed("opencode/glm-5.3\nopencode/claude-opus-5-5\n"),
+            vec!["zen"]
+        );
+        assert_eq!(
+            plans_listed("opencode-go/glm-5.3\nopencode/glm-5.3\n"),
+            vec!["go", "zen"]
+        );
+        assert!(plans_listed("anthropic/claude-opus-5-5\n").is_empty());
     }
 
     #[test]

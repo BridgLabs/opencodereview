@@ -5,6 +5,15 @@ use std::io::Read;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+/// The plan (`go` or `zen`) an OpenCode model id (`<provider>/<model>`) bills.
+pub(crate) fn plan(model: &str) -> Option<&'static str> {
+    match model.split_once('/')?.0 {
+        "opencode-go" => Some("go"),
+        "opencode" => Some("zen"),
+        _ => None,
+    }
+}
+
 /// Each OpenCode provider, the plan it bills and its public model list.
 const SOURCES: &[(&str, &str, &str)] = &[
     ("opencode-go", "Go", "https://opencode.ai/inference/go/v1/models"),
@@ -211,6 +220,14 @@ mod tests {
             ]
         );
         assert!(parse("opencode", "Zen", &json!({ "data": "nope" })).is_empty());
+    }
+
+    #[test]
+    fn each_model_bills_its_providers_plan() {
+        assert_eq!(plan("opencode-go/glm-5.3"), Some("go"));
+        assert_eq!(plan("opencode/claude-opus-5-5"), Some("zen"));
+        assert_eq!(plan("anthropic/claude-opus-5-5"), None);
+        assert_eq!(plan("glm-5.3"), None);
     }
 
     #[test]

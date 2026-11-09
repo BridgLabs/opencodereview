@@ -53,6 +53,55 @@ pub(crate) fn store_codex_auth(id: i64, raw: &str) -> Result<(), String> {
     store(&codex_auth_path(id), id, raw.as_bytes())
 }
 
+/// The OpenCode plans an account's workspace has (`go`, `zen`), kept beside its sign-in for the
+/// server only: runners never receive it.
+pub(crate) fn opencode_plans_path(id: i64) -> PathBuf {
+    root().join(id.to_string()).join("opencode/plans.json")
+}
+
+pub(crate) fn store_opencode_plans(id: i64, plans: &[&str]) -> Result<(), String> {
+    store(
+        &opencode_plans_path(id),
+        id,
+        serde_json::json!({ "plans": plans }).to_string().as_bytes(),
+    )
+}
+
+/// The OpenCode plans of every OpenCode account together, or None without one. An account saved
+/// before its plans were recorded counts as having both.
+pub(crate) fn opencode_plans() -> Option<Vec<String>> {
+    plans_under(&root())
+}
+
+fn plans_under(root: &std::path::Path) -> Option<Vec<String>> {
+    let mut plans = Vec::new();
+    let mut any = false;
+    for entry in fs::read_dir(root).ok()?.flatten() {
+        let directory = entry.path().join("opencode");
+        if !directory.join("auth.json").exists() {
+            continue;
+        }
+        any = true;
+        let known = fs::read_to_string(directory.join("plans.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .and_then(|value| {
+                value["plans"].as_array().map(|list| {
+                    list.iter()
+                        .filter_map(|plan| plan.as_str().map(str::to_string))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .unwrap_or_else(|| vec!["go".into(), "zen".into()]);
+        for plan in known {
+            if !plans.contains(&plan) {
+                plans.push(plan);
+            }
+        }
+    }
+    any.then_some(plans)
+}
+
 /// Saves an OpenCode account: its API key or Console sign-in.
 pub(crate) fn store_opencode_auth(id: i64, raw: &str) -> Result<(), String> {
     crate::providers::opencode::validate_auth(raw)?;
@@ -182,5 +231,33 @@ mod tests {
         assert!(!super::remove_unsupported_sign_ins(&root).unwrap());
         std::fs::remove_dir_all(&root).unwrap();
         assert!(!super::remove_unsupported_sign_ins(&root).unwrap());
+    }
+
+    #[test]
+    fn opencode_plans_join_every_opencode_account() {
+        let root = std::env::temp_dir().join(format!("ocr-opencode-plans-{}", std::process::id()));
+        let account = |id: i64, plans: Option<&str>| {
+            let directory = root.join(id.to_string()).join("opencode");
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(directory.join("auth.json"), "{}").unwrap();
+            if let Some(plans) = plans {
+                std::fs::write(directory.join("plans.json"), plans).unwrap();
+            }
+        };
+        std::fs::create_dir_all(root.join("1/claude")).unwrap();
+        assert_eq!(super::plans_under(&root), None);
+        account(2, Some(r#"{"plans":["zen"]}"#));
+        assert_eq!(super::plans_under(&root), Some(vec!["zen".to_string()]));
+        account(3, Some(r#"{"plans":["go","zen"]}"#));
+        let mut both = super::plans_under(&root).unwrap();
+        both.sort();
+        assert_eq!(both, vec!["go".to_string(), "zen".to_string()]);
+        std::fs::remove_dir_all(root.join("3")).unwrap();
+        // An account saved before plans were recorded counts as both.
+        account(4, None);
+        let mut legacy = super::plans_under(&root).unwrap();
+        legacy.sort();
+        assert_eq!(legacy, vec!["go".to_string(), "zen".to_string()]);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

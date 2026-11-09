@@ -69,8 +69,24 @@ pub(crate) fn models(provider: &str) -> Vec<Model> {
     match provider {
         "claude" => listed(CLAUDE),
         "codex" => listed(CODEX),
-        "opencode" => crate::providers::opencode_catalogue::models().unwrap_or_default(),
+        "opencode" => opencode_models(),
         _ => vec![],
+    }
+}
+
+/// OpenCode's models that the plans of the connected OpenCode accounts pay for: Go models need a
+/// workspace with Go, Zen models one with Zen. Without an OpenCode account, every model.
+fn opencode_models() -> Vec<Model> {
+    let models = crate::providers::opencode_catalogue::models().unwrap_or_default();
+    match crate::accounts::opencode_plans() {
+        Some(plans) => models
+            .into_iter()
+            .filter(|model| {
+                crate::providers::opencode_catalogue::plan(&model.id)
+                    .is_some_and(|plan| plans.iter().any(|known| known == plan))
+            })
+            .collect(),
+        None => models,
     }
 }
 
