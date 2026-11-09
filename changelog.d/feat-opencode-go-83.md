@@ -16,3 +16,11 @@
 - Read bounded windows from large evidence files without treating ordinary Unicode escape text as leaked credentials.
 - Require a confirmed Go model before selecting an account for reviews, and report rejected model saves.
 - Skip unavailable Go backups during failover without refreshing the review's frozen catalogue.
+- Skip unprepared Go accounts during global preflight when another prepared review account is available.
+- Identify evidence files skipped or interrupted by search limits while preserving matches already found.
+- Show engine discovery failures with a retry action without removing provider connection choices.
+- Preserve known review tokens and show unknown queue duration when execution has no recorded start time.
+
+### Security
+
+- Reject smoke-test temporary directories unless they are real directories owned by the current user with mode 0700.
