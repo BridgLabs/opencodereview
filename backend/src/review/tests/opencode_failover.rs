@@ -72,8 +72,155 @@ fn opencode_review_failover_attributes_tokens_and_never_replays_infrastructure_f
         "claude-failover-missing",
         "codex-failover-discovery",
         "claude-failover-go",
+        "claude-failover-missing-third",
+        "codex-failover-discovery-third",
+        "claude-new-ready",
+        "claude-new-ready-alone",
+        "claude-frozen-preferences",
     ] {
         run_case(outcome);
+    }
+}
+
+fn prepared_account_case(
+    inputs: &mut ReviewInputs,
+    db: &Database,
+    root: &Path,
+    log: &Path,
+    first: i64,
+    second: i64,
+    third: Option<i64>,
+) {
+    let cancel = AtomicBool::new(false);
+    let head = inputs.fixed_head_sha.clone().unwrap();
+    let base = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&inputs.repo_path)
+        .args(["rev-parse", "HEAD~"])
+        .output()
+        .unwrap();
+    assert!(base.status.success());
+    let base = String::from_utf8(base.stdout).unwrap().trim().to_string();
+    let archive = crate::review_archive::capture(
+        &inputs.repo_path,
+        crate::review_archive::Scope {
+            host: github::gh_host(),
+            repository: inputs.full_name.clone(),
+            head_sha: head,
+            base_sha: base.clone(),
+            merge_base_sha: base.clone(),
+            prior_sha: None,
+        },
+        &cancel,
+    )
+    .unwrap();
+    let work = root.join("prepared");
+    let context = work.join("context");
+    fs::create_dir_all(context.join("skill")).unwrap();
+    fs::write(context.join("PR.md"), "Synthetic review").unwrap();
+    fs::write(context.join("skill/SKILL.md"), &inputs.skill_content).unwrap();
+    let diff = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&inputs.repo_path)
+        .args(["diff", &base, "HEAD"])
+        .output()
+        .unwrap();
+    assert!(diff.status.success());
+    archive
+        .prepare_stage(
+            &context,
+            &["code.rs".into()],
+            std::str::from_utf8(&diff.stdout).unwrap(),
+            &base,
+        )
+        .unwrap();
+    inputs.frozen = Some(std::sync::Arc::new(frozen::FrozenContext::new(archive)));
+    let prompt = work.join("prompt.md");
+    fs::write(&prompt, "Review frozen evidence.").unwrap();
+    let stages = [(work.clone(), context, prompt.clone())];
+    frozen::preflight(inputs, &work, &stages, &cancel).unwrap();
+    let had_snapshot = crate::accounts::has_credential("opencode", second);
+    let expected = if had_snapshot {
+        db.mark_ai_account_auth_failed(second, "Synthetic reconnect").unwrap();
+        let new = db.create_ai_account("opencode", "New ready Go account").unwrap();
+        crate::accounts::store_opencode_key(new.id, "synthetic-new-ready-go").unwrap();
+        new.id
+    } else {
+        crate::accounts::store_opencode_key(second, "synthetic-new-ready-go").unwrap();
+        third.unwrap_or(second)
+    };
+    let changed = crate::providers::go_catalogue::fixture("changed-preference", &["changed-effort"], "responses");
+    db.save_go_preference(&changed.select("changed-preference", "changed-effort").unwrap())
+        .unwrap();
+    crate::providers::go_catalogue::install_test_error("Must not refresh a prepared catalogue");
+    db.mark_ai_account_limited(first, None, "Synthetic prior limit")
+        .unwrap();
+    let transcript = work.join("transcript.json");
+    let config = work.join("config.json");
+    let stdout = work.join("stdout.log");
+    let stderr = work.join("stderr.log");
+    let paths = SpawnPaths {
+        config: &config,
+        prompt: &prompt,
+        transcript: &transcript,
+        stdout: &stdout,
+        stderr: &stderr,
+        progress_phase: "reviewing",
+        sharded_progress: false,
+    };
+    let engine = frozen::cache_engine(inputs);
+    let additional = frozen::preflight_additional(inputs, &stages, &cancel);
+    let result = frozen::execute(inputs, &cancel, &mut |_, _| {}, &paths);
+    if !had_snapshot && third.is_none() {
+        let error = "OpenCode Go has no frozen confirmed selection; prepare a new review";
+        assert_eq!(engine.unwrap_err(), error);
+        assert_eq!(additional.unwrap_err(), error);
+        assert_eq!(result.unwrap_err(), error);
+        assert!(!log.exists());
+        assert_eq!(db.ai_account(second).unwrap().status, "ok");
+        assert!(db.ai_account(second).unwrap().last_used_at.is_none());
+        return;
+    }
+    let engine = engine.unwrap();
+    additional.unwrap();
+    result.unwrap();
+    let attempts: Vec<serde_json::Value> = fs::read_to_string(log)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0]["account"], expected);
+    if had_snapshot {
+        assert_eq!(engine["provider"], "opencode");
+        assert_eq!(engine["model"], "new-review-model");
+        assert_eq!(engine["effort"], "new-review-effort");
+        assert_eq!(attempts[0]["model"], "new-review-model");
+        assert_eq!(attempts[0]["effort"], "new-review-effort");
+        let context = std::sync::Arc::try_unwrap(inputs.frozen.take().unwrap()).ok().unwrap();
+        inputs.frozen = Some(std::sync::Arc::new(frozen::FrozenContext::diagnostic(
+            context.archive,
+            work,
+            vec![(
+                PathBuf::from(std::env::var("OCR_REVIEW_RUNNER_SOCKETS").unwrap()),
+                "2.2.6".into(),
+            )],
+        )));
+        let error = "OpenCode Go review catalogue was not prepared";
+        assert_eq!(frozen::cache_engine(inputs).unwrap_err(), error);
+        assert_eq!(
+            frozen::preflight_additional(inputs, &stages, &cancel).unwrap_err(),
+            error
+        );
+        assert_eq!(
+            frozen::execute(inputs, &cancel, &mut |_, _| {}, &paths).unwrap_err(),
+            error
+        );
+    } else {
+        assert_eq!(engine["provider"], "codex");
+        assert_eq!(attempts[0]["provider"], "codex");
+        assert_eq!(db.ai_account(second).unwrap().status, "ok");
+        assert!(db.ai_account(second).unwrap().last_used_at.is_none());
     }
 }
 
@@ -163,7 +310,26 @@ fn run_case(outcome: &str) {
         }
         _ => crate::accounts::store_opencode_key(first.id, "synthetic-primary-go").unwrap(),
     }
-    crate::accounts::store_opencode_key(second.id, "synthetic-secondary-go").unwrap();
+    if !outcome.starts_with("claude-new-ready") {
+        crate::accounts::store_opencode_key(second.id, "synthetic-secondary-go").unwrap();
+    }
+    let third = if outcome.ends_with("third") || outcome == "claude-new-ready" {
+        let provider = if primary_provider == "claude" {
+            "codex"
+        } else {
+            "claude"
+        };
+        let account = db.create_ai_account(provider, "Prepared third provider").unwrap();
+        if provider == "claude" {
+            crate::accounts::store_claude_token(account.id, "synthetic-third-claude").unwrap();
+        } else {
+            crate::accounts::store_codex_auth(account.id, r#"{"tokens":{"refresh_token":"synthetic-third-codex"}}"#)
+                .unwrap();
+        }
+        Some(account)
+    } else {
+        None
+    };
     let socket = root.join("runner.sock");
     let log = root.join("attempts.jsonl");
     let child = std::process::Command::new("python3")
@@ -193,6 +359,20 @@ fn run_case(outcome: &str) {
     inputs.skill_content = "Review correctness using frozen evidence.".into();
     inputs.db_handle = Some(handle);
     inputs.archive_dir = root.join("archives");
+    if outcome.starts_with("claude-new-ready") || outcome == "claude-frozen-preferences" {
+        prepared_account_case(
+            &mut inputs,
+            &db,
+            &root,
+            &log,
+            first.id,
+            second.id,
+            third.as_ref().map(|a| a.id),
+        );
+        drop(runner);
+        fs::remove_dir_all(root).unwrap();
+        return;
+    }
     let result = crate::review::execute(&inputs, &AtomicBool::new(false), &mut |_, _| {});
     let attempts: Vec<serde_json::Value> = fs::read_to_string(&log)
         .unwrap_or_default()
@@ -246,6 +426,19 @@ fn run_case(outcome: &str) {
         fs::remove_dir_all(root).unwrap();
         return;
     }
+    if let Some(third) = third {
+        result.expect("unavailable Go must not hide the prepared third provider");
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0]["account"], first.id);
+        assert_eq!(attempts[1]["account"], third.id);
+        assert_eq!(db.ai_account(first.id).unwrap().status, "limited");
+        assert_eq!(db.ai_account(second.id).unwrap().status, "ok");
+        assert!(db.ai_account(second.id).unwrap().last_used_at.is_none());
+        assert!(db.ai_account(third.id).unwrap().last_used_at.is_some());
+        drop(runner);
+        fs::remove_dir_all(root).unwrap();
+        return;
+    }
     if primary_provider != "opencode" {
         assert_eq!(
             attempts.len(),
@@ -257,7 +450,7 @@ fn run_case(outcome: &str) {
         assert_eq!(db.ai_account(second.id).unwrap().status, "ok");
         assert!(db.ai_account(second.id).unwrap().last_used_at.is_none());
         if outcome.contains("failover") {
-            assert!(result.is_err(), "selected Go backup must surface its frozen error");
+            assert!(result.is_err(), "without an alternative, preserve the frozen Go error");
             assert_eq!(db.ai_account(first.id).unwrap().status, "limited");
             let message = result.err().unwrap();
             assert!(

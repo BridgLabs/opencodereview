@@ -445,7 +445,7 @@ pub fn preflight_additional(
     let frozen = inputs.frozen.as_ref().ok_or("Frozen snapshot unavailable")?;
     let root = frozen.root.get().ok_or("Review was not preflighted")?;
     let targets = frozen.targets.get().ok_or("Review runners were not preflighted")?;
-    let account = next_account(inputs, &[])?;
+    let account = next_prepared_account(inputs, &[])?;
     for_each_prepared_request(
         inputs,
         root,
@@ -503,7 +503,7 @@ pub(super) fn execute(
     };
     let mut tried = Vec::new();
     loop {
-        let account = next_account(inputs, &tried)?;
+        let account = next_prepared_account(inputs, &tried)?;
         let result = {
             let slot = slot(targets, cancel)?;
             let version = &targets
@@ -688,7 +688,7 @@ pub(super) fn cache_engine(inputs: &ReviewInputs) -> Result<serde_json::Value, S
     if inputs.frozen.is_none() || inputs.db_handle.is_none() {
         return Ok(serde_json::json!({"model": inputs.model}));
     }
-    let account = next_account(inputs, &[])?;
+    let account = next_prepared_account(inputs, &[])?;
     let (model, effort) = engine_for(inputs, &account.provider)?;
     engine_identity(inputs, &account.provider, &model, &effort)
 }
@@ -748,8 +748,7 @@ fn attach_go(inputs: &ReviewInputs, request: &mut runner::Request, provider: &st
     Ok(())
 }
 
-/// An optional Go backup cannot fail another provider's preparation. Freeze its failure too,
-/// and surface it only when Go is actually selected, before any Go inference or classification.
+/// Go preparation and its failure stay frozen for the entire review.
 fn go_snapshot(inputs: &ReviewInputs) -> Result<&crate::providers::go_catalogue::Snapshot, String> {
     inputs
         .frozen
@@ -765,9 +764,34 @@ fn go_snapshot(inputs: &ReviewInputs) -> Result<&crate::providers::go_catalogue:
 /// The account a stage runs on: the first ready account by priority, the first account's provider
 /// before the other, skipping the ones this stage already tried.
 fn next_account(inputs: &ReviewInputs, tried: &[i64]) -> Result<crate::db::AiAccount, String> {
+    pick_account(inputs, tried, false)
+}
+
+fn next_prepared_account(inputs: &ReviewInputs, tried: &[i64]) -> Result<crate::db::AiAccount, String> {
+    pick_account(inputs, tried, true)
+}
+
+fn pick_account(inputs: &ReviewInputs, tried: &[i64], prepared: bool) -> Result<crate::db::AiAccount, String> {
     let db = accounts_db(inputs)?;
-    if let Some(account) = db.pick_ai_account(tried)? {
+    let mut excluded = tried.to_vec();
+    let mut unavailable = None;
+    while let Some(account) = db.pick_ai_account(&excluded)? {
+        if prepared && account.provider == "opencode" {
+            let preparation = inputs
+                .frozen
+                .as_ref()
+                .and_then(|frozen| frozen.go.get())
+                .ok_or("OpenCode Go review catalogue was not prepared")?;
+            if !matches!(preparation, Ok(Some(_))) {
+                unavailable = Some(go_snapshot(inputs).unwrap_err());
+                excluded.push(account.id);
+                continue;
+            }
+        }
         return Ok(account);
+    }
+    if let Some(error) = unavailable {
+        return Err(error);
     }
     Err(match db.next_ai_account_reset()? {
         Some(at) => format!(
