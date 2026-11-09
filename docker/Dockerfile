@@ -18,7 +18,7 @@ FROM debian:bookworm-slim
 # Debian's security updates land after the base image is published; take them at build time.
 RUN apt-get update \
   && apt-get upgrade -y --no-install-recommends \
-  && apt-get install -y --no-install-recommends ca-certificates curl git bubblewrap \
+  && apt-get install -y --no-install-recommends ca-certificates curl git bubblewrap ripgrep \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
@@ -67,6 +67,25 @@ RUN case "$TARGETARCH" in \
   && ln -s /opt/codex/bin/codex /usr/local/bin/codex \
   && test "$(/opt/codex/bin/codex --version | cut -d ' ' -f2)" = "$CODEX_CLI_VERSION"
 LABEL ai.codex.cli.version="${CODEX_CLI_VERSION}"
+ARG OPENCODE_CLI_VERSION=2.2.6
+ARG OPENCODE_CLI_SHA256_AMD64=08bb21d6326ce740d91cce7ebe88a6536933f6e1e30353b91a06b01f25da306c
+ARG OPENCODE_CLI_SHA256_ARM64=f2d27600c367e45057d6a16f6a5c2aa8d77b41a9b10d4bc3d849c2f88870e944
+RUN case "$TARGETARCH" in \
+      amd64) platform=linux-x64; checksum="$OPENCODE_CLI_SHA256_AMD64" ;; \
+      arm64) platform=linux-arm64; checksum="$OPENCODE_CLI_SHA256_ARM64" ;; \
+      *) echo "Unsupported OpenCode CLI architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+  && curl -fsSL --retry 3 "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_CLI_VERSION}/opencode-${platform}.tar.gz" -o /tmp/opencode.tar.gz \
+  && printf '%s  /tmp/opencode.tar.gz\n' "$checksum" | sha256sum -c - \
+  && mkdir -p /opt/opencode/bin \
+  && tar -xzf /tmp/opencode.tar.gz -C /opt/opencode/bin \
+  && rm /tmp/opencode.tar.gz \
+  && chown -R root:root /opt/opencode \
+  && chmod 0755 /opt/opencode/bin/opencode \
+  && ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode \
+  && test "$(HOME=/tmp/opencode-home XDG_DATA_HOME=/tmp/opencode-home XDG_CONFIG_HOME=/tmp/opencode-home XDG_CACHE_HOME=/tmp/opencode-home XDG_STATE_HOME=/tmp/opencode-home /opt/opencode/bin/opencode --version)" = "opencode v$OPENCODE_CLI_VERSION" \
+  && rm -rf /tmp/opencode-home
+LABEL ai.opencode.cli.version="${OPENCODE_CLI_VERSION}"
 ENV DISABLE_AUTOUPDATER=1
 WORKDIR /app
 COPY --from=server /app/assets ./assets
