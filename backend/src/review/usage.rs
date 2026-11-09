@@ -36,6 +36,18 @@ pub(crate) fn parse_transcript_usage_single(transcript_path: &Path) -> RunUsage 
     usage
 }
 
+/// Time covered by `spans`, counting once the time where several overlap: tools one step runs side
+/// by side.
+fn covered_ms(spans: &mut [(i64, i64)]) -> i64 {
+    spans.sort_unstable();
+    let (mut covered, mut reached) = (0, i64::MIN);
+    for &(start, end) in spans.iter() {
+        covered += (end - start.max(reached)).max(0);
+        reached = reached.max(end);
+    }
+    covered
+}
+
 /// Counts what one execution did from its events: Claude `assistant` and `result` events, Codex
 /// `item.completed` and `turn.completed` events and OpenCode `step_start`, `tool_use` and
 /// `step_finish` events.
@@ -43,7 +55,7 @@ pub fn collect_activity(value: &serde_json::Value) -> StageActivity {
     let mut activity = StageActivity::default();
     let mut messages = std::collections::HashSet::new();
     // OpenCode runs a step's tools before the step finishes; their time is not the provider's.
-    let (mut step_started, mut step_tools_ms) = (None, 0);
+    let (mut step_started, mut step_tools) = (None, Vec::new());
     for event in value.as_array().into_iter().flatten() {
         match event["type"].as_str() {
             // Claude writes one event per content block; blocks of one round trip share its id.
@@ -65,19 +77,22 @@ pub fn collect_activity(value: &serde_json::Value) -> StageActivity {
             Some("turn.completed") => {
                 activity.reasoning_tokens += event["usage"]["reasoning_output_tokens"].as_i64().unwrap_or(0);
             }
-            Some("step_start") => (step_started, step_tools_ms) = (event["timestamp"].as_i64(), 0),
+            Some("step_start") => {
+                step_started = event["timestamp"].as_i64();
+                step_tools.clear();
+            }
             Some("tool_use") => {
                 activity.tool_calls += 1;
                 let time = &event["part"]["state"]["time"];
                 if let (Some(start), Some(end)) = (time["start"].as_i64(), time["end"].as_i64()) {
-                    step_tools_ms += (end - start).max(0);
+                    step_tools.push((start, end));
                 }
             }
             Some("step_finish") => {
                 activity.turns += 1;
                 activity.reasoning_tokens += event["part"]["tokens"]["reasoning"].as_i64().unwrap_or(0);
                 if let (Some(start), Some(end)) = (step_started.take(), event["timestamp"].as_i64()) {
-                    activity.model_ms += (end - start - step_tools_ms).max(0);
+                    activity.model_ms += (end - start - covered_ms(&mut step_tools)).max(0);
                 }
             }
             _ => {}

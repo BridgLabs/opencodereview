@@ -71,15 +71,19 @@ fn stage_activity_counts_round_trips_tool_calls_and_reasoning_of_each_cli() {
         r#"{"type":"tool_use","timestamp":1500,"part":{"state":{"input":{"command":"ls"},"time":{"start":1100,"end":1500}}}}"#,
         r#"{"type":"step_finish","timestamp":3000,"part":{"tokens":{"input":1,"output":1,"reasoning":50,"cache":{"read":0,"write":0}}}}"#,
         r#"{"type":"step_start","timestamp":3400}"#,
+        r#"{"type":"tool_use","timestamp":3800,"part":{"state":{"time":{"start":3500,"end":3800}}}}"#,
+        r#"{"type":"tool_use","timestamp":3900,"part":{"state":{"time":{"start":3600,"end":3900}}}}"#,
+        r#"{"type":"tool_use","timestamp":3700,"part":{"state":{"time":{"start":3650,"end":3700}}}}"#,
         r#"{"type":"step_finish","timestamp":4000,"part":{"tokens":{"input":1,"output":1,"reasoning":20,"cache":{"read":0,"write":0}}}}"#,
     ]);
+    // The second step runs three tools side by side from 3500 to 3900: that time counts once.
     assert_eq!(
         opencode,
         super::StageActivity {
             turns: 2,
-            tool_calls: 1,
+            tool_calls: 4,
             reasoning_tokens: 70,
-            model_ms: 2200
+            model_ms: 1800
         }
     );
     // Retries and failovers of a stage add up.
@@ -94,5 +98,5 @@ fn stage_activity_counts_round_trips_tool_calls_and_reasoning_of_each_cli() {
         },
     ]);
     assert_eq!(total.activity.turns, 4);
-    assert_eq!(total.activity.model_ms, 9200);
+    assert_eq!(total.activity.model_ms, 8800);
 }
