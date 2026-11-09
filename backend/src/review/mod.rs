@@ -288,7 +288,7 @@ pub struct StageActivity {
     pub turns: i64,
     pub tool_calls: i64,
     pub reasoning_tokens: i64,
-    /// Time spent on the provider: Claude's API time, OpenCode's steps.
+    /// Time spent on the provider: Claude's API time, OpenCode's steps without their tools.
     pub model_ms: i64,
 }
 
