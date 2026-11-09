@@ -657,3 +657,45 @@ fn final_response_of_other_clis_takes_report_fields_written_beside_or_without_th
     }
     assert!(parse_final_response(&json!({"title":"x"}).to_string(), true).is_err());
 }
+
+#[test]
+fn final_response_of_other_clis_drops_the_identity_repeated_in_every_point() {
+    let identity = json!({"contractVersion":2,"snapshotId":"snapshot"});
+    let point =
+        json!({"title":"t","detail":"d","action":"a","path":"a.rs","line":1,"evidence":[],"counterEvidence":[]});
+    let with = |extra: serde_json::Value| {
+        let mut point = point.clone();
+        point
+            .as_object_mut()
+            .unwrap()
+            .extend(identity.as_object().unwrap().clone());
+        point
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        point
+    };
+    let output = json!({"report":{
+        "contractVersion":2,"snapshotId":"snapshot","reviewedFiles":["a.rs"],"missingEvidence":[],
+        "findings":[with(json!({"kind":"finding"})), with(json!({"snapshotId":"other"}))],
+        "suggestions":[with(json!({"kind":"suggestion"}))],
+        "questions":[with(json!({"kind":"finding"}))]
+    },"findingDecisions":identity});
+    let (report, decisions) = parse_final_response(&output.to_string(), true).unwrap();
+    let report = serde_json::from_str::<serde_json::Value>(&report).unwrap();
+    let mut finding = point.clone();
+    finding["kind"] = json!("finding");
+    assert_eq!(report["findings"][0], finding);
+    // A value that differs from the report's is left for validation to reject.
+    assert_eq!(report["findings"][1]["snapshotId"], "other");
+    assert_eq!(report["suggestions"][0], point);
+    assert_eq!(report["questions"][0]["kind"], "finding");
+    assert_eq!(decisions, None);
+    // Claude's output stays as written.
+    let (strict, decisions) = parse_final_response(&output.to_string(), false).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&strict).unwrap()["suggestions"][0]["kind"],
+        "suggestion"
+    );
+    assert!(decisions.is_some());
+}

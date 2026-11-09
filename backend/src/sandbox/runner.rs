@@ -841,6 +841,32 @@ fn wrap_report(value: serde_json::Value) -> serde_json::Value {
     serde_json::Value::Object(fields)
 }
 
+/// Other CLIs sometimes repeat the report's frozen identity in every finding, question and
+/// suggestion, and mark suggestions and questions with the `kind` only findings carry. Only values
+/// equal to the report's own are dropped; anything else is left for validation to reject.
+fn drop_repeated_identity(report: &mut serde_json::Value) {
+    let identity = ["contractVersion", "snapshotId"].map(|key| (key, report.get(key).cloned()));
+    for (list, kind) in [
+        ("findings", None),
+        ("questions", Some("question")),
+        ("suggestions", Some("suggestion")),
+    ] {
+        let Some(serde_json::Value::Array(points)) = report.get_mut(list) else {
+            continue;
+        };
+        for point in points.iter_mut().filter_map(serde_json::Value::as_object_mut) {
+            for (key, value) in &identity {
+                if value.is_some() && point.get(*key) == value.as_ref() {
+                    point.remove(*key);
+                }
+            }
+            if kind.is_some() && point.get("kind").and_then(serde_json::Value::as_str) == kind {
+                point.remove("kind");
+            }
+        }
+    }
+}
+
 /// Escapes backslashes the model left unescaped inside JSON strings, as in a quoted `\d`.
 /// Valid escapes are kept, so quotes still have to match the frozen source exactly.
 fn escape_stray_backslashes(text: &str) -> String {
@@ -984,9 +1010,18 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
         fields.entry(key).or_insert(value);
     }
     let decisions = response.finding_decisions.map(unwrap);
+    if lenient {
+        drop_repeated_identity(&mut report);
+    }
     let decisions = if lenient {
         decisions
             .filter(|value| !value.is_null() && value.as_array().is_none_or(|items| !items.is_empty()))
+            // Decisions holding only the frozen identity are no decisions.
+            .filter(|value| {
+                value
+                    .as_object()
+                    .is_none_or(|fields| fields.keys().any(|key| key != "contractVersion" && key != "snapshotId"))
+            })
             .map(|value| match value {
                 // A bare list takes the frozen identity from the report, as the wrapper would carry it.
                 serde_json::Value::Array(items) => {
