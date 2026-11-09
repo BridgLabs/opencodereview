@@ -198,14 +198,20 @@ fn reader(path: &Path) -> Result<BufReader<std::fs::File>, String> {
     Ok(BufReader::new(file))
 }
 
-fn next_line(reader: &mut impl BufRead, budget: &mut u64) -> Result<Option<Vec<u8>>, String> {
+#[derive(Debug, PartialEq)]
+enum LineError {
+    Read,
+    Budget,
+}
+
+fn next_line(reader: &mut impl BufRead, budget: &mut u64) -> Result<Option<Vec<u8>>, LineError> {
     let mut line = Vec::new();
     reader
         .take(*budget + 1)
         .read_until(b'\n', &mut line)
-        .map_err(|_| DENIED)?;
+        .map_err(|_| LineError::Read)?;
     if line.len() as u64 > *budget {
-        return Err(DENIED.into());
+        return Err(LineError::Budget);
     }
     *budget -= line.len() as u64;
     Ok((!line.is_empty()).then_some(line))
@@ -230,7 +236,7 @@ fn read_window(path: &Path, offset: usize, limit: usize) -> Result<String, Strin
     let mut budget = MAX_SCAN;
     let mut output = String::new();
     for index in 0..offset - 1 + limit {
-        let Some(line) = next_line(&mut reader, &mut budget)? else {
+        let Some(line) = next_line(&mut reader, &mut budget).map_err(|_| DENIED)? else {
             break;
         };
         if index >= offset - 1 {
@@ -277,6 +283,15 @@ fn files(path: &Path, depth: usize, entries: &mut usize, result: &mut Vec<PathBu
     Ok(())
 }
 
+fn search_note(output: &mut String, path: &Path, reason: &str) -> Result<(), String> {
+    let note = format!("[OpenCode search output truncated: {} ({reason})]\n", path.display());
+    if note.len() > MAX_FILE as usize - output.len() {
+        return Err(DENIED.into());
+    }
+    output.push_str(&note);
+    Ok(())
+}
+
 fn search(path: &Path, pattern: &str, limit: usize) -> Result<String, String> {
     let mut paths = Vec::new();
     files(path, 0, &mut 0, &mut paths)?;
@@ -284,27 +299,53 @@ fn search(path: &Path, pattern: &str, limit: usize) -> Result<String, String> {
     let mut output = String::new();
     let mut count = 0;
     let mut budget = MAX_SCAN;
+    let marker = "\n[OpenCode search output truncated]\n";
     for path in paths {
+        let reserve = format!(
+            "[OpenCode search output truncated: {} (invalid UTF-8)]\n",
+            path.display()
+        )
+        .len()
+            + marker.len();
+        if output.len() > MAX_FILE as usize - reserve {
+            output.push_str(marker);
+            return Ok(output);
+        }
         let mut reader = reader(&path)?;
         if reader.get_ref().metadata().map_err(|_| DENIED)?.len() > MAX_SCAN {
+            search_note(&mut output, &path, "size limit")?;
             continue;
         }
         let mut index = 0;
-        while let Some(line) = next_line(&mut reader, &mut budget)? {
+        let mut truncated = false;
+        loop {
+            let line = match next_line(&mut reader, &mut budget) {
+                Ok(Some(line)) => line,
+                Ok(None) => break,
+                Err(LineError::Budget) if truncated => break,
+                Err(_) => return Err(DENIED.into()),
+            };
             index += 1;
-            let Ok(line) = std::str::from_utf8(&line) else { break };
+            let Ok(line) = std::str::from_utf8(&line) else {
+                search_note(&mut output, &path, "invalid UTF-8")?;
+                break;
+            };
             if line.contains('\0') {
+                search_note(&mut output, &path, "NUL")?;
                 break;
             }
             let line = line.strip_suffix('\n').unwrap_or(line);
+            if truncated {
+                continue;
+            }
             if let Some(position) = line.find(pattern) {
                 let matched = format!("{}:{index}:{line}\n", path.display());
-                if matched.len() > MAX_FILE as usize - output.len() {
-                    let marker = "\n[OpenCode search output truncated]\n";
+                if matched.len() > MAX_FILE as usize - reserve - output.len() {
                     let prefix = format!("{}:{index}:[excerpt] ", path.display());
-                    let available = MAX_FILE as usize - marker.len() - prefix.len();
+                    let available = MAX_FILE as usize - reserve - prefix.len();
                     if output.len() + pattern.len() > available {
-                        return Err(DENIED.into());
+                        truncated = true;
+                        continue;
                     }
                     let mut start = position.saturating_sub(128.min(available - output.len() - pattern.len()));
                     while !line.is_char_boundary(start) {
@@ -316,8 +357,8 @@ fn search(path: &Path, pattern: &str, limit: usize) -> Result<String, String> {
                     }
                     output.push_str(&prefix);
                     output.push_str(&line[start..end]);
-                    output.push_str(marker);
-                    return Ok(output);
+                    truncated = true;
+                    continue;
                 }
                 output.push_str(&matched);
                 count += 1;
@@ -325,6 +366,10 @@ fn search(path: &Path, pattern: &str, limit: usize) -> Result<String, String> {
                     return Ok(output);
                 }
             }
+        }
+        if truncated {
+            output.push_str(marker);
+            return Ok(output);
         }
     }
     Ok(output)
@@ -467,14 +512,28 @@ mod tests {
     fn opencode_tool_search_skips_unsuitable_files_and_finds_large_manifest_matches() {
         let root = std::env::temp_dir().join(format!("ocr-search-{}", super::super::secret().unwrap()));
         std::fs::create_dir(&root).unwrap();
-        std::fs::write(root.join("a-binary"), [0xff, b'\n']).unwrap();
-        std::fs::write(root.join("b-nul"), b"binary\0target\n").unwrap();
+        std::fs::write(root.join("a-binary"), b"target\n\xff\ntarget\n").unwrap();
+        std::fs::write(root.join("b-nul"), b"target\nbinary\0target\ntarget\n").unwrap();
         let oversized = std::fs::File::create(root.join("c-oversized")).unwrap();
         oversized.set_len(MAX_SCAN + 1).unwrap();
         let manifest = root.join("manifest.json");
         std::fs::write(&manifest, "x".repeat(MAX_FILE as usize + 20) + "target\n").unwrap();
         std::fs::write(root.join("z-source"), "target\n").unwrap();
         let found = search(&root, "target", 80).unwrap();
+        for (file, reason) in [
+            ("a-binary", "invalid UTF-8"),
+            ("b-nul", "NUL"),
+            ("c-oversized", "size limit"),
+        ] {
+            assert!(found.contains(&format!(
+                "[OpenCode search output truncated: {} ({reason})]",
+                root.join(file).display()
+            )));
+        }
+        for file in ["a-binary", "b-nul"] {
+            assert!(found.contains(&format!("{file}:1:target\n")));
+            assert!(!found.contains(&format!("{file}:3:target\n")));
+        }
         assert!(found.contains("manifest.json:1:[excerpt]"));
         assert!(found.contains("target"));
         assert!(found.ends_with("[OpenCode search output truncated]\n"));
@@ -489,9 +548,51 @@ mod tests {
     }
 
     #[test]
+    fn opencode_tool_search_preserves_near_budget_matches_before_invalid_content() {
+        let root = std::env::temp_dir().join(format!("ocr-search-budget-{}", super::super::secret().unwrap()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("source");
+        for (invalid, reason) in [(b"\xff\n".as_slice(), "invalid UTF-8"), (b"\0\n".as_slice(), "NUL")] {
+            let mut content = b"target".to_vec();
+            content.resize(MAX_FILE as usize - path.to_str().unwrap().len() - 20, b'x');
+            content.push(b'\n');
+            content.extend_from_slice(invalid);
+            std::fs::write(&path, content).unwrap();
+            let found = search(&root, "target", 80).unwrap();
+            assert!(found.contains("source:1:"));
+            assert!(found.contains("target"));
+            assert!(found.contains(&format!("{} ({reason})]", path.display())));
+            assert!(found.len() <= MAX_FILE as usize);
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn opencode_tool_search_preserves_excerpt_when_remaining_scan_budget_runs_out() {
+        let root = std::env::temp_dir().join(format!("ocr-search-scan-{}", super::super::secret().unwrap()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("a"), vec![b'x'; 3 * 1024 * 1024]).unwrap();
+        let mut content = b"target".to_vec();
+        content.resize(300 * 1024, b'x');
+        content.push(b'\n');
+        content.extend(vec![b'x'; 1024 * 1024]);
+        std::fs::write(root.join("b"), content).unwrap();
+        let found = search(&root, "target", 80).unwrap();
+        assert!(found.contains("b:1:[excerpt] target"));
+        assert!(found.ends_with("[OpenCode search output truncated]\n"));
+        assert!(found.len() <= MAX_FILE as usize);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn opencode_tool_line_reader_bounds_allocation_and_preserves_utf8() {
         let mut budget = 4;
-        assert_eq!(next_line(&mut &b"12345"[..], &mut budget).unwrap_err(), DENIED);
+        assert_eq!(
+            next_line(&mut &b"12345"[..], &mut budget).unwrap_err(),
+            LineError::Budget
+        );
+        let mut directory = BufReader::new(std::fs::File::open(".").unwrap());
+        assert_eq!(next_line(&mut directory, &mut budget).unwrap_err(), LineError::Read);
         let mut output = "x".repeat(MAX_FILE as usize - 1);
         assert!(!append_bounded(&mut output, "é"));
         assert_eq!(output.len(), MAX_FILE as usize - 1);
