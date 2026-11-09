@@ -157,74 +157,76 @@ export function EnginePicker() {
           {adding ? (
             <AddAccount onDone={added} onCancel={() => setAdding(false)} />
           ) : (
-            <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-              <div className="px-4 pt-3.5 pb-1.5">
-                <div className="truncate text-small font-semibold text-fg">{providerName[provider]}</div>
-                <div className="truncate text-caption text-fg-subtle">
-                  {provider === next.provider
-                    ? "New reviews start on the chosen account"
-                    : `New reviews run on ${providerName[next.provider]} · ${next.label}`}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <div className="px-4 pt-3.5 pb-1.5">
+                  <div className="truncate text-small font-semibold text-fg">{providerName[provider]}</div>
+                  <div className="truncate text-caption text-fg-subtle">
+                    {provider === next.provider
+                      ? "New reviews start on the chosen account"
+                      : `New reviews run on ${providerName[next.provider]} · ${next.label}`}
+                  </div>
+                </div>
+                <AccountChoices
+                  accounts={all.filter((account) => account.provider === provider)}
+                  nextId={next.id}
+                  busy={choose.isPending}
+                  onChoose={(account) => choose.mutate(account)}
+                />
+                <div className="flex flex-col gap-2.5 border-t border-line px-4 pt-3 pb-2">
+                  <span className="text-caption text-fg-subtle">Model</span>
+                  {shown.models.length > 1 && (
+                    <input
+                      aria-label="Search models"
+                      placeholder="Search models"
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      className="h-9 w-full rounded-lg bg-surface-muted px-3 text-small text-fg outline-none placeholder:text-fg-subtle focus:ring-2 focus:ring-brand/20"
+                    />
+                  )}
+                </div>
+                <div className="flex flex-col px-2 pb-2" role="radiogroup" aria-label="Model">
+                  {models.map((item) => {
+                    const selected = item.id === shown.model;
+                    return (
+                      // biome-ignore lint/a11y/useSemanticElements: radio rows styled as a list; a native radio cannot hold this layout
+                      <button
+                        key={item.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        disabled={save.isPending}
+                        className="flex h-9 w-full flex-none cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-small text-fg transition-colors hover:bg-surface-muted/60"
+                        onClick={() => !selected && chooseModel(item.id)}
+                      >
+                        <span
+                          className={cx(
+                            "grid size-4.5 flex-none place-items-center rounded-full border",
+                            selected ? "border-fg bg-fg text-canvas" : "border-line-strong",
+                          )}
+                        >
+                          {selected && <Check className="size-3" strokeWidth={3} />}
+                        </span>
+                        <span className="truncate">{item.label}</span>
+                        {shown.models.length > 1 && item.id === shown.models[0].id && (
+                          <span className="rounded-md bg-surface-muted px-1.5 py-0.5 text-caption text-fg-subtle">
+                            default
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                  {models.length === 0 && (
+                    <p className="px-2 py-3 text-caption text-fg-subtle">
+                      {shown.models.length === 0
+                        ? `${shown.name}'s model list couldn't be loaded. Check the connection and reopen this menu.`
+                        : "No model matches."}
+                    </p>
+                  )}
                 </div>
               </div>
-              <AccountChoices
-                accounts={all.filter((account) => account.provider === provider)}
-                nextId={next.id}
-                busy={choose.isPending}
-                onChoose={(account) => choose.mutate(account)}
-              />
-              <div className="flex flex-col gap-2.5 border-t border-line px-4 pt-3 pb-2">
-                <span className="text-caption text-fg-subtle">Model</span>
-                {shown.models.length > 1 && (
-                  <input
-                    aria-label="Search models"
-                    placeholder="Search models"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    className="h-9 w-full rounded-lg bg-surface-muted px-3 text-small text-fg outline-none placeholder:text-fg-subtle focus:ring-2 focus:ring-brand/20"
-                  />
-                )}
-              </div>
-              <div className="flex flex-col px-2 pb-2" role="radiogroup" aria-label="Model">
-                {models.map((item) => {
-                  const selected = item.id === shown.model;
-                  return (
-                    // biome-ignore lint/a11y/useSemanticElements: radio rows styled as a list; a native radio cannot hold this layout
-                    <button
-                      key={item.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      disabled={save.isPending}
-                      className="flex h-9 w-full flex-none cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-small text-fg transition-colors hover:bg-surface-muted/60"
-                      onClick={() => !selected && chooseModel(item.id)}
-                    >
-                      <span
-                        className={cx(
-                          "grid size-4.5 flex-none place-items-center rounded-full border",
-                          selected ? "border-fg bg-fg text-canvas" : "border-line-strong",
-                        )}
-                      >
-                        {selected && <Check className="size-3" strokeWidth={3} />}
-                      </span>
-                      <span className="truncate">{item.label}</span>
-                      {shown.models.length > 1 && item.id === shown.models[0].id && (
-                        <span className="rounded-md bg-surface-muted px-1.5 py-0.5 text-caption text-fg-subtle">
-                          default
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-                {models.length === 0 && (
-                  <p className="px-2 py-3 text-caption text-fg-subtle">
-                    {shown.models.length === 0
-                      ? `${shown.name}'s model list couldn't be loaded. Check the connection and reopen this menu.`
-                      : "No model matches."}
-                  </p>
-                )}
-              </div>
               {shownModel && shownModel.efforts.length > 0 && (
-                <div className="flex flex-col gap-2 border-t border-line px-4 py-3">
+                <div className="flex flex-none flex-col gap-2 border-t border-line px-4 py-3">
                   <span className="text-caption text-fg-subtle">Effort</span>
                   <div className="flex rounded-lg bg-surface-muted p-0.5">
                     {shownModel.efforts.map((effort) => (
