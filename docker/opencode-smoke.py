@@ -166,6 +166,7 @@ def main():
         return subprocess.run(command, env={"PATH": "/usr/bin:/bin"}, check=False).returncode
     subprocess.run(["ip", "link", "set", "lo", "up"], check=True)
     assert subprocess.run(["ip", "route", "get", "1.1.1.1"], capture_output=True).returncode != 0
+    Path("/tmp/opencode").mkdir(mode=0o700, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ocr-opencode-", dir="/tmp/opencode") as directory:
         root = Path(directory)
         work = root / "work"

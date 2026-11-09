@@ -175,6 +175,7 @@ def main():
     def engine(*command, **kwargs):
         return subprocess.run([args.engine, *command], check=True, capture_output=True, text=True, timeout=60, **kwargs).stdout
     try:
+        Path("/tmp/opencode").mkdir(mode=0o700, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix=prefix, dir="/tmp/opencode") as temporary:
             root = Path(temporary)
             for name in ["ipc", "work", "output", "scratch", "evidence", "tmp", "system", "provider", "proof", "auth/accounts/1/opencode"]:
@@ -230,7 +231,8 @@ def main():
                 provider = prefix + "-api"
                 resources.append(provider)
                 volume_mode = "rw,Z" if args.engine == "podman" else "rw"
-                engine("run", "-d", "--name", provider, "--pull=never", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges:true", "-v", f"{root / 'provider'}:/provider:{volume_mode}", "--entrypoint=python3", args.provider_image, "/provider/proof.py", "--provider", "/provider/state.json")
+                provider_user = ["--user", f"{os.getuid()}:{os.getgid()}"] if args.engine == "docker" else []
+                engine("run", "-d", "--name", provider, "--pull=never", "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges:true", *provider_user, "-v", f"{root / 'provider'}:/provider:{volume_mode}", "--entrypoint=python3", args.provider_image, "/provider/proof.py", "--provider", "/provider/state.json")
                 runner = prefix
                 resources.append(runner)
                 mounts = []
@@ -436,13 +438,17 @@ def main():
                     result = stage(test_key=key, **options)
                     assert result.get("report") is None and result["error"] and not result["error"].startswith("auth_failed:"), result
                     print("PASS recoverable plaintext Unicode key rejected in " + label)
-                for label, text in [
-                    ("malformed Unicode escape", r"prefix \u00xz suffix"),
-                    ("Unicode inspection budget", r"prefix \u005c" + "u005c" * 65 + "u0070 suffix"),
-                ]:
-                    result = stage(test_key=key, report_summary=text)
-                    assert result.get("report") is None and result["error"], result
-                    print("PASS " + label + " fails closed")
+                malformed = r"prefix \u00xz suffix"
+                result = stage(test_key=key, report_summary=malformed)
+                assert result["error"] is None and json.loads(result["report"])["summary"] == malformed, result
+                print("PASS malformed non-secret Unicode remains byte-identical")
+                result = stage(test_key=key, report_summary=malformed + nested)
+                assert result.get("report") is None and result["error"], result
+                print("PASS malformed Unicode cannot hide an encoded credential")
+                exhausted = r"prefix \u005c" + "u005c" * 65 + "u0070 suffix"
+                result = stage(test_key=key, report_summary=exhausted)
+                assert result.get("report") is None and result["error"], result
+                print("PASS Unicode inspection budget fails closed")
                 return 0
             if args.check_evidence_identity:
                 quote = '{"enabled": true}'
