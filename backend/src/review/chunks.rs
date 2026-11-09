@@ -1242,6 +1242,23 @@ pub(crate) fn prepare_review_chunk(
     validate_review_stage_inputs(&chunk_context, None, &prompt)
 }
 
+/// `payload` with the engine the review started with, so a chunk reviewed by one provider, model
+/// or effort is never reused for another, nor an OpenCode chunk across prompt adaptations.
+pub(crate) fn with_engine(mut payload: serde_json::Value, inputs: &ReviewInputs) -> serde_json::Value {
+    let Some(pinned) = inputs.engines.as_ref() else {
+        return payload;
+    };
+    let provider = pinned.provider.clone().unwrap_or_default();
+    let (model, effort) = pinned.engine(&provider).unwrap_or_default();
+    let runtime = if provider == "opencode" {
+        crate::providers::opencode::PROMPT_ADAPTATION
+    } else {
+        ""
+    };
+    payload["engine"] = serde_json::json!([provider, model, effort, runtime]);
+    payload
+}
+
 pub(crate) fn planned_chunk_prompt(
     inputs: &ReviewInputs,
     run_dir: &Path,
@@ -1320,6 +1337,7 @@ pub(crate) fn run_review_chunk(
         "diffHash": diff_hash,
         "lensPass": lens::enabled(inputs),
     });
+    let cache_payload = with_engine(cache_payload, inputs);
     let cache_key = sha256_hex(serde_json::to_string(&cache_payload).unwrap_or_default().as_bytes());
     let potential_cache_hit = inputs
         .open_db()

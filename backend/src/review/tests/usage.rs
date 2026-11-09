@@ -2407,3 +2407,26 @@ fn stages_record_the_model_they_ran_on() {
         "opencode/deepseek-v4.1-flash"
     );
 }
+
+#[test]
+fn chunk_cache_keys_keep_engines_apart() {
+    let base = serde_json::json!({ "promptHash": "p" });
+    let mut inputs = review_inputs("auto", 0, 0);
+    assert_eq!(super::chunks::with_engine(base.clone(), &inputs), base);
+    let pinned = |provider: &str, model: &str, effort: &str| {
+        Some(std::sync::Arc::new(super::PinnedEngines {
+            provider: Some(provider.into()),
+            engines: vec![(provider.into(), model.into(), effort.into())],
+        }))
+    };
+    inputs.engines = pinned("claude", "claude-opus-5-5", "medium");
+    let claude = super::chunks::with_engine(base.clone(), &inputs);
+    inputs.engines = pinned("opencode", "opencode/glm-5.3-flash", "low");
+    let opencode = super::chunks::with_engine(base.clone(), &inputs);
+    inputs.engines = pinned("opencode", "opencode/glm-5.3-flash", "high");
+    let opencode_high = super::chunks::with_engine(base, &inputs);
+    assert_ne!(claude, opencode);
+    assert_ne!(opencode, opencode_high);
+    assert_eq!(opencode["engine"][3], crate::providers::opencode::PROMPT_ADAPTATION);
+    assert_eq!(claude["engine"][3], "");
+}

@@ -1029,6 +1029,12 @@ fn run(
             })
             .map_err(|e| e.to_string())?;
     }
+    // OpenCode runs each tool call as its own step; its prompt lets one step read several files.
+    let prompt = if provider == "opencode" {
+        crate::providers::opencode::adapt_prompt(&prompt)
+    } else {
+        prompt
+    };
     fs::write("/work/prompt.md", prompt).map_err(|e| e.to_string())?;
     fs::set_permissions("/work/prompt.md", fs::Permissions::from_mode(0o444)).map_err(|e| e.to_string())?;
     let mut probe = Command::new("/bin/sh");
