@@ -144,7 +144,6 @@ fn round_trip_and_stage_scope_validation() {
     assert!(validate(&request).is_err());
 }
 
-#[cfg(unix)]
 #[test]
 fn printing_prepared_files_keeps_the_stage_request_valid() {
     let run = |prompt: String, source: String| Request::Run {
@@ -171,6 +170,7 @@ fn printing_prepared_files_keeps_the_stage_request_valid() {
     assert!(matches!(&request, Request::Run { prompt, .. } if prompt.len() == 150_000));
 }
 
+#[cfg(unix)]
 #[test]
 fn cancellation_returns_partial_usage_over_private_ipc() {
     let root = std::env::temp_dir().join(format!("sandbox-ipc-{}", secret().unwrap()));
