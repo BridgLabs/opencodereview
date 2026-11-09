@@ -124,6 +124,16 @@ it("lists Go from the API catalogue and shows its data-use notice", async () => 
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(container.textContent).toContain("OpenCode Go");
+    expect(
+      [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) =>
+        item.textContent?.includes("OpenCode Go"),
+      )?.textContent,
+    ).toContain("Model 1 · medium");
+    expect(
+      [...container.querySelectorAll<HTMLOptionElement>("select[aria-label='Reviews run on'] option")].map(
+        (option) => option.textContent,
+      ),
+    ).toContain("OpenCode Go · Model 1 · medium");
     await act(async () =>
       [...container.querySelectorAll<HTMLButtonElement>("button")]
         .find((item) => item.textContent?.includes("OpenCode Go"))!
@@ -321,8 +331,9 @@ it("shows loading Go catalogue in provider settings without saving a stale model
 });
 
 it("keeps provider connection choices available when engine discovery fails", async () => {
-  vi.mocked(setupApi.listAccounts).mockResolvedValue([]);
-  vi.mocked(setupApi.reviewEngines).mockRejectedValue(new Error("catalogue unavailable"));
+  const discoveryError = new Error("Engine discovery unavailable");
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(24, "opencode", "Go key")]);
+  vi.mocked(setupApi.reviewEngines).mockRejectedValueOnce(discoveryError).mockResolvedValueOnce([]);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const container = document.createElement("div");
   document.body.append(container);
@@ -335,9 +346,28 @@ it("keeps provider connection choices available when engine discovery fails", as
         </QueryClientProvider>,
       ),
     );
-    await vi.waitFor(() => expect(container.textContent).toContain("OpenCode Go API key"));
-    expect(container.textContent).toContain("Claude Pro, Max or Team plan");
-    expect(container.textContent).toContain("ChatGPT Plus or Pro plan");
+    await vi.waitFor(() => expect(container.textContent).toContain("Go key"));
+    expect(container.textContent).toContain("OpenCode Go");
+    const goSummary = [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) =>
+      item.textContent?.includes("OpenCode Go"),
+    );
+    expect(goSummary?.textContent).toContain("Models unavailable");
+    expect(goSummary?.textContent).not.toContain("Loading models…");
+    await act(async () =>
+      [...container.querySelectorAll<HTMLButtonElement>("button")]
+        .find((item) => item.textContent?.includes("OpenCode Go"))!
+        .click(),
+    );
+    await vi.waitFor(() => expect(container.textContent).toContain("Engine discovery unavailable"));
+    expect(container.textContent).not.toContain("Loading OpenCode Go models…");
+    const retry = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+      (item) => item.textContent === "Retry",
+    );
+    expect(retry).toBeDefined();
+    await act(async () => retry!.click());
+    await vi.waitFor(() => expect(setupApi.reviewEngines).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(container.textContent).not.toContain("Engine discovery unavailable"));
+    expect(setupApi.refreshOpenCodeCatalogue).not.toHaveBeenCalled();
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -348,7 +378,7 @@ it("keeps provider connection choices available when engine discovery fails", as
 it("shows rejected model save errors", async () => {
   const go = engine("opencode", "OpenCode Go");
   vi.mocked(setupApi.listAccounts).mockResolvedValue([account(23, "opencode", "Go key")]);
-  vi.mocked(setupApi.reviewEngines).mockResolvedValue([go]);
+  vi.mocked(setupApi.reviewEngines).mockResolvedValueOnce([go]).mockResolvedValueOnce([go]);
   vi.mocked(setupApi.saveReviewEngine).mockRejectedValue(new Error("Catalogue changed; refresh and confirm."));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const container = document.createElement("div");
@@ -374,6 +404,7 @@ it("shows rejected model save errors", async () => {
       select.dispatchEvent(new Event("change", { bubbles: true }));
     });
     await vi.waitFor(() => expect(container.textContent).toContain("Catalogue changed; refresh and confirm."));
+    await vi.waitFor(() => expect(setupApi.reviewEngines).toHaveBeenCalledTimes(2));
   } finally {
     await act(async () => root.unmount());
     container.remove();

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
+import { friendlyError } from "../../components/AccessConnect";
 import { BrandLoadingIcon } from "../../components/BrandLoading";
 import { cx, DSButton } from "../../components/DesignSystem";
 import { setupApi } from "../../services/setupApi";
@@ -70,6 +71,7 @@ export function ProvidersPanel() {
       )
         return "Choose model";
       if (provider === "opencode" && engine?.catalogue?.status === "error") return "Models unavailable";
+      if (provider === "opencode" && engines.error) return "Models unavailable";
       if (provider === "opencode" && engine?.catalogue?.status !== "ready") return "Loading models…";
       if (provider === "opencode") {
         const model = engine?.models.find((item) => item.id === engine.model);
@@ -83,6 +85,8 @@ export function ProvidersPanel() {
         provider={open}
         accounts={accounts}
         engine={engines.data?.find((engine) => engine.provider === open)}
+        discoveryError={engines.error}
+        retryDiscovery={() => void engines.refetch()}
         first={connected[0] === open && runnable.includes(open)}
         onBack={() => setOpen(null)}
       />
@@ -189,12 +193,16 @@ function ProviderDetail({
   provider,
   accounts,
   engine,
+  discoveryError,
+  retryDiscovery,
   first,
   onBack,
 }: {
   provider: Provider;
   accounts: AiAccount[];
   engine?: ReviewEngine;
+  discoveryError: Error | null;
+  retryDiscovery: () => void;
   first: boolean;
   onBack: () => void;
 }) {
@@ -258,7 +266,9 @@ function ProviderDetail({
             {go && !catalogueReady
               ? catalogueFailed
                 ? "OpenCode Go models need a refresh"
-                : "Loading OpenCode Go models…"
+                : discoveryError
+                  ? friendlyError(discoveryError)
+                  : "Loading OpenCode Go models…"
               : go && !selectionValid
                 ? "Choose a model before reviews can use this account"
                 : first
@@ -273,6 +283,16 @@ function ProviderDetail({
         )}
       </header>
       <AccountsPanel provider={provider} engineValid={selectionValid} />
+      {discoveryError && (
+        <div className={cx(groupClass, "flex flex-wrap items-center justify-between gap-3 px-4 py-3")} role="alert">
+          <p className="text-small text-danger">
+            {friendlyError(discoveryError) || "Could not load review engines."} Try again.
+          </p>
+          <DSButton size="sm" onClick={retryDiscovery}>
+            Retry
+          </DSButton>
+        </div>
+      )}
       {engine && (
         <div className="flex flex-col gap-2">
           <h3 className="px-1 text-small font-semibold text-fg">Model</h3>
@@ -322,11 +342,13 @@ function ProviderDetail({
                 </select>
               )}
             </div>
-            {go && (!catalogue || catalogue.status === "empty" || catalogue.status === "loading") && (
-              <div className="flex items-center gap-2 px-4 py-3 text-small text-fg-muted" role="status">
-                <BrandLoadingIcon size={16} /> Loading OpenCode Go models…
-              </div>
-            )}
+            {go &&
+              !discoveryError &&
+              (!catalogue || catalogue.status === "empty" || catalogue.status === "loading") && (
+                <div className="flex items-center gap-2 px-4 py-3 text-small text-fg-muted" role="status">
+                  <BrandLoadingIcon size={16} /> Loading OpenCode Go models…
+                </div>
+              )}
             {catalogueFailed && (
               <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3" role="alert">
                 <p className="text-small text-danger">
