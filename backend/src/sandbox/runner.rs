@@ -314,9 +314,12 @@ fn validate(request: &Request) -> Result<(), String> {
         {
             return Err("Invalid archive identity".into());
         }
+        // OpenCode models are `<provider>/<model>`; every other model is a plain name.
+        let model_ok = model.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+            || provider == "opencode" && crate::providers::opencode_catalogue::selector_ok(model, "");
         if model.is_empty()
             || model.len() > 120
-            || !model.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+            || !model_ok
             || version.is_empty()
             || version.len() > 256
             || prompt.len() > 200_000
