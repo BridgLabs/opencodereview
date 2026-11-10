@@ -826,6 +826,12 @@ fn wrap_report(value: serde_json::Value) -> serde_json::Value {
         wrapper.extend(decisions.map(|decisions| ("findingDecisions".to_string(), decisions)));
         return serde_json::Value::Object(wrapper);
     }
+    // A report sent as a JSON string is read first, so fields beside it still find it.
+    if let Some(serde_json::Value::String(raw)) = fields.get("report") {
+        if let Ok(report @ serde_json::Value::Object(_)) = serde_json::from_str(raw) {
+            fields.insert("report".into(), report);
+        }
+    }
     let stray = fields
         .keys()
         .filter(|key| !WRAPPER.contains(&key.as_str()))
