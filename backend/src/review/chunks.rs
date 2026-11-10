@@ -1256,6 +1256,23 @@ pub(crate) fn prepare_review_chunk(
     validate_review_stage_inputs(&chunk_context, None, &prompt)
 }
 
+/// Whether every execution in `usage` ran on the provider the review started with. A stage whose
+/// accounts are all resting fails over to another provider, and its report then comes from another
+/// engine than the one the chunk's cache key names, so it is not kept for reuse.
+pub(crate) fn ran_on_pinned_provider(inputs: &ReviewInputs, usage: &RunUsage) -> bool {
+    let Some(pinned) = inputs.engines.as_ref().and_then(|pinned| pinned.provider.as_deref()) else {
+        return true;
+    };
+    // Codex and OpenCode transcripts name the provider; Claude's name its model.
+    usage.by_model.iter().all(|entry| {
+        pinned
+            == match entry.model.as_str() {
+                provider @ ("codex" | "opencode") => provider,
+                _ => "claude",
+            }
+    })
+}
+
 /// `payload` with the engine the review started with, so a chunk reviewed by one provider, model
 /// or effort is never reused for another, nor an OpenCode chunk across prompt adaptations.
 pub(crate) fn with_engine(mut payload: serde_json::Value, inputs: &ReviewInputs) -> serde_json::Value {
@@ -1371,10 +1388,8 @@ pub(crate) fn run_review_chunk(
                 &comments,
             )?;
             let comments_json = fs::read_to_string(&comments).map_err(|error| error.to_string())?;
-            let usage = RunUsage {
-                model: Some(inputs.model.clone()),
-                ..Default::default()
-            };
+            // No transcript: the stage is recorded with the model of the review's provider.
+            let usage = RunUsage::default();
             record_stage(
                 inputs,
                 "chunk",
@@ -1592,7 +1607,8 @@ pub(crate) fn run_review_chunk(
         .last()
         .ok_or("Incomplete review: no chunk execution recorded")?
         .metrics;
-    if let Some(db) = (attempts.len() == 1).then(|| inputs.open_db().ok()).flatten() {
+    let reusable = attempts.len() == 1 && ran_on_pinned_provider(inputs, &usage);
+    if let Some(db) = reusable.then(|| inputs.open_db().ok()).flatten() {
         let _ = db.upsert_review_chunk_cache(&ReviewChunkCacheInput {
             cache_key,
             repo_id: inputs.repo_id,
