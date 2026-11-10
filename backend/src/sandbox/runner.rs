@@ -25,7 +25,11 @@ const CODEX_CLI: &str = "/opt/codex/bin/codex";
 const TRANSCRIPT: &str = "/scratch/transcript.jsonl";
 /// Codex keeps its home, sign-in and final message here, owned by the model UID.
 const CODEX_HOME: &str = "/scratch/session/codex";
-const PROVIDERS: &[&str] = &["claude", "codex"];
+const OPENCODE_CLI: &str = "/opt/opencode/bin/opencode";
+/// OpenCode keeps its XDG homes and configuration here; an API key arrives in the environment and a
+/// Console sign-in is imported here.
+const OPENCODE_HOME: &str = "/scratch/session/opencode";
+const PROVIDERS: &[&str] = &["claude", "codex", "opencode"];
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "operation", deny_unknown_fields)]
@@ -70,7 +74,8 @@ enum Response {
     Ready,
     Started,
     Pulse,
-    /// `credential` is a Codex sign-in the CLI refreshed during the stage, for the broker to keep.
+    /// `credential` is a Codex or OpenCode Console sign-in the CLI refreshed during the stage, for the
+    /// broker to keep.
     Finished {
         report: Option<String>,
         decisions: Option<String>,
@@ -309,9 +314,12 @@ fn validate(request: &Request) -> Result<(), String> {
         {
             return Err("Invalid archive identity".into());
         }
+        // OpenCode models are `<provider>/<model>`; every other model is a plain name.
+        let model_ok = model.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+            || provider == "opencode" && crate::providers::opencode_catalogue::selector_ok(model, "");
         if model.is_empty()
             || model.len() > 120
-            || !model.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+            || !model_ok
             || version.is_empty()
             || version.len() > 256
             || prompt.len() > 200_000
@@ -324,7 +332,7 @@ fn validate(request: &Request) -> Result<(), String> {
             safe_path(name)?;
             if name
                 .split('/')
-                .any(|part| matches!(part, ".devin" | ".agents" | ".claude" | ".git"))
+                .any(|part| matches!(part, ".devin" | ".agents" | ".claude" | ".opencode" | ".git"))
             {
                 return Err("Executable configuration is not snapshot evidence".into());
             }
@@ -440,8 +448,10 @@ fn exchange(
                 credential,
             } if running => {
                 if let (Some(credential), Request::Run { account, provider, .. }) = (credential, request) {
-                    if provider == "codex" {
-                        crate::accounts::store_codex_auth(*account, &credential)?;
+                    match provider.as_str() {
+                        "codex" => crate::accounts::store_codex_auth(*account, &credential)?,
+                        "opencode" => crate::accounts::store_opencode_auth(*account, &credential)?,
+                        _ => {}
                     }
                 }
                 for (path, value, limit) in [
@@ -556,10 +566,120 @@ fn codex_session(account: i64, model: &str, effort: &str) -> Result<(Command, St
     Ok((command, auth))
 }
 
+/// Writes `contents` to a new file with `mode`, owned by the model UID when `owned`.
+#[cfg(unix)]
+fn session_file(path: &Path, contents: &str, mode: u32, owned: bool) -> Result<(), String> {
+    fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .mode(mode)
+        .open(path)
+        .and_then(|mut file| file.write_all(contents.as_bytes()))
+        .map_err(|e| e.to_string())?;
+    if owned {
+        std::os::unix::fs::chown(path, Some(UID), Some(UID)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// OpenCode with only the session's private homes, the egress proxy and the trusted configuration,
+/// run as the model UID.
+#[cfg(unix)]
+fn opencode_command(config: &Path) -> Command {
+    let home = Path::new(OPENCODE_HOME);
+    let proxy = std::env::var("OCR_RUNNER_PROXY").unwrap_or_else(|_| "http://review-egress:8790".into());
+    let mut command = Command::new(OPENCODE_CLI);
+    command
+        .env_clear()
+        .env("PATH", "/opt/opencode/bin:/usr/local/bin:/usr/bin:/bin")
+        .env("HOME", home)
+        .env("TMPDIR", "/tmp")
+        .env("XDG_DATA_HOME", home.join("data"))
+        .env("XDG_CONFIG_HOME", home.join("config"))
+        .env("XDG_CACHE_HOME", home.join("cache"))
+        .env("XDG_STATE_HOME", home.join("state"))
+        .env("HTTPS_PROXY", &proxy)
+        .env("HTTP_PROXY", &proxy)
+        .env("NO_COLOR", "1")
+        .env("OPENCODE_CONFIG", config)
+        .envs(crate::providers::opencode::QUIET_ENV.iter().copied())
+        .current_dir("/work")
+        .uid(UID)
+        .gid(UID);
+    command
+}
+
+/// The OpenCode Console sign-in the stage ended with, when OpenCode refreshed the one it started from.
+#[cfg(unix)]
+fn opencode_refreshed(auth: &str) -> Option<String> {
+    crate::providers::opencode::console(auth)?;
+    let mut export = opencode_command(&Path::new(OPENCODE_HOME).join("opencode.json"));
+    export.args([
+        "auth",
+        "export",
+        crate::providers::opencode::CONSOLE_INTEGRATION,
+        "--standalone",
+    ]);
+    let output = bounded(&mut export, Path::new("/scratch"), &AtomicBool::new(false), 30).ok()?;
+    crate::providers::opencode::exported(&String::from_utf8_lossy(&output)).filter(|raw| raw != auth)
+}
+
+/// An OpenCode execution on `account` with `model`: an API key goes in the environment and a
+/// Console sign-in is imported into the session; the trusted configuration is read-only and the
+/// homes are private to the model UID. Returns the command and the account it started from.
+#[cfg(unix)]
+fn opencode_session(account: i64, model: &str, effort: &str) -> Result<(Command, String), String> {
+    let (model, effort) = crate::providers::engines::resolve_offline("opencode", model, effort)?;
+    let auth_root = std::env::var("OCR_RUNNER_AUTH_ROOT").unwrap_or_else(|_| "/claude-auth/app-managed".into());
+    let auth = read_output(
+        &Path::new(&auth_root).join(format!("accounts/{account}/opencode/auth.json")),
+        crate::providers::opencode::MAX_AUTH_BYTES as u64,
+    )
+    .ok()
+    .flatten()
+    .filter(|raw| crate::providers::opencode::validate_auth(raw).is_ok())
+    .ok_or_else(|| crate::providers::claude::Failure::Auth.encode())?;
+    let home = Path::new(OPENCODE_HOME);
+    private_dir(Path::new(SESSION), 0o755)?;
+    for name in ["", "data", "config", "cache", "state"] {
+        let directory = home.join(name);
+        private_dir(&directory, 0o700)?;
+        std::os::unix::fs::chown(&directory, Some(UID), Some(UID)).map_err(|e| e.to_string())?;
+    }
+    let config = home.join("opencode.json");
+    session_file(
+        &config,
+        &crate::providers::opencode::config(&model).to_string(),
+        0o444,
+        false,
+    )?;
+    let mut command = opencode_command(&config);
+    match crate::providers::opencode::console(&auth) {
+        Some(entry) => {
+            let import = home.join("sign-in.json");
+            session_file(&import, &serde_json::json!([entry]).to_string(), 0o600, true)?;
+            let mut load = opencode_command(&config);
+            load.arg("auth").arg("import").arg(&import).arg("--standalone");
+            let loaded = bounded(&mut load, Path::new("/scratch"), &AtomicBool::new(false), 30);
+            let _ = fs::remove_file(&import);
+            loaded.map_err(|_| "Could not load the OpenCode sign-in into the runner".to_string())?;
+        }
+        None => {
+            let key = crate::providers::opencode::key(&auth)
+                .ok_or_else(|| crate::providers::claude::Failure::Auth.encode())?;
+            command.env(crate::providers::opencode::KEY_ENV, key);
+        }
+    }
+    command
+        .process_group(0)
+        .args(crate::providers::opencode::exec_args(&model, &effort));
+    Ok((command, auth))
+}
+
 /// Inference arguments for an isolated stage; the prompt is supplied on stdin.
 #[cfg(unix)]
 pub(crate) fn inference(command: &mut Command, model: &str, effort: &str) -> Result<(), String> {
-    let (model, effort) = crate::providers::engines::resolve("claude", model, effort)?;
+    let (model, effort) = crate::providers::engines::resolve("claude", model, effort, &None)?;
     command.args(crate::providers::claude::print_args(
         &Path::new(SESSION).join("settings.json"),
         crate::providers::claude::RUNNER_TOOLS,
@@ -688,6 +808,156 @@ struct FinalResponse {
     snapshot_id: Option<serde_json::Value>,
 }
 
+/// A JSON value whose outer object refuses a repeated key, as the response struct does. Reading
+/// it as a plain `serde_json::Value` would keep the last `report` or `findingDecisions` and drop
+/// the other one without a word.
+struct UniqueKeys(serde_json::Value);
+
+impl<'de> serde::Deserialize<'de> for UniqueKeys {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Outer;
+        impl<'de> serde::de::Visitor<'de> for Outer {
+            type Value = serde_json::Value;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a JSON value")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut fields = serde_json::Map::new();
+                while let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
+                    if fields.contains_key(&key) {
+                        return Err(serde::de::Error::custom(format!("duplicate field `{key}`")));
+                    }
+                    fields.insert(key, value);
+                }
+                Ok(serde_json::Value::Object(fields))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut items = Vec::new();
+                while let Some(item) = seq.next_element()? {
+                    items.push(item);
+                }
+                Ok(serde_json::Value::Array(items))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(serde_json::Value::Null)
+            }
+        }
+        deserializer.deserialize_any(Outer).map(UniqueKeys)
+    }
+}
+
+/// Other CLIs sometimes write the report without its wrapper, or some report fields (such as an
+/// empty `requestedFiles`) beside it instead of inside it. A field the report already holds with
+/// another value stays outside, so the response is rejected instead of one of the two being
+/// dropped; the report is validated as usual afterwards.
+fn wrap_report(value: serde_json::Value) -> serde_json::Value {
+    const WRAPPER: [&str; 4] = ["report", "findingDecisions", "contractVersion", "snapshotId"];
+    let serde_json::Value::Object(mut fields) = value else {
+        return value;
+    };
+    if !fields.contains_key("report") {
+        if !fields.contains_key("reviewedFiles") {
+            return serde_json::Value::Object(fields);
+        }
+        let decisions = fields.remove("findingDecisions");
+        let mut wrapper = serde_json::Map::from_iter([("report".to_string(), serde_json::Value::Object(fields))]);
+        wrapper.extend(decisions.map(|decisions| ("findingDecisions".to_string(), decisions)));
+        return serde_json::Value::Object(wrapper);
+    }
+    // A report sent as a JSON string is read first, so fields beside it still find it.
+    if let Some(serde_json::Value::String(raw)) = fields.get("report") {
+        if let Ok(report @ serde_json::Value::Object(_)) = serde_json::from_str(raw) {
+            fields.insert("report".into(), report);
+        }
+    }
+    let stray = fields
+        .keys()
+        .filter(|key| !WRAPPER.contains(&key.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if let Some(serde_json::Value::Object(_)) = fields.get("report") {
+        for key in stray {
+            let held = fields["report"].get(&key);
+            if held.is_some_and(|held| held != &fields[&key]) {
+                continue;
+            }
+            let value = fields.remove(&key).expect("a listed field");
+            if let Some(serde_json::Value::Object(report)) = fields.get_mut("report") {
+                report.entry(key).or_insert(value);
+            }
+        }
+    }
+    serde_json::Value::Object(fields)
+}
+
+/// Other CLIs sometimes repeat the report's frozen identity in every finding, question and
+/// suggestion, and mark suggestions and questions with the `kind` only findings carry. Only values
+/// equal to the report's own are dropped; anything else is left for validation to reject.
+fn drop_repeated_identity(report: &mut serde_json::Value) {
+    numeric_version(report);
+    let identity = ["contractVersion", "snapshotId"].map(|key| (key, report.get(key).cloned()));
+    for (list, kind) in [
+        ("findings", None),
+        ("questions", Some("question")),
+        ("suggestions", Some("suggestion")),
+    ] {
+        let Some(serde_json::Value::Array(points)) = report.get_mut(list) else {
+            continue;
+        };
+        for point in points.iter_mut().filter_map(serde_json::Value::as_object_mut) {
+            if let Some(version) = point.get_mut("contractVersion") {
+                numeric_version_value(version);
+            }
+            for (key, value) in &identity {
+                if value.is_some() && point.get(*key) == value.as_ref() {
+                    point.remove(*key);
+                }
+            }
+            if kind.is_some() && point.get("kind").and_then(serde_json::Value::as_str) == kind {
+                point.remove("kind");
+            }
+        }
+    }
+}
+
+/// Other CLIs sometimes write the contract version as a string (`"2"`); a whole number in a string
+/// becomes the number, anything else is left for validation to reject.
+fn numeric_version(object: &mut serde_json::Value) {
+    if let Some(version) = object.get_mut("contractVersion") {
+        numeric_version_value(version);
+    }
+}
+
+fn numeric_version_value(version: &mut serde_json::Value) {
+    if let Some(number) = version.as_str().and_then(|text| text.trim().parse::<u32>().ok()) {
+        *version = number.into();
+    }
+}
+
 /// Escapes backslashes the model left unescaped inside JSON strings, as in a quoted `\d`.
 /// Valid escapes are kept, so quotes still have to match the frozen source exactly.
 fn escape_stray_backslashes(text: &str) -> String {
@@ -784,13 +1054,24 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
             )
         })?,
     };
-    let parse = |body: &str| {
-        let mut objects = serde_json::Deserializer::from_str(body).into_iter::<FinalResponse>();
-        objects
+    let invalid = |error: serde_json::Error| format!("Review final response is not valid structured JSON ({error})");
+    let parse = |body: &str| -> Result<(FinalResponse, bool), String> {
+        let closed = |offset: usize| body[offset..].trim_start().starts_with("```");
+        if !lenient {
+            let mut objects = serde_json::Deserializer::from_str(body).into_iter::<FinalResponse>();
+            let response = objects
+                .next()
+                .ok_or_else(|| "Review final response is empty".to_string())?
+                .map_err(invalid)?;
+            return Ok((response, closed(objects.byte_offset())));
+        }
+        let mut objects = serde_json::Deserializer::from_str(body).into_iter::<UniqueKeys>();
+        let value = objects
             .next()
             .ok_or_else(|| "Review final response is empty".to_string())?
-            .map(|response| (response, body[objects.byte_offset()..].trim_start().starts_with("```")))
-            .map_err(|error| format!("Review final response is not valid structured JSON ({error})"))
+            .map_err(invalid)?;
+        let response = serde_json::from_value(wrap_report(value.0)).map_err(invalid)?;
+        Ok((response, closed(objects.byte_offset())))
     };
     let (response, closed) = parse(&text[start..]).or_else(|error| {
         let escaped = escape_stray_backslashes(&text[start..]);
@@ -798,7 +1079,8 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
             .or_else(|_| parse(&drop_unmatched_closers(&escaped)))
             .map_err(|_| error)
     })?;
-    if fence.is_some() && !text.starts_with('{') && !closed {
+    // Other CLIs sometimes stop right after the object; the object itself was read whole.
+    if fence.is_some() && !text.starts_with('{') && !closed && !lenient {
         return Err("Review final response has an unclosed JSON fence".into());
     }
     let unwrap = |value: serde_json::Value| match value {
@@ -819,9 +1101,22 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
         fields.entry(key).or_insert(value);
     }
     let decisions = response.finding_decisions.map(unwrap);
+    if lenient {
+        drop_repeated_identity(&mut report);
+    }
     let decisions = if lenient {
         decisions
+            .map(|mut value| {
+                numeric_version(&mut value);
+                value
+            })
             .filter(|value| !value.is_null() && value.as_array().is_none_or(|items| !items.is_empty()))
+            // Decisions holding only the frozen identity are no decisions.
+            .filter(|value| {
+                value
+                    .as_object()
+                    .is_none_or(|fields| fields.keys().any(|key| key != "contractVersion" && key != "snapshotId"))
+            })
             .map(|value| match value {
                 // A bare list takes the frozen identity from the report, as the wrapper would carry it.
                 serde_json::Value::Array(items) => {
@@ -883,7 +1178,7 @@ fn run(
         return Err("Invalid runner operation".into());
     };
     // Only models OpenCodeReview offers for the provider reach a CLI.
-    let (model, effort) = crate::providers::engines::resolve(&provider, &model, &effort)?;
+    let (model, effort) = crate::providers::engines::resolve_offline(&provider, &model, &effort)?;
     let archive = archive.ok_or("Frozen archive must be installed before a stage")?;
     if archive_id.as_deref() != Some(archive.descriptor().id.as_str()) {
         return Err("Stage archive identity mismatch".into());
@@ -895,7 +1190,7 @@ fn run(
     archive
         .materialize_new(Path::new("/evidence/snapshot"), &AtomicBool::new(false))
         .map_err(|e| e.to_string())?;
-    for (name, content) in files {
+    for (name, content) in &files {
         let path = Path::new("/work").join(name);
         private_dir(path.parent().ok_or("Missing evidence parent")?, 0o755)?;
         fs::OpenOptions::new()
@@ -909,6 +1204,12 @@ fn run(
             })
             .map_err(|e| e.to_string())?;
     }
+    // OpenCode runs each tool call as its own step; its prompt carries the prepared files.
+    let prompt = if provider == "opencode" {
+        crate::providers::opencode::adapt_prompt(&prompt, &files)
+    } else {
+        prompt
+    };
     fs::write("/work/prompt.md", prompt).map_err(|e| e.to_string())?;
     fs::set_permissions("/work/prompt.md", fs::Permissions::from_mode(0o444)).map_err(|e| e.to_string())?;
     let mut probe = Command::new("/bin/sh");
@@ -952,6 +1253,10 @@ fn run(
             let (command, auth) = codex_session(account, &model, &effort)?;
             (command, Some(auth))
         }
+        "opencode" => {
+            let (command, auth) = opencode_session(account, &model, &effort)?;
+            (command, Some(auth))
+        }
         _ => {
             let mut command = session(account)?;
             inference(&mut command, &model, &effort)?;
@@ -986,12 +1291,28 @@ fn run(
                 }
             }
             match child.try_wait() {
+                // OpenCode reports a provider error as an event and still exits 0.
+                Ok(Some(status))
+                    if status.success()
+                        && provider == "opencode"
+                        && !crate::providers::opencode::errors(
+                            &read_output(Path::new(TRANSCRIPT), 32_000_000)?.unwrap_or_default(),
+                        )
+                        .is_empty() =>
+                {
+                    let stderr = read_output(Path::new("/scratch/stderr"), 8_000_000)?.unwrap_or_default();
+                    return Err(crate::providers::opencode::failure(
+                        &read_output(Path::new(TRANSCRIPT), 32_000_000)?.unwrap_or_default(),
+                        &stderr,
+                    ));
+                }
                 Ok(Some(status)) if status.success() => return Ok(()),
                 Ok(Some(_)) => {
                     let stderr = read_output(Path::new("/scratch/stderr"), 8_000_000)?.unwrap_or_default();
                     let stdout = read_output(Path::new(TRANSCRIPT), 32_000_000)?.unwrap_or_default();
                     return Err(match provider.as_str() {
                         "codex" => crate::providers::codex::failure(&stdout, &stderr),
+                        "opencode" => crate::providers::opencode::failure(&stdout, &stderr),
                         _ => crate::providers::claude::failure(&stdout, &stderr),
                     });
                 }
@@ -1022,28 +1343,37 @@ fn run(
             },
         );
     };
-    // Codex may refresh its sign-in mid-stage; the broker keeps the new one so the next stage
-    // doesn't start from a revoked token.
-    let refreshed = read_output(
-        &Path::new(CODEX_HOME).join("auth.json"),
-        crate::providers::codex::MAX_AUTH_BYTES as u64,
-    )
-    .ok()
-    .flatten()
-    .filter(|raw| *raw != auth && crate::providers::codex::validate_auth(raw).is_ok());
-    let secrets = crate::providers::codex::secrets(&auth)
-        .into_iter()
-        .chain(
-            refreshed
-                .as_deref()
-                .map(crate::providers::codex::secrets)
-                .unwrap_or_default(),
+    // Codex and an OpenCode Console sign-in may refresh mid-stage; the broker keeps the new one so
+    // the next stage doesn't start from a revoked token. An OpenCode key never changes.
+    let opencode = provider == "opencode";
+    let refreshed = if opencode {
+        opencode_refreshed(&auth)
+    } else {
+        read_output(
+            &Path::new(CODEX_HOME).join("auth.json"),
+            crate::providers::codex::MAX_AUTH_BYTES as u64,
         )
+        .ok()
+        .flatten()
+        .filter(|raw| *raw != auth && crate::providers::codex::validate_auth(raw).is_ok())
+    };
+    let secrets_of = if opencode {
+        crate::providers::opencode::secrets
+    } else {
+        crate::providers::codex::secrets
+    };
+    let secrets = secrets_of(&auth)
+        .into_iter()
+        .chain(refreshed.as_deref().map(secrets_of).unwrap_or_default())
         .collect::<Vec<_>>();
     let result = outcome
         .and_then(|()| {
-            let text = read_output(&Path::new(CODEX_HOME).join("last-message.txt"), 4_000_000)?
-                .ok_or("Codex final response is missing")?;
+            let text = if opencode {
+                crate::providers::opencode::final_message(transcript.as_deref().unwrap_or_default())
+            } else {
+                read_output(&Path::new(CODEX_HOME).join("last-message.txt"), 4_000_000)?
+                    .ok_or("Codex final response is missing")?
+            };
             parse_final_response(&text, true)
         })
         .and_then(|(report, decisions)| {

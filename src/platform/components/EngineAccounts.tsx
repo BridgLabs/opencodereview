@@ -1,7 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Check } from "lucide-react";
 import { useState } from "react";
-import { ClaudeSignIn, ClaudeTokenSignIn, CodexSignIn } from "../../components/AccessConnect";
+import {
+  ClaudeSignIn,
+  ClaudeTokenSignIn,
+  CodexSignIn,
+  OpencodeKeySignIn,
+  OpencodeSignIn,
+} from "../../components/AccessConnect";
 import { cx } from "../../components/DesignSystem";
 import type { AiAccount, UsageWindow } from "../../types";
 import {
@@ -103,7 +109,13 @@ export function AccountChoices({
   );
 }
 
-/** Signs in a new Claude or ChatGPT account without leaving the picker. */
+const planLabel: Record<Provider, string> = {
+  claude: "Pro, Max or Team",
+  codex: "Plus or Pro",
+  opencode: "Go or Zen",
+};
+
+/** Signs in a new Claude, ChatGPT or OpenCode account without leaving the picker. */
 export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) => void; onCancel: () => void }) {
   const [choice, setChoice] = useState<{ provider: Provider; alternative: boolean } | null>(null);
   const done = () => choice && onDone(choice.provider);
@@ -125,7 +137,7 @@ export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) 
       </div>
       {!choice ? (
         <div className="flex flex-col gap-1.5">
-          {(["claude", "codex"] as const).map((provider) => (
+          {(["claude", "codex", "opencode"] as const).map((provider) => (
             <button
               key={provider}
               type="button"
@@ -134,15 +146,19 @@ export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) 
             >
               <ProviderGlyph provider={provider} />
               {providerName[provider]}
-              <span className="ml-auto text-caption font-normal text-fg-subtle">
-                {provider === "claude" ? "Pro, Max or Team" : "Plus or Pro"}
-              </span>
+              <span className="ml-auto text-caption font-normal text-fg-subtle">{planLabel[provider]}</span>
             </button>
           ))}
         </div>
       ) : (
         <>
-          {choice.provider === "codex" ? (
+          {choice.provider === "opencode" ? (
+            choice.alternative ? (
+              <OpencodeKeySignIn onDone={done} onCancel={back} />
+            ) : (
+              <OpencodeSignIn onDone={done} onCancel={back} />
+            )
+          ) : choice.provider === "codex" ? (
             <CodexSignIn mode={choice.alternative ? "device" : "browser"} onDone={done} onCancel={back} />
           ) : choice.alternative ? (
             <ClaudeTokenSignIn onDone={done} onCancel={back} />
@@ -154,11 +170,15 @@ export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) 
             className="cursor-pointer self-start text-caption text-fg-subtle underline-offset-2 hover:text-fg hover:underline"
             onClick={() => setChoice({ ...choice, alternative: !choice.alternative })}
           >
-            {choice.alternative
-              ? `Sign in to ${providerName[choice.provider]} in the browser instead`
-              : choice.provider === "claude"
-                ? "Paste a token from claude setup-token instead"
-                : "Sign in with a one-time code instead"}
+            {choice.provider === "opencode"
+              ? choice.alternative
+                ? "Sign in to OpenCode instead"
+                : "Use an API key instead"
+              : choice.alternative
+                ? `Sign in to ${providerName[choice.provider]} in the browser instead`
+                : choice.provider === "claude"
+                  ? "Paste a token from claude setup-token instead"
+                  : "Sign in with a one-time code instead"}
           </button>
         </>
       )}

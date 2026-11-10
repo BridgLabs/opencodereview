@@ -721,7 +721,6 @@ fn archived_evidence_is_shared_by_reports_and_final_decisions() {
         json!({"path":"guard.rs","revision":head,"source":"repository:owner/dependency","line":1,"quote":"guard();"}),
         json!({"path":"guard.rs","revision":dependency_sha,"source":"repository:owner/dependency","line":1,"quote":"invented();"}),
         json!({"path":"guard.rs","source":"repository:owner/dependency","line":1,"quote":"guard();"}),
-        json!({"path":"implementation.rs","line":1,"quote":"allow_all();"}),
         json!({"path":"../implementation.rs","revision":head,"line":1,"quote":"allow_all();"}),
     ] {
         let mut bad = report.clone();
@@ -734,6 +733,17 @@ fn archived_evidence_is_shared_by_reports_and_final_decisions() {
         bad["decisions"][0]["counterEvidence"][0] = invalid;
         assert!(resolver.verify_decisions(&bad.to_string()).is_err());
     }
+    // A report quote without its revision is bound to the head that holds it; a decision's is not.
+    let bare = json!({"path":"implementation.rs","line":1,"quote":"allow_all();"});
+    let mut bound = report.clone();
+    bound["findings"][0]["evidence"][0] = bare.clone();
+    fs::write(&output, bound.to_string()).unwrap();
+    resolver
+        .materialize(&output, &["test.rs".into()], &head, diff, &summary, &comments)
+        .unwrap();
+    let mut bad = decisions.clone();
+    bad["decisions"][0]["counterEvidence"][0] = bare;
+    assert!(resolver.verify_decisions(&bad.to_string()).is_err());
     for (field, value) in [
         ("snapshotId", json!("wrong")),
         ("contractVersion", json!(1)),
