@@ -219,8 +219,8 @@ pub(crate) fn quoted_line(content: &str, line: usize, quote: &str) -> Option<usi
 }
 
 /// Whether `line` of `content` itself holds `quote`. References that `rebind_quote_lines` does not
-/// move (conventions, linked repositories, PR.md, an unfrozen review) are published with the line
-/// they name, so it has to be right.
+/// move (conventions, linked repositories, an unfrozen review) are published with the line they
+/// name, so it has to be right.
 fn on_line(content: &str, line: usize, quote: &str) -> bool {
     line >= 1
         && content
@@ -440,6 +440,27 @@ impl<'a> EvidenceResolver<'a> {
                                 reference["revision"] = head.clone().into();
                                 moved = true;
                             }
+                        }
+                        // The description has no revision: its quote moves within PR.md itself.
+                        if reference.is_object()
+                            && reference["revision"].is_null()
+                            && reference["source"].is_null()
+                            && reference["path"].as_str() == Some("PR.md")
+                        {
+                            let actual = match (reference["line"].as_u64(), reference["quote"].as_str()) {
+                                (Some(line), Some(quote)) if !quote.trim().is_empty() => {
+                                    crate::review_archive::read_prepared_text(self.context, "PR.md")
+                                        .ok()
+                                        .and_then(|content| quoted_line(&content, line as usize, quote))
+                                        .filter(|actual| *actual as u64 != line)
+                                }
+                                _ => None,
+                            };
+                            if let Some(actual) = actual {
+                                reference["line"] = actual.into();
+                                moved = true;
+                            }
+                            continue;
                         }
                         let (Some(revision), Some(path), Some(line), Some(quote)) = (
                             reference["revision"].as_str(),

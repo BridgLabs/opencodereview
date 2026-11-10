@@ -744,6 +744,30 @@ fn archived_evidence_is_shared_by_reports_and_final_decisions() {
     let mut bad = decisions.clone();
     bad["decisions"][0]["counterEvidence"][0] = bare;
     assert!(resolver.verify_decisions(&bad.to_string()).is_err());
+    // A description quote counted up to three lines off moves to the line that holds it.
+    for (line, moved) in [(1, true), (4, true), (5, false)] {
+        let mut described = report.clone();
+        described["findings"][0]["evidence"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"path":"PR.md","line":line,"quote":"Intent"}));
+        fs::write(&output, described.to_string()).unwrap();
+        let result = resolver.materialize(&output, &["test.rs".into()], &head, diff, &summary, &comments);
+        assert_eq!(result.is_ok(), moved, "line {line}: {result:?}");
+        let stored: serde_json::Value = serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+        let expected = if moved { 1 } else { line };
+        assert_eq!(stored["findings"][0]["evidence"][1]["line"], expected);
+    }
+    let mut invented = report.clone();
+    invented["findings"][0]["evidence"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"path":"PR.md","line":1,"quote":"Invented"}));
+    fs::write(&output, invented.to_string()).unwrap();
+    assert!(resolver
+        .materialize(&output, &["test.rs".into()], &head, diff, &summary, &comments)
+        .unwrap_err()
+        .contains("external evidence at PR.md:1"));
     for (field, value) in [
         ("snapshotId", json!("wrong")),
         ("contractVersion", json!(1)),
