@@ -175,6 +175,10 @@ export interface ReviewRunStage {
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
+  turns: number;
+  toolCalls: number;
+  reasoningTokens: number;
+  modelMs: number;
   promptBytes: number;
   diffBytes: number;
   contextBytes: number;

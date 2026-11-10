@@ -114,7 +114,9 @@ pub(crate) fn parse_hunk_header(line: &str) -> Option<(i64, i64)> {
 
 pub(crate) fn sum_usage(usages: Vec<RunUsage>) -> RunUsage {
     let mut per_model = std::collections::HashMap::new();
+    let mut activity = StageActivity::default();
     for usage in usages {
+        activity += usage.activity;
         for entry in usage.by_model {
             let item = per_model.entry(entry.model.clone()).or_insert_with(|| ModelUsageEntry {
                 model: entry.model.clone(),
@@ -126,7 +128,9 @@ pub(crate) fn sum_usage(usages: Vec<RunUsage>) -> RunUsage {
             item.cache_creation_tokens += entry.cache_creation_tokens;
         }
     }
-    finalize_usage(per_model)
+    let mut usage = finalize_usage(per_model);
+    usage.activity = activity;
+    usage
 }
 
 pub(crate) fn review_range(incremental_base: Option<&str>, base_rev: &str, head_sha: &str) -> String {

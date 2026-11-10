@@ -280,6 +280,28 @@ pub struct RunUsage {
     pub cache_creation_tokens: i64,
     pub model: Option<String>,
     pub by_model: Vec<ModelUsageEntry>,
+    pub activity: StageActivity,
+}
+
+/// What a stage's executions did, read from their transcripts. A CLI that does not report a
+/// value leaves it at zero: Codex reports no round trips, Claude no reasoning tokens.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct StageActivity {
+    /// Model round trips: Claude assistant messages, OpenCode steps.
+    pub turns: i64,
+    pub tool_calls: i64,
+    pub reasoning_tokens: i64,
+    /// Time spent on the provider: Claude's API time, OpenCode's steps without their tools.
+    pub model_ms: i64,
+}
+
+impl std::ops::AddAssign for StageActivity {
+    fn add_assign(&mut self, other: Self) {
+        self.turns += other.turns;
+        self.tool_calls += other.tool_calls;
+        self.reasoning_tokens += other.reasoning_tokens;
+        self.model_ms += other.model_ms;
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -439,6 +461,10 @@ fn record_stage(
             output_tokens: usage.output_tokens,
             cache_read_tokens: usage.cache_read_tokens,
             cache_creation_tokens: usage.cache_creation_tokens,
+            turns: usage.activity.turns,
+            tool_calls: usage.activity.tool_calls,
+            reasoning_tokens: usage.activity.reasoning_tokens,
+            model_ms: usage.activity.model_ms,
             prompt_bytes: metrics.prompt_bytes,
             diff_bytes: metrics.diff_bytes,
             context_bytes: metrics.context_bytes,
