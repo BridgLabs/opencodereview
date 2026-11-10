@@ -687,7 +687,7 @@ fn opencode_session(account: i64, model: &str, effort: &str) -> Result<(Command,
 /// Inference arguments for an isolated stage; the prompt is supplied on stdin.
 #[cfg(unix)]
 pub(crate) fn inference(command: &mut Command, model: &str, effort: &str) -> Result<(), String> {
-    let (model, effort) = crate::providers::engines::resolve("claude", model, effort)?;
+    let (model, effort) = crate::providers::engines::resolve("claude", model, effort, &None)?;
     command.args(crate::providers::claude::print_args(
         &Path::new(SESSION).join("settings.json"),
         crate::providers::claude::RUNNER_TOOLS,
@@ -833,6 +833,12 @@ fn wrap_report(value: serde_json::Value) -> serde_json::Value {
         let mut wrapper = serde_json::Map::from_iter([("report".to_string(), serde_json::Value::Object(fields))]);
         wrapper.extend(decisions.map(|decisions| ("findingDecisions".to_string(), decisions)));
         return serde_json::Value::Object(wrapper);
+    }
+    // A report sent as a JSON string is read first, so fields beside it still find it.
+    if let Some(serde_json::Value::String(raw)) = fields.get("report") {
+        if let Ok(report @ serde_json::Value::Object(_)) = serde_json::from_str(raw) {
+            fields.insert("report".into(), report);
+        }
     }
     let stray = fields
         .keys()

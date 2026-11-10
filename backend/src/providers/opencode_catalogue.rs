@@ -132,42 +132,87 @@ fn fetch() -> Result<Vec<Model>, String> {
     Ok(models)
 }
 
-static CACHE: Mutex<Option<(Instant, Vec<Model>)>> = Mutex::new(None);
+/// The list last read, and when opencode.ai may be asked again: an hour after a list was read,
+/// five minutes after a failure, whether or not an earlier list is kept.
+#[derive(Default)]
+struct Cache {
+    models: Option<Vec<Model>>,
+    error: Option<String>,
+    next: Option<Instant>,
+    refreshing: bool,
+}
+
+impl Cache {
+    fn answer(&self) -> Result<Vec<Model>, String> {
+        match (&self.models, &self.error) {
+            (Some(models), _) => Ok(models.clone()),
+            (None, Some(error)) => Err(error.clone()),
+            (None, None) => Err("OpenCode's model list is being read; try again in a moment".into()),
+        }
+    }
+}
+
+static CACHE: Mutex<Cache> = Mutex::new(Cache {
+    models: None,
+    error: None,
+    next: None,
+    refreshing: false,
+});
+
+fn lock(cache: &Mutex<Cache>) -> std::sync::MutexGuard<'_, Cache> {
+    cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// The models reviews can pick, Go's first: refreshed from opencode.ai at most hourly.
 pub(crate) fn models() -> Result<Vec<Model>, String> {
     if cfg!(test) {
         return Err("OpenCode's model list is not read in tests".into());
     }
-    let mut cache = CACHE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some((at, models)) = cache.as_ref() {
-        if at.elapsed() < FRESH {
-            return Ok(models.clone());
+    refreshed(&CACHE, Instant::now(), fetch)
+}
+
+/// `cache`'s list, read again with `fetch` when it is due. The lock is not held while `fetch`
+/// runs: other callers get the list already read, or the last error, and only one of them fetches.
+fn refreshed(
+    cache: &Mutex<Cache>,
+    now: Instant,
+    fetch: impl FnOnce() -> Result<Vec<Model>, String>,
+) -> Result<Vec<Model>, String> {
+    {
+        let mut cache = lock(cache);
+        if cache.refreshing || cache.next.is_some_and(|next| now < next) {
+            return cache.answer();
+        }
+        cache.refreshing = true;
+    }
+    // Clears the flag even if `fetch` panics, so a later call can read the list.
+    struct Refreshing<'a>(&'a Mutex<Cache>);
+    impl Drop for Refreshing<'_> {
+        fn drop(&mut self) {
+            lock(self.0).refreshing = false;
         }
     }
-    match fetch() {
+    let refreshing = Refreshing(cache);
+    let result = fetch();
+    drop(refreshing);
+    let mut cache = lock(cache);
+    match result {
         Ok(models) => {
-            *cache = Some((Instant::now(), models.clone()));
-            Ok(models)
+            cache.models = Some(models);
+            cache.error = None;
+            cache.next = Some(now + FRESH);
         }
-        Err(error) => match cache.as_mut() {
-            Some((at, models)) => {
-                *at = Instant::now() - FRESH + RETRY;
-                Ok(models.clone())
-            }
-            None => Err(error),
-        },
+        Err(error) => {
+            cache.error = Some(error);
+            cache.next = Some(now + RETRY);
+        }
     }
+    cache.answer()
 }
 
 /// The list already read, without asking opencode.ai.
 pub(crate) fn cached() -> Vec<Model> {
-    CACHE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .as_ref()
-        .map(|(_, models)| models.clone())
-        .unwrap_or_default()
+    lock(&CACHE).models.clone().unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -220,6 +265,44 @@ mod tests {
             ]
         );
         assert!(parse("opencode", "Zen", &json!({ "data": "nope" })).is_empty());
+    }
+
+    #[test]
+    fn a_failed_read_is_not_repeated_before_its_retry_and_never_holds_the_lock() {
+        let cache = Mutex::new(Cache::default());
+        let calls = std::cell::Cell::new(0);
+        let model = || Model {
+            id: "opencode/glm-5.3".into(),
+            label: "Zen · GLM-5.3".into(),
+            efforts: vec![],
+            default_effort: String::new(),
+        };
+        let fail = || {
+            calls.set(calls.get() + 1);
+            // The list already read stays readable while opencode.ai is asked.
+            assert!(cache.try_lock().is_ok());
+            Err("unreachable".to_string())
+        };
+        let start = Instant::now();
+        // Nothing read yet: the failure is remembered, so the next call does not ask again.
+        assert_eq!(refreshed(&cache, start, fail), Err("unreachable".into()));
+        assert_eq!(refreshed(&cache, start + RETRY / 2, fail), Err("unreachable".into()));
+        assert_eq!(calls.get(), 1);
+        assert_eq!(
+            refreshed(&cache, start + RETRY, || Ok(vec![model()])),
+            Ok(vec![model()])
+        );
+        // A fresh list is served for an hour, then a failed refresh keeps it for another retry.
+        assert_eq!(refreshed(&cache, start + RETRY + FRESH / 2, fail), Ok(vec![model()]));
+        assert_eq!(calls.get(), 1);
+        let stale = start + RETRY + FRESH;
+        assert_eq!(refreshed(&cache, stale, fail), Ok(vec![model()]));
+        assert_eq!(refreshed(&cache, stale + RETRY / 2, fail), Ok(vec![model()]));
+        assert_eq!(calls.get(), 2);
+        // While one caller reads the list, another gets what is known instead of waiting.
+        lock(&cache).refreshing = true;
+        assert_eq!(refreshed(&cache, stale + FRESH, fail), Ok(vec![model()]));
+        assert_eq!(calls.get(), 2);
     }
 
     #[test]

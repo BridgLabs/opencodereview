@@ -67,18 +67,22 @@ pub(crate) fn store_opencode_plans(id: i64, plans: &[&str]) -> Result<(), String
     )
 }
 
-/// The OpenCode plans of every OpenCode account together, or None without one. An account saved
-/// before its plans were recorded counts as having both.
-pub(crate) fn opencode_plans() -> Option<Vec<String>> {
-    plans_under(&root())
+/// The OpenCode plans of the accounts `ids` together, or None when none of them has a usable
+/// sign-in. The caller passes the accounts reviews can run on (`Database::opencode_plans`): a
+/// folder left without its account, or a disabled or signed-out account, offers no models. An
+/// account saved before its plans were recorded counts as having both.
+pub(crate) fn opencode_plans(ids: &[i64]) -> Option<Vec<String>> {
+    plans_under(&root(), ids)
 }
 
-fn plans_under(root: &std::path::Path) -> Option<Vec<String>> {
+fn plans_under(root: &std::path::Path, ids: &[i64]) -> Option<Vec<String>> {
     let mut plans = Vec::new();
     let mut any = false;
-    for entry in fs::read_dir(root).ok()?.flatten() {
-        let directory = entry.path().join("opencode");
-        if !directory.join("auth.json").exists() {
+    for id in ids {
+        let directory = root.join(id.to_string()).join("opencode");
+        let signed_in = fs::read_to_string(directory.join("auth.json"))
+            .is_ok_and(|raw| crate::providers::opencode::validate_auth(&raw).is_ok());
+        if !signed_in {
             continue;
         }
         any = true;
@@ -234,28 +238,34 @@ mod tests {
     }
 
     #[test]
-    fn opencode_plans_join_every_opencode_account() {
+    fn opencode_plans_join_the_given_accounts_with_a_usable_sign_in() {
         let root = std::env::temp_dir().join(format!("ocr-opencode-plans-{}", std::process::id()));
-        let account = |id: i64, plans: Option<&str>| {
+        let key = r#"{"key":"sk-0123456789abcdef"}"#;
+        let account = |id: i64, auth: &str, plans: Option<&str>| {
             let directory = root.join(id.to_string()).join("opencode");
             std::fs::create_dir_all(&directory).unwrap();
-            std::fs::write(directory.join("auth.json"), "{}").unwrap();
+            std::fs::write(directory.join("auth.json"), auth).unwrap();
             if let Some(plans) = plans {
                 std::fs::write(directory.join("plans.json"), plans).unwrap();
             }
         };
         std::fs::create_dir_all(root.join("1/claude")).unwrap();
-        assert_eq!(super::plans_under(&root), None);
-        account(2, Some(r#"{"plans":["zen"]}"#));
-        assert_eq!(super::plans_under(&root), Some(vec!["zen".to_string()]));
-        account(3, Some(r#"{"plans":["go","zen"]}"#));
-        let mut both = super::plans_under(&root).unwrap();
+        assert_eq!(super::plans_under(&root, &[1, 2]), None);
+        account(2, key, Some(r#"{"plans":["zen"]}"#));
+        assert_eq!(super::plans_under(&root, &[1, 2]), Some(vec!["zen".to_string()]));
+        account(3, key, Some(r#"{"plans":["go","zen"]}"#));
+        let mut both = super::plans_under(&root, &[2, 3]).unwrap();
         both.sort();
         assert_eq!(both, vec!["go".to_string(), "zen".to_string()]);
-        std::fs::remove_dir_all(root.join("3")).unwrap();
+        // A folder whose account is not asked for (removed, disabled or signed out) offers nothing.
+        assert_eq!(super::plans_under(&root, &[2]), Some(vec!["zen".to_string()]));
+        assert_eq!(super::plans_under(&root, &[]), None);
+        // Nor does a sign-in that does not validate.
+        account(5, "{}", Some(r#"{"plans":["go"]}"#));
+        assert_eq!(super::plans_under(&root, &[5]), None);
         // An account saved before plans were recorded counts as both.
-        account(4, None);
-        let mut legacy = super::plans_under(&root).unwrap();
+        account(4, key, None);
+        let mut legacy = super::plans_under(&root, &[4]).unwrap();
         legacy.sort();
         assert_eq!(legacy, vec!["go".to_string(), "zen".to_string()]);
         std::fs::remove_dir_all(&root).unwrap();

@@ -668,6 +668,13 @@ fn final_response_of_other_clis_takes_report_fields_written_beside_or_without_th
         serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
         json!({"reviewedFiles":["a.ts"],"missingEvidence":[],"findings":[],"requestedFiles":[]})
     );
+    // The same with the report sent as a JSON string.
+    let quoted = json!({"report":report.to_string(),"requestedFiles":[]}).to_string();
+    let (actual, _) = parse_final_response(&quoted, true).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+        json!({"reviewedFiles":["a.ts"],"missingEvidence":[],"findings":[],"requestedFiles":[]})
+    );
     let bare = json!({"reviewedFiles":["a.ts"],"missingEvidence":[],"findings":[],"findingDecisions":[decision]});
     let (actual, decisions) = parse_final_response(&bare.to_string(), true).unwrap();
     assert_eq!(serde_json::from_str::<serde_json::Value>(&actual).unwrap(), report);

@@ -21,10 +21,14 @@ pub(crate) fn rank(name: &str) -> Option<u8> {
         "skill/SKILL.md" => 1,
         "CONTEXT.md" => 2,
         "REVIEW_MAP.md" => 3,
-        "PR_DIFF.patch" => 4,
-        "PUBLICATION_DIFF.patch" => 5,
-        _ if name.starts_with("conventions/") => 6,
-        _ if name.starts_with("changed/") || name.starts_with("integration/") => 7,
+        // Files the prompt tells the model to read when they exist.
+        "PENDING_REVIEW.md" => 4,
+        "CONTEXT_RETRIEVAL.md" => 5,
+        "CHUNK_SCOPE" => 6,
+        "PR_DIFF.patch" => 7,
+        "PUBLICATION_DIFF.patch" => 8,
+        _ if name.starts_with("conventions/") => 9,
+        _ if name.starts_with("changed/") || name.starts_with("integration/") => 10,
         _ => return None,
     })
 }
@@ -33,18 +37,16 @@ pub(crate) fn rank(name: &str) -> Option<u8> {
 /// source in ranges: only what every stage reads whole is printed. The diff already shows the
 /// changed lines, so changed files and conventions stay on disk, read when a check needs them.
 fn lean_rank(name: &str) -> Option<u8> {
-    let name = name.strip_prefix("context/").unwrap_or(name);
-    Some(match name {
-        "PENDING_REVIEW.md" => 4,
-        "STAGE.json" => 6,
-        _ if name.starts_with("integration/") => 7,
-        _ if name.starts_with("conventions/") || name.starts_with("changed/") => return None,
-        _ => return rank(name).map(|rank| if rank >= 4 { rank + 1 } else { rank }),
-    })
+    let short = name.strip_prefix("context/").unwrap_or(name);
+    match short {
+        "STAGE.json" => Some(9),
+        _ if short.starts_with("conventions/") || short.starts_with("changed/") => None,
+        _ => rank(name),
+    }
 }
 
 /// Bytes `content` takes once printed: its text, a header and a number before each line.
-fn rendered(content: &str) -> usize {
+pub(crate) fn rendered(content: &str) -> usize {
     content.len() + 8 * content.lines().count() + 300
 }
 
