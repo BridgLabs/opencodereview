@@ -53,6 +53,9 @@ export function EnginePicker() {
   });
   const save = useMutation({
     mutationFn: (choice: { provider: string; model: string; effort: string }) => setupApi.saveReviewEngine(choice),
+    // A read started when the menu opened holds the choice from before this save: it is dropped,
+    // so it cannot replace what the save returns.
+    onMutate: () => queryClient.cancelQueries({ queryKey: ENGINES_QUERY_KEY }),
     onSuccess: (data) => queryClient.setQueryData(ENGINES_QUERY_KEY, data),
   });
   useEffect(() => {
