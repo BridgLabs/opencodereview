@@ -2427,6 +2427,35 @@ fn chunk_cache_keys_keep_engines_apart() {
     let opencode_high = super::chunks::with_engine(base, &inputs);
     assert_ne!(claude, opencode);
     assert_ne!(opencode, opencode_high);
+    // A chunk that failed over to another provider is not kept under the pinned engine's key.
+    let ran = |models: &[&str]| super::RunUsage {
+        by_model: models
+            .iter()
+            .map(|model| super::ModelUsageEntry {
+                model: model.to_string(),
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    };
+    assert!(super::chunks::ran_on_pinned_provider(&inputs, &ran(&["opencode"])));
+    assert!(super::chunks::ran_on_pinned_provider(&inputs, &ran(&[])));
+    assert!(!super::chunks::ran_on_pinned_provider(
+        &inputs,
+        &ran(&["opencode", "claude-opus-5-5"])
+    ));
+    assert!(!super::chunks::ran_on_pinned_provider(&inputs, &ran(&["codex"])));
+    inputs.engines = pinned("claude", "claude-opus-5-5", "medium");
+    assert!(super::chunks::ran_on_pinned_provider(
+        &inputs,
+        &ran(&["claude-opus-5-5"])
+    ));
+    assert!(!super::chunks::ran_on_pinned_provider(
+        &inputs,
+        &ran(&["claude-opus-5-5", "opencode"])
+    ));
+    inputs.engines = None;
+    assert!(super::chunks::ran_on_pinned_provider(&inputs, &ran(&["codex"])));
     assert_eq!(opencode["engine"][3], crate::providers::opencode::PROMPT_ADAPTATION);
     assert_eq!(claude["engine"][3], "");
 }
