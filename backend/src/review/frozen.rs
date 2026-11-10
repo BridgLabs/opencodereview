@@ -643,20 +643,19 @@ pub(crate) fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, Stri
     if let Some(engine) = inputs.engines.as_ref().and_then(|pinned| pinned.engine(provider)) {
         return engine;
     }
-    // Without the database the plans come from the stored sign-ins, so the default is still a
-    // model some account pays for.
-    let stored = || {
-        let plans = (provider == "opencode")
-            .then(|| crate::accounts::opencode_plans(&crate::accounts::stored_ids()))
-            .flatten();
-        crate::providers::engines::default_engine(provider, &plans)
-    };
     if inputs.db_handle.is_none() {
-        return stored();
+        return crate::providers::engines::default_engine(provider, &None);
     }
-    accounts_db(inputs)
-        .and_then(|db| db.review_engine(provider))
-        .unwrap_or_else(|_| stored())
+    // When the database cannot say which OpenCode accounts reviews can run on, no OpenCode model
+    // is guessed: the stage fails instead of running a model no usable account pays for.
+    let unknown = || (provider == "opencode").then(Vec::new);
+    let Ok(db) = accounts_db(inputs) else {
+        return crate::providers::engines::default_engine(provider, &unknown());
+    };
+    db.review_engine(provider).unwrap_or_else(|_| {
+        let plans = db.engine_plans(provider).unwrap_or_else(|_| unknown());
+        crate::providers::engines::default_engine(provider, &plans)
+    })
 }
 
 /// Whether `provider`'s stage prompts get the prepared files printed by `review_inline_evidence`.
