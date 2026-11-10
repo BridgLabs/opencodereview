@@ -197,6 +197,12 @@ fn bounded_output(
     cancel: &AtomicBool,
     limit: Duration,
 ) -> Result<(std::process::ExitStatus, String), String> {
+    // Its own process group, so stopping it also stops what it started.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -468,6 +474,14 @@ mod tests {
             "Sign-in was cancelled."
         );
         assert!(started.elapsed() < Duration::from_secs(10));
+        // What the CLI started is stopped with it: a child that outlives the kill would still
+        // write its marker.
+        let marker = std::env::temp_dir().join(format!("ocr-opencode-auth-kill-{}", std::process::id()));
+        let _ = std::fs::remove_file(&marker);
+        let script = format!("(sleep 1; echo alive > '{}') & wait", marker.display());
+        assert!(bounded_output(shell(&script), &running, Duration::from_millis(200)).is_err());
+        thread::sleep(Duration::from_millis(1500));
+        assert!(!marker.exists());
     }
 
     #[test]
