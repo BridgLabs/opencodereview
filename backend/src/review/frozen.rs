@@ -255,7 +255,13 @@ fn runner_sockets() -> Result<Vec<PathBuf>, String> {
                 .filter(|path| path.extension().is_some_and(|extension| extension == "sock"))
                 .collect::<Vec<_>>();
             paths.sort();
-            paths
+            // Every recreated runner leaves its old socket behind; drop the dead ones before
+            // counting, or a few updates push a healthy install past the limit.
+            if paths.len() > crate::review::policy::MAX_RUNNERS {
+                without_stale(paths)?
+            } else {
+                paths
+            }
         }
     };
     if paths.len() > crate::review::policy::MAX_RUNNERS
@@ -265,6 +271,18 @@ fn runner_sockets() -> Result<Vec<PathBuf>, String> {
         return Err("Invalid operational runner configuration".into());
     }
     Ok(paths)
+}
+
+/// `paths` without the sockets of runners that are gone, which are deleted. A socket a review is
+/// using belongs to a live runner and is kept without being probed.
+fn without_stale(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>, String> {
+    let mut live = Vec::with_capacity(paths.len());
+    for path in paths {
+        if !try_slot(&path)?.is_some_and(|_slot| runner::is_stale(&path)) {
+            live.push(path);
+        }
+    }
+    Ok(live)
 }
 
 /// Each runner's CLI version, read once per runner. Replicas come from one image, so a runner busy
@@ -647,5 +665,40 @@ fn resets_in(at: i64) -> String {
         format!("in {minutes} min")
     } else {
         format!("in {} h {} min", minutes / 60, minutes % 60)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixListener;
+
+    #[test]
+    fn sockets_of_replaced_runners_are_dropped_and_deleted() {
+        let root = std::env::temp_dir().join(format!("ocr-stale-sockets-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let stale = (0..3)
+            .map(|index| {
+                let path = root.join(format!("gone-{index}.sock"));
+                drop(UnixListener::bind(&path).unwrap());
+                path
+            })
+            .collect::<Vec<_>>();
+        let live_path = root.join("live.sock");
+        let _live = UnixListener::bind(&live_path).unwrap();
+        let mut paths = stale.clone();
+        paths.push(live_path.clone());
+        // A process another test forks can briefly hold a just-closed listener, so a dead socket
+        // still accepts until it execs; such a socket is kept and dropped on a later call.
+        for _ in 0..50 {
+            paths = without_stale(paths).unwrap();
+            if paths.len() == 1 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(paths, vec![live_path]);
+        assert!(stale.iter().all(|path| !path.exists()));
+        fs::remove_dir_all(&root).unwrap();
     }
 }
