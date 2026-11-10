@@ -22,6 +22,7 @@ mod review_coverage;
 mod review_requests;
 mod review_results;
 mod review_runs;
+pub(crate) use review_runs::post_refusal;
 mod review_usage;
 mod settings;
 mod skills;
