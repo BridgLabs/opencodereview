@@ -254,8 +254,9 @@ fn signed_in(
         "--standalone",
     ]);
     let (status, exported) = bounded_output(export, cancel, CLI_TIMEOUT)?;
-    let raw = Some(exported)
-        .filter(|_| status.success())
+    let raw = status
+        .success()
+        .then_some(exported)
         .and_then(|exported| crate::providers::opencode::exported(&exported))
         .ok_or("OpenCode sign-in did not finish. Start again.")?;
     let mut models = opencode(home);
