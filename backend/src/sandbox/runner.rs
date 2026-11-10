@@ -808,6 +808,138 @@ struct FinalResponse {
     snapshot_id: Option<serde_json::Value>,
 }
 
+/// A JSON value whose outer object refuses a repeated key, as the response struct does. Reading
+/// it as a plain `serde_json::Value` would keep the last `report` or `findingDecisions` and drop
+/// the other one without a word.
+struct UniqueKeys(serde_json::Value);
+
+impl<'de> serde::Deserialize<'de> for UniqueKeys {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Outer;
+        impl<'de> serde::de::Visitor<'de> for Outer {
+            type Value = serde_json::Value;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a JSON value")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut fields = serde_json::Map::new();
+                while let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
+                    if fields.contains_key(&key) {
+                        return Err(serde::de::Error::custom(format!("duplicate field `{key}`")));
+                    }
+                    fields.insert(key, value);
+                }
+                Ok(serde_json::Value::Object(fields))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut items = Vec::new();
+                while let Some(item) = seq.next_element()? {
+                    items.push(item);
+                }
+                Ok(serde_json::Value::Array(items))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(serde_json::Value::Null)
+            }
+        }
+        deserializer.deserialize_any(Outer).map(UniqueKeys)
+    }
+}
+
+/// Other CLIs sometimes write the report without its wrapper, or some report fields (such as an
+/// empty `requestedFiles`) beside it instead of inside it. A field the report already holds with
+/// another value stays outside, so the response is rejected instead of one of the two being
+/// dropped; the report is validated as usual afterwards.
+fn wrap_report(value: serde_json::Value) -> serde_json::Value {
+    const WRAPPER: [&str; 4] = ["report", "findingDecisions", "contractVersion", "snapshotId"];
+    let serde_json::Value::Object(mut fields) = value else {
+        return value;
+    };
+    if !fields.contains_key("report") {
+        if !fields.contains_key("reviewedFiles") {
+            return serde_json::Value::Object(fields);
+        }
+        let decisions = fields.remove("findingDecisions");
+        let mut wrapper = serde_json::Map::from_iter([("report".to_string(), serde_json::Value::Object(fields))]);
+        wrapper.extend(decisions.map(|decisions| ("findingDecisions".to_string(), decisions)));
+        return serde_json::Value::Object(wrapper);
+    }
+    // A report sent as a JSON string is read first, so fields beside it still find it.
+    if let Some(serde_json::Value::String(raw)) = fields.get("report") {
+        if let Ok(report @ serde_json::Value::Object(_)) = serde_json::from_str(raw) {
+            fields.insert("report".into(), report);
+        }
+    }
+    let stray = fields
+        .keys()
+        .filter(|key| !WRAPPER.contains(&key.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if let Some(serde_json::Value::Object(_)) = fields.get("report") {
+        for key in stray {
+            let held = fields["report"].get(&key);
+            if held.is_some_and(|held| held != &fields[&key]) {
+                continue;
+            }
+            let value = fields.remove(&key).expect("a listed field");
+            if let Some(serde_json::Value::Object(report)) = fields.get_mut("report") {
+                report.entry(key).or_insert(value);
+            }
+        }
+    }
+    serde_json::Value::Object(fields)
+}
+
+/// Other CLIs sometimes repeat the report's frozen identity in every finding, question and
+/// suggestion, and mark suggestions and questions with the `kind` only findings carry. Only values
+/// equal to the report's own are dropped; anything else is left for validation to reject.
+fn drop_repeated_identity(report: &mut serde_json::Value) {
+    let identity = ["contractVersion", "snapshotId"].map(|key| (key, report.get(key).cloned()));
+    for (list, kind) in [
+        ("findings", None),
+        ("questions", Some("question")),
+        ("suggestions", Some("suggestion")),
+    ] {
+        let Some(serde_json::Value::Array(points)) = report.get_mut(list) else {
+            continue;
+        };
+        for point in points.iter_mut().filter_map(serde_json::Value::as_object_mut) {
+            for (key, value) in &identity {
+                if value.is_some() && point.get(*key) == value.as_ref() {
+                    point.remove(*key);
+                }
+            }
+            if kind.is_some() && point.get("kind").and_then(serde_json::Value::as_str) == kind {
+                point.remove("kind");
+            }
+        }
+    }
+}
+
 /// Escapes backslashes the model left unescaped inside JSON strings, as in a quoted `\d`.
 /// Valid escapes are kept, so quotes still have to match the frozen source exactly.
 fn escape_stray_backslashes(text: &str) -> String {
@@ -904,13 +1036,24 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
             )
         })?,
     };
-    let parse = |body: &str| {
-        let mut objects = serde_json::Deserializer::from_str(body).into_iter::<FinalResponse>();
-        objects
+    let invalid = |error: serde_json::Error| format!("Review final response is not valid structured JSON ({error})");
+    let parse = |body: &str| -> Result<(FinalResponse, bool), String> {
+        let closed = |offset: usize| body[offset..].trim_start().starts_with("```");
+        if !lenient {
+            let mut objects = serde_json::Deserializer::from_str(body).into_iter::<FinalResponse>();
+            let response = objects
+                .next()
+                .ok_or_else(|| "Review final response is empty".to_string())?
+                .map_err(invalid)?;
+            return Ok((response, closed(objects.byte_offset())));
+        }
+        let mut objects = serde_json::Deserializer::from_str(body).into_iter::<UniqueKeys>();
+        let value = objects
             .next()
             .ok_or_else(|| "Review final response is empty".to_string())?
-            .map(|response| (response, body[objects.byte_offset()..].trim_start().starts_with("```")))
-            .map_err(|error| format!("Review final response is not valid structured JSON ({error})"))
+            .map_err(invalid)?;
+        let response = serde_json::from_value(wrap_report(value.0)).map_err(invalid)?;
+        Ok((response, closed(objects.byte_offset())))
     };
     let (response, closed) = parse(&text[start..]).or_else(|error| {
         let escaped = escape_stray_backslashes(&text[start..]);
@@ -918,7 +1061,8 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
             .or_else(|_| parse(&drop_unmatched_closers(&escaped)))
             .map_err(|_| error)
     })?;
-    if fence.is_some() && !text.starts_with('{') && !closed {
+    // Other CLIs sometimes stop right after the object; the object itself was read whole.
+    if fence.is_some() && !text.starts_with('{') && !closed && !lenient {
         return Err("Review final response has an unclosed JSON fence".into());
     }
     let unwrap = |value: serde_json::Value| match value {
@@ -939,9 +1083,18 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
         fields.entry(key).or_insert(value);
     }
     let decisions = response.finding_decisions.map(unwrap);
+    if lenient {
+        drop_repeated_identity(&mut report);
+    }
     let decisions = if lenient {
         decisions
             .filter(|value| !value.is_null() && value.as_array().is_none_or(|items| !items.is_empty()))
+            // Decisions holding only the frozen identity are no decisions.
+            .filter(|value| {
+                value
+                    .as_object()
+                    .is_none_or(|fields| fields.keys().any(|key| key != "contractVersion" && key != "snapshotId"))
+            })
             .map(|value| match value {
                 // A bare list takes the frozen identity from the report, as the wrapper would carry it.
                 serde_json::Value::Array(items) => {
@@ -1029,6 +1182,12 @@ fn run(
             })
             .map_err(|e| e.to_string())?;
     }
+    // OpenCode runs each tool call as its own step; its prompt lets one step read several files.
+    let prompt = if provider == "opencode" {
+        crate::providers::opencode::adapt_prompt(&prompt)
+    } else {
+        prompt
+    };
     fs::write("/work/prompt.md", prompt).map_err(|e| e.to_string())?;
     fs::set_permissions("/work/prompt.md", fs::Permissions::from_mode(0o444)).map_err(|e| e.to_string())?;
     let mut probe = Command::new("/bin/sh");

@@ -631,3 +631,91 @@ fn a_fence_mentioned_inside_the_report_is_not_read_as_one() {
     assert!(parse_final_response(&fenced, false).is_ok());
     assert!(parse_final_response(&format!("```json\n{}", json!({"report":report})), false).is_err());
 }
+
+#[test]
+fn final_response_of_other_clis_takes_report_fields_written_beside_or_without_the_wrapper() {
+    let report = json!({"reviewedFiles":["a.ts"],"missingEvidence":[],"findings":[]});
+    let decision = json!({"candidateId":"candidate-1","decision":"keep","commentIndex":0,"reason":"Verified"});
+    let beside = json!({"report":report,"requestedFiles":[],"findings":[]}).to_string();
+    let (actual, _) = parse_final_response(&beside, true).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+        json!({"reviewedFiles":["a.ts"],"missingEvidence":[],"findings":[],"requestedFiles":[]})
+    );
+    // The same with the report sent as a JSON string.
+    let quoted = json!({"report":report.to_string(),"requestedFiles":[]}).to_string();
+    let (actual, _) = parse_final_response(&quoted, true).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&actual).unwrap(),
+        json!({"reviewedFiles":["a.ts"],"missingEvidence":[],"findings":[],"requestedFiles":[]})
+    );
+    let bare = json!({"reviewedFiles":["a.ts"],"missingEvidence":[],"findings":[],"findingDecisions":[decision]});
+    let (actual, decisions) = parse_final_response(&bare.to_string(), true).unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&actual).unwrap(), report);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&decisions.unwrap()).unwrap(),
+        json!({"decisions":[decision]})
+    );
+    let unclosed = format!("Here it is:\n```json\n{}", json!({"report":report}));
+    assert!(parse_final_response(&unclosed, true).is_ok());
+    // Claude's output stays strict, and an object that is no report is never read as one.
+    for strict in [beside, bare.to_string(), unclosed] {
+        assert!(parse_final_response(&strict, false).is_err(), "{strict}");
+    }
+    assert!(parse_final_response(&json!({"title":"x"}).to_string(), true).is_err());
+    // Nor is one of two reports or decision lists written under the same key.
+    let report_text = report.to_string();
+    for repeated in [
+        format!(r#"{{"report":{report_text},"report":{report_text}}}"#),
+        format!(r#"{{"report":{report_text},"findingDecisions":[],"findingDecisions":[]}}"#),
+    ] {
+        let error = parse_final_response(&repeated, true).unwrap_err();
+        assert!(error.contains("duplicate field"), "{error}");
+        assert!(parse_final_response(&repeated, false).is_err());
+    }
+    // Findings written beside a report that holds other findings are never dropped: the response fails.
+    let conflict = json!({"report":report,"findings":[{"title":"lost"}]}).to_string();
+    assert!(parse_final_response(&conflict, true).is_err());
+}
+
+#[test]
+fn final_response_of_other_clis_drops_the_identity_repeated_in_every_point() {
+    let identity = json!({"contractVersion":2,"snapshotId":"snapshot"});
+    let point =
+        json!({"title":"t","detail":"d","action":"a","path":"a.rs","line":1,"evidence":[],"counterEvidence":[]});
+    let with = |extra: serde_json::Value| {
+        let mut point = point.clone();
+        point
+            .as_object_mut()
+            .unwrap()
+            .extend(identity.as_object().unwrap().clone());
+        point
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        point
+    };
+    let output = json!({"report":{
+        "contractVersion":2,"snapshotId":"snapshot","reviewedFiles":["a.rs"],"missingEvidence":[],
+        "findings":[with(json!({"kind":"finding"})), with(json!({"snapshotId":"other"}))],
+        "suggestions":[with(json!({"kind":"suggestion"}))],
+        "questions":[with(json!({"kind":"finding"}))]
+    },"findingDecisions":identity});
+    let (report, decisions) = parse_final_response(&output.to_string(), true).unwrap();
+    let report = serde_json::from_str::<serde_json::Value>(&report).unwrap();
+    let mut finding = point.clone();
+    finding["kind"] = json!("finding");
+    assert_eq!(report["findings"][0], finding);
+    // A value that differs from the report's is left for validation to reject.
+    assert_eq!(report["findings"][1]["snapshotId"], "other");
+    assert_eq!(report["suggestions"][0], point);
+    assert_eq!(report["questions"][0]["kind"], "finding");
+    assert_eq!(decisions, None);
+    // Claude's output stays as written.
+    let (strict, decisions) = parse_final_response(&output.to_string(), false).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&strict).unwrap()["suggestions"][0]["kind"],
+        "suggestion"
+    );
+    assert!(decisions.is_some());
+}
