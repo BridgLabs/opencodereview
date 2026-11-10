@@ -174,6 +174,12 @@ fn opencode(home: &std::path::Path) -> Command {
         .envs(crate::providers::opencode::QUIET_ENV.iter().copied())
         .current_dir(home)
         .stdin(Stdio::null());
+    // Its own process group, so stopping it (`kill_tree`) also stops what it started.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     command
 }
 
@@ -197,7 +203,8 @@ fn bounded_output(
     cancel: &AtomicBool,
     limit: Duration,
 ) -> Result<(std::process::ExitStatus, String), String> {
-    // Its own process group, so stopping it also stops what it started.
+    // Its own process group (the OpenCode command already asks for one), so stopping it also
+    // stops what it started.
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
