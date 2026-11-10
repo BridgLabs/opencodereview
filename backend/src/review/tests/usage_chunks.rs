@@ -759,3 +759,75 @@ fn prepared_files_are_printed_only_with_the_setting_and_for_other_providers_than
         .unwrap();
     assert_eq!(key(&inputs), "");
 }
+
+#[test]
+fn chunk_cache_keys_keep_engines_apart() {
+    let base = serde_json::json!({ "promptHash": "p" });
+    let mut inputs = review_inputs("auto", 0, 0);
+    assert_eq!(super::chunks::with_engine(base.clone(), &inputs), base);
+    let pinned = |provider: &str, model: &str, effort: &str| {
+        Some(std::sync::Arc::new(super::PinnedEngines {
+            provider: Some(provider.into()),
+            engines: vec![(provider.into(), model.into(), effort.into())],
+        }))
+    };
+    inputs.engines = pinned("claude", "claude-opus-5-5", "medium");
+    let claude = super::chunks::with_engine(base.clone(), &inputs);
+    inputs.engines = pinned("opencode", "opencode/glm-5.3-flash", "low");
+    let opencode = super::chunks::with_engine(base.clone(), &inputs);
+    inputs.engines = pinned("opencode", "opencode/glm-5.3-flash", "high");
+    let opencode_high = super::chunks::with_engine(base, &inputs);
+    assert_ne!(claude, opencode);
+    assert_ne!(opencode, opencode_high);
+    // A chunk that failed over to another provider is not kept under the pinned engine's key.
+    let ran = |models: &[&str]| super::RunUsage {
+        by_model: models
+            .iter()
+            .map(|model| super::ModelUsageEntry {
+                model: model.to_string(),
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    };
+    assert!(super::chunks::ran_on_pinned_provider(&inputs, &ran(&["opencode"])));
+    assert!(super::chunks::ran_on_pinned_provider(&inputs, &ran(&[])));
+    assert!(!super::chunks::ran_on_pinned_provider(
+        &inputs,
+        &ran(&["opencode", "claude-opus-5-5"])
+    ));
+    assert!(!super::chunks::ran_on_pinned_provider(&inputs, &ran(&["codex"])));
+    inputs.engines = pinned("claude", "claude-opus-5-5", "medium");
+    assert!(super::chunks::ran_on_pinned_provider(
+        &inputs,
+        &ran(&["claude-opus-5-5"])
+    ));
+    assert!(!super::chunks::ran_on_pinned_provider(
+        &inputs,
+        &ran(&["claude-opus-5-5", "opencode"])
+    ));
+    inputs.engines = None;
+    assert!(super::chunks::ran_on_pinned_provider(&inputs, &ran(&["codex"])));
+    // A review that pinned OpenCode before it had a model keys its chunks by the model in use.
+    let db = crate::db::Db::for_test();
+    inputs.db_handle = Some(db.clone());
+    inputs.engines = Some(std::sync::Arc::new(super::PinnedEngines {
+        provider: Some("opencode".into()),
+        engines: Vec::new(),
+    }));
+    let choose = |model: &str| {
+        db.open()
+            .unwrap()
+            .save_setting_value(
+                "review_engine_opencode",
+                &serde_json::json!({ "model": model, "effort": "high" }).to_string(),
+            )
+            .unwrap();
+        super::chunks::with_engine(serde_json::json!({}), &inputs)
+    };
+    let first = choose("opencode/glm-5.3");
+    assert_eq!(first["engine"][1], "opencode/glm-5.3");
+    assert_ne!(first, choose("opencode/glm-5.3-flash"));
+    assert_eq!(opencode["engine"][3], crate::providers::opencode::PROMPT_ADAPTATION);
+    assert_eq!(claude["engine"][3], "");
+}
