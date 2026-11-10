@@ -32,7 +32,7 @@ pulldown-cmark = { version = "=0.13.6", default-features = false }
 r2d2 = "0.8.10"
 r2d2_postgres = "0.18.2"
 reqwest = { version = "0.13.4", features = ["blocking", "form", "json"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
 rustls-native-certs = "0.8"
 scheduled-thread-pool = "0.2"
