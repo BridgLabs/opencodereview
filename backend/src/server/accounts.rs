@@ -93,7 +93,7 @@ pub(crate) fn review_engines(state: &SharedState) -> Result<serde_json::Value, S
             .iter()
             .map(|(provider, name)| {
                 let (model, effort) = db.review_engine(provider)?;
-                let models = engines::models(provider)
+                let models = engines::models(provider, &db.engine_plans(provider)?)
                     .into_iter()
                     .map(|entry| {
                         serde_json::json!({

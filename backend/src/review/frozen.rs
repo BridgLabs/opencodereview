@@ -630,18 +630,19 @@ fn accounts_db(inputs: &ReviewInputs) -> Result<Database, String> {
 }
 
 /// The model and effort `provider` reviews with: the ones the review started with, so a change in
-/// the app reaches only reviews that start later. Without a pinned choice the current one is read,
-/// and diagnostics, which have no database, use the defaults.
+/// the app reaches only reviews that start later. Without a pinned choice the current one is read
+/// (a review that started before OpenCode's list was read pins none for OpenCode, so each of its
+/// stages reads it), and diagnostics, which have no database, use the defaults.
 pub(crate) fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, String) {
     if let Some(engine) = inputs.engines.as_ref().and_then(|pinned| pinned.engine(provider)) {
         return engine;
     }
     if inputs.db_handle.is_none() {
-        return crate::providers::engines::default_engine(provider);
+        return crate::providers::engines::default_engine(provider, &None);
     }
     accounts_db(inputs)
         .and_then(|db| db.review_engine(provider))
-        .unwrap_or_else(|_| crate::providers::engines::default_engine(provider))
+        .unwrap_or_else(|_| crate::providers::engines::default_engine(provider, &None))
 }
 
 /// The account a stage runs on: the first ready account by priority, the first account's provider

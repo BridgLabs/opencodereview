@@ -90,7 +90,7 @@ pub(crate) fn start_review_job_with_intent(
         let provider = db
             .pick_ai_account(&[])?
             .map_or_else(|| "claude".to_string(), |account| account.provider);
-        let (engine_model, effort) = db.review_engine(&provider)?;
+        let (engine_model, effort) = db.review_engine_offline(&provider)?;
         let label = crate::providers::engines::label(&provider, &engine_model, &effort);
         let run_id = db.start_review_skeleton_with(pr_id, Some(&label))?;
         let engines = review::PinnedEngines::current(db)?;
