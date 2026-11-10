@@ -679,7 +679,7 @@ fn opencode_session(account: i64, model: &str, effort: &str) -> Result<(Command,
 /// Inference arguments for an isolated stage; the prompt is supplied on stdin.
 #[cfg(unix)]
 pub(crate) fn inference(command: &mut Command, model: &str, effort: &str) -> Result<(), String> {
-    let (model, effort) = crate::providers::engines::resolve("claude", model, effort)?;
+    let (model, effort) = crate::providers::engines::resolve("claude", model, effort, &None)?;
     command.args(crate::providers::claude::print_args(
         &Path::new(SESSION).join("settings.json"),
         crate::providers::claude::RUNNER_TOOLS,

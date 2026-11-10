@@ -134,6 +134,22 @@ impl Database {
     /// Next account to try: enabled, signed in, not resting, by priority. Accounts whose rest has
     /// elapsed count as available again. The first usable account's provider goes first, so a
     /// limit moves reviews to that provider's other accounts before another provider's.
+    /// The OpenCode plans of the accounts reviews can run on (enabled and signed in), or None
+    /// without one.
+    pub(crate) fn opencode_plans(&self) -> Result<Option<Vec<String>>, String> {
+        Ok(crate::accounts::opencode_plans(&self.opencode_review_accounts()?))
+    }
+
+    /// The OpenCode accounts reviews can run on: enabled and not signed out.
+    pub(crate) fn opencode_review_accounts(&self) -> Result<Vec<i64>, String> {
+        Ok(self
+            .list_ai_accounts()?
+            .into_iter()
+            .filter(|account| account.provider == "opencode" && account.enabled && account.status != "auth_failed")
+            .map(|account| account.id)
+            .collect())
+    }
+
     pub fn pick_ai_account(&self, excluded: &[i64]) -> Result<Option<AiAccount>, String> {
         self.pick_ai_account_preferring(excluded, None)
     }
