@@ -366,25 +366,52 @@ impl Database {
 
     /// The model and effort reviews use on `provider`; its default when unset or no longer offered.
     pub(crate) fn review_engine(&self, provider: &str) -> Result<(String, String), String> {
+        self.stored_review_engine(provider, true)
+    }
+
+    /// [`Self::review_engine`] without asking opencode.ai, for a review that is starting: an
+    /// OpenCode choice is checked against the list already read and the plans (its shape, before
+    /// any list was read), and its default comes from that list, empty until one was read.
+    pub(crate) fn review_engine_offline(&self, provider: &str) -> Result<(String, String), String> {
+        self.stored_review_engine(provider, false)
+    }
+
+    fn stored_review_engine(&self, provider: &str, online: bool) -> Result<(String, String), String> {
         use crate::providers::engines;
+        let plans = self.engine_plans(provider)?;
         let stored = self
             .setting(&engines::setting_key(provider))?
             .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok());
         Ok(stored
             .and_then(|value| {
-                engines::resolve(
-                    provider,
-                    value["model"].as_str()?,
-                    value["effort"].as_str().unwrap_or(""),
-                )
-                .ok()
+                let (model, effort) = (value["model"].as_str()?, value["effort"].as_str().unwrap_or(""));
+                if online {
+                    engines::resolve(provider, model, effort, &plans).ok()
+                } else {
+                    engines::resolve_cached(provider, model, effort, &plans).ok()
+                }
             })
-            .unwrap_or_else(|| engines::default_engine(provider)))
+            .unwrap_or_else(|| {
+                if online {
+                    engines::default_engine(provider, &plans)
+                } else {
+                    engines::default_engine_offline(provider, &plans)
+                }
+            }))
+    }
+
+    /// What `provider`'s model list depends on: the OpenCode plans, for OpenCode only.
+    pub(crate) fn engine_plans(&self, provider: &str) -> Result<crate::providers::engines::Plans, String> {
+        if provider == "opencode" {
+            self.opencode_plans()
+        } else {
+            Ok(None)
+        }
     }
 
     pub(crate) fn save_review_engine(&self, provider: &str, model: &str, effort: &str) -> Result<(), String> {
         use crate::providers::engines;
-        let (model, effort) = engines::resolve(provider, model, effort)?;
+        let (model, effort) = engines::resolve(provider, model, effort, &self.engine_plans(provider)?)?;
         self.save_setting_value(
             &engines::setting_key(provider),
             &serde_json::json!({ "model": model, "effort": effort }).to_string(),

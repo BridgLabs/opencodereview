@@ -198,6 +198,42 @@ pub struct ReviewInputs {
     pub archive_dir: PathBuf,
     /// The time this review has, when it has a fixed one (`ocr-bench`); None runs every step.
     pub budget: Option<std::sync::Arc<budget::Budget>>,
+    /// The provider and engines chosen when the review started, which every stage keeps even if
+    /// the choice in the app changes meanwhile. None reads the current choice at each stage.
+    pub engines: Option<std::sync::Arc<PinnedEngines>>,
+}
+
+/// The engine choice a review started with: the provider whose accounts go first, and each
+/// provider's model and effort, for stages that fail over to another provider.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PinnedEngines {
+    pub provider: Option<String>,
+    pub engines: Vec<(String, String, String)>,
+}
+
+impl PinnedEngines {
+    /// The current choice in `db`, to keep for a review starting now. It is read without asking
+    /// opencode.ai, since a review starts under the lock every other start waits on; a provider
+    /// with no model to pin yet (OpenCode before its list was read) is left out, so its stages
+    /// read the choice when they run.
+    pub(crate) fn current(db: &Database) -> Result<Self, String> {
+        let provider = db.pick_ai_account(&[])?.map(|account| account.provider);
+        let mut engines = Vec::new();
+        for (provider, _) in crate::providers::engines::PROVIDERS {
+            let (model, effort) = db.review_engine_offline(provider)?;
+            if !model.is_empty() {
+                engines.push((provider.to_string(), model, effort));
+            }
+        }
+        Ok(Self { provider, engines })
+    }
+
+    pub(crate) fn engine(&self, provider: &str) -> Option<(String, String)> {
+        self.engines
+            .iter()
+            .find(|(known, _, _)| known == provider)
+            .map(|(_, model, effort)| (model.clone(), effort.clone()))
+    }
 }
 
 impl ReviewInputs {
@@ -351,6 +387,26 @@ fn validate_review_stage_inputs(context: &Path, additional_inputs: Option<&Path>
     crate::review::policy::validate_prepared_inputs(context_bytes + additional, prompt_bytes)
 }
 
+/// The model a stage ran on. Claude's transcript names it; Codex's and OpenCode's only name the
+/// provider, whose model is the one the review uses for it. Without a transcript, the model of the
+/// provider the review started on.
+fn stage_model(inputs: &ReviewInputs, usage: &RunUsage) -> String {
+    let provider = match usage.model.as_deref() {
+        Some(provider @ ("codex" | "opencode")) => provider,
+        Some(model) => return model.to_string(),
+        None => match inputs.engines.as_ref().and_then(|pinned| pinned.provider.as_deref()) {
+            Some(provider) => provider,
+            None => return inputs.model.clone(),
+        },
+    };
+    let (model, _) = frozen::engine_for(inputs, provider);
+    if model.is_empty() {
+        provider.to_string()
+    } else {
+        model
+    }
+}
+
 fn record_stage(
     inputs: &ReviewInputs,
     stage: &str,
@@ -369,7 +425,7 @@ fn record_stage(
             pr_id: inputs.pr_id,
             stage: stage.to_string(),
             chunk_id,
-            model: Some(inputs.model.clone()),
+            model: Some(stage_model(inputs, usage)),
             status: status.to_string(),
             cache_key,
             cache_hit: status == "cached",

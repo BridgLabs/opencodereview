@@ -1,6 +1,6 @@
 //! Credentials of the AI accounts listed in `ai_accounts`. Each account owns one directory,
 //! `$OCR_DATA_DIR/accounts/<id>/`, holding its provider's credential file:
-//! `claude/oauth-token` or `codex/auth.json`.
+//! `claude/oauth-token`, `codex/auth.json` or `opencode/auth.json`.
 pub(crate) mod sandbox_sync;
 pub(crate) mod usage;
 
@@ -39,6 +39,10 @@ pub(crate) fn codex_auth_path(id: i64) -> PathBuf {
     root().join(id.to_string()).join("codex/auth.json")
 }
 
+pub(crate) fn opencode_auth_path(id: i64) -> PathBuf {
+    root().join(id.to_string()).join("opencode/auth.json")
+}
+
 pub(crate) fn store_claude_token(id: i64, token: &str) -> Result<(), String> {
     store(&claude_token_path(id), id, token.as_bytes())
 }
@@ -47,6 +51,65 @@ pub(crate) fn store_claude_token(id: i64, token: &str) -> Result<(), String> {
 pub(crate) fn store_codex_auth(id: i64, raw: &str) -> Result<(), String> {
     crate::providers::codex::validate_auth(raw)?;
     store(&codex_auth_path(id), id, raw.as_bytes())
+}
+
+/// The OpenCode plans an account's workspace has (`go`, `zen`), kept beside its sign-in for the
+/// server only: runners never receive it.
+pub(crate) fn opencode_plans_path(id: i64) -> PathBuf {
+    root().join(id.to_string()).join("opencode/plans.json")
+}
+
+pub(crate) fn store_opencode_plans(id: i64, plans: &[&str]) -> Result<(), String> {
+    store(
+        &opencode_plans_path(id),
+        id,
+        serde_json::json!({ "plans": plans }).to_string().as_bytes(),
+    )
+}
+
+/// The OpenCode plans of the accounts `ids` together, or None when none of them has a usable
+/// sign-in. The caller passes the accounts reviews can run on (`Database::opencode_plans`): a
+/// folder left without its account, or a disabled or signed-out account, offers no models. An
+/// account saved before its plans were recorded counts as having both.
+pub(crate) fn opencode_plans(ids: &[i64]) -> Option<Vec<String>> {
+    plans_under(&root(), ids)
+}
+
+fn plans_under(root: &std::path::Path, ids: &[i64]) -> Option<Vec<String>> {
+    let mut plans = Vec::new();
+    let mut any = false;
+    for id in ids {
+        let directory = root.join(id.to_string()).join("opencode");
+        let signed_in = fs::read_to_string(directory.join("auth.json"))
+            .is_ok_and(|raw| crate::providers::opencode::validate_auth(&raw).is_ok());
+        if !signed_in {
+            continue;
+        }
+        any = true;
+        let known = fs::read_to_string(directory.join("plans.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .and_then(|value| {
+                value["plans"].as_array().map(|list| {
+                    list.iter()
+                        .filter_map(|plan| plan.as_str().map(str::to_string))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .unwrap_or_else(|| vec!["go".into(), "zen".into()]);
+        for plan in known {
+            if !plans.contains(&plan) {
+                plans.push(plan);
+            }
+        }
+    }
+    any.then_some(plans)
+}
+
+/// Saves an OpenCode account: its API key or Console sign-in.
+pub(crate) fn store_opencode_auth(id: i64, raw: &str) -> Result<(), String> {
+    crate::providers::opencode::validate_auth(raw)?;
+    store(&opencode_auth_path(id), id, raw.as_bytes())
 }
 
 fn store(path: &std::path::Path, id: i64, bytes: &[u8]) -> Result<(), String> {
@@ -93,6 +156,8 @@ pub(crate) fn has_credential(provider: &str, id: i64) -> bool {
         "claude" => crate::providers::claude::read_token(&claude_token_path(id)).is_ok(),
         "codex" => fs::read_to_string(codex_auth_path(id))
             .is_ok_and(|raw| crate::providers::codex::validate_auth(&raw).is_ok()),
+        "opencode" => fs::read_to_string(opencode_auth_path(id))
+            .is_ok_and(|raw| crate::providers::opencode::validate_auth(&raw).is_ok()),
         _ => false,
     }
 }
@@ -109,7 +174,7 @@ pub(crate) fn remove_unsupported(db: &Database) -> Result<(), String> {
     Ok(())
 }
 
-/// Deletes the Gemini and OpenCode folders under `root`, and each account folder they leave
+/// Deletes the Gemini folders under `root`, and each account folder they leave
 /// empty. Returns whether it deleted any.
 fn remove_unsupported_sign_ins(root: &std::path::Path) -> Result<bool, String> {
     let mut removed = false;
@@ -117,7 +182,7 @@ fn remove_unsupported_sign_ins(root: &std::path::Path) -> Result<bool, String> {
         return Ok(false);
     };
     for account in entries.flatten().map(|entry| entry.path()) {
-        for provider in ["gemini", "opencode"] {
+        for provider in ["gemini"] {
             match fs::remove_dir_all(account.join(provider)) {
                 Ok(()) => {
                     removed = true;
@@ -165,10 +230,44 @@ mod tests {
         assert!(root.join("1/claude/secret").exists());
         assert!(root.join("2/codex/secret").exists());
         assert!(!root.join("3").exists());
-        assert!(!root.join("4").exists());
+        assert!(root.join("4/opencode/secret").exists());
         // Nothing left to remove, and a missing root is not an error.
         assert!(!super::remove_unsupported_sign_ins(&root).unwrap());
         std::fs::remove_dir_all(&root).unwrap();
         assert!(!super::remove_unsupported_sign_ins(&root).unwrap());
+    }
+
+    #[test]
+    fn opencode_plans_join_the_given_accounts_with_a_usable_sign_in() {
+        let root = std::env::temp_dir().join(format!("ocr-opencode-plans-{}", std::process::id()));
+        let key = r#"{"key":"sk-0123456789abcdef"}"#;
+        let account = |id: i64, auth: &str, plans: Option<&str>| {
+            let directory = root.join(id.to_string()).join("opencode");
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(directory.join("auth.json"), auth).unwrap();
+            if let Some(plans) = plans {
+                std::fs::write(directory.join("plans.json"), plans).unwrap();
+            }
+        };
+        std::fs::create_dir_all(root.join("1/claude")).unwrap();
+        assert_eq!(super::plans_under(&root, &[1, 2]), None);
+        account(2, key, Some(r#"{"plans":["zen"]}"#));
+        assert_eq!(super::plans_under(&root, &[1, 2]), Some(vec!["zen".to_string()]));
+        account(3, key, Some(r#"{"plans":["go","zen"]}"#));
+        let mut both = super::plans_under(&root, &[2, 3]).unwrap();
+        both.sort();
+        assert_eq!(both, vec!["go".to_string(), "zen".to_string()]);
+        // A folder whose account is not asked for (removed, disabled or signed out) offers nothing.
+        assert_eq!(super::plans_under(&root, &[2]), Some(vec!["zen".to_string()]));
+        assert_eq!(super::plans_under(&root, &[]), None);
+        // Nor does a sign-in that does not validate.
+        account(5, "{}", Some(r#"{"plans":["go"]}"#));
+        assert_eq!(super::plans_under(&root, &[5]), None);
+        // An account saved before plans were recorded counts as both.
+        account(4, key, None);
+        let mut legacy = super::plans_under(&root, &[4]).unwrap();
+        legacy.sort();
+        assert_eq!(legacy, vec!["go".to_string(), "zen".to_string()]);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

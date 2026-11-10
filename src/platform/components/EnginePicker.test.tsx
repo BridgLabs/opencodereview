@@ -230,3 +230,90 @@ it("says when a used-up account resets, before any review has hit its limit", as
     client.clear();
   }
 });
+
+it("asks for the model list again when the menu opens, so a list that failed to load comes back", async () => {
+  const opencode = (models: ReviewEngine["models"]): ReviewEngine[] => [
+    { provider: "opencode", name: "OpenCode", model: "", effort: "", label: "OpenCode", models },
+  ];
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(1, "opencode", "OpenCode")]);
+  vi.mocked(setupApi.accountUsage).mockResolvedValue([]);
+  vi.mocked(setupApi.reviewEngines)
+    .mockResolvedValueOnce(opencode([]))
+    .mockResolvedValue(opencode([{ id: "opencode/glm-5.3", label: "Zen · GLM-5.3", efforts: [], defaultEffort: "" }]));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const settle = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <EnginePicker />
+        </QueryClientProvider>,
+      ),
+    );
+    await settle();
+    expect(setupApi.reviewEngines).toHaveBeenCalledTimes(1);
+    await act(async () => container.querySelector<HTMLButtonElement>("button[aria-haspopup]")!.click());
+    await settle();
+    expect(setupApi.reviewEngines).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Zen · GLM-5.3");
+    expect(container.textContent).not.toContain("couldn't be loaded");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+it("keeps a saved choice when the read started by opening the menu answers afterwards", async () => {
+  const saved = engines.map((engine) =>
+    engine.provider === "claude"
+      ? { ...engine, model: "claude-sonnet-5-5", label: "Claude · Sonnet 5.5 · medium" }
+      : engine,
+  );
+  let answerOpen: (value: ReviewEngine[]) => void = () => {};
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(1, "claude", "Claude")]);
+  vi.mocked(setupApi.accountUsage).mockResolvedValue([]);
+  vi.mocked(setupApi.reviewEngines)
+    .mockResolvedValueOnce(engines)
+    .mockImplementationOnce(() => new Promise((resolve) => (answerOpen = resolve)));
+  vi.mocked(setupApi.saveReviewEngine).mockResolvedValue(saved);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const settle = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  const trigger = () => container.querySelector<HTMLButtonElement>("button[aria-haspopup]")!;
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <EnginePicker />
+        </QueryClientProvider>,
+      ),
+    );
+    await settle();
+    await act(async () => trigger().click());
+    await act(async () =>
+      [...container.querySelectorAll<HTMLButtonElement>("button")]
+        .find((item) => item.textContent?.includes("Sonnet 5.5"))!
+        .click(),
+    );
+    await settle();
+    expect(trigger().textContent).toContain("Sonnet 5.5");
+    // The read from before the save answers last, with the old choice.
+    await act(async () => answerOpen(engines));
+    await settle();
+    expect(trigger().textContent).toContain("Sonnet 5.5");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});

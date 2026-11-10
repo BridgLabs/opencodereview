@@ -59,7 +59,7 @@ impl Database {
     }
 
     pub fn create_ai_account(&self, provider: &str, label: &str) -> Result<AiAccount, String> {
-        if !matches!(provider, "claude" | "codex") {
+        if !matches!(provider, "claude" | "codex" | "opencode") {
             return Err("Unsupported account provider".into());
         }
         let label = label.trim();
@@ -134,11 +134,40 @@ impl Database {
     /// Next account to try: enabled, signed in, not resting, by priority. Accounts whose rest has
     /// elapsed count as available again. The first usable account's provider goes first, so a
     /// limit moves reviews to that provider's other accounts before another provider's.
+    /// The OpenCode plans of the accounts reviews can run on (enabled and signed in), or None
+    /// without one.
+    pub(crate) fn opencode_plans(&self) -> Result<Option<Vec<String>>, String> {
+        Ok(crate::accounts::opencode_plans(&self.opencode_review_accounts()?))
+    }
+
+    /// The OpenCode accounts reviews can run on: enabled and not signed out.
+    pub(crate) fn opencode_review_accounts(&self) -> Result<Vec<i64>, String> {
+        Ok(self
+            .list_ai_accounts()?
+            .into_iter()
+            .filter(|account| account.provider == "opencode" && account.enabled && account.status != "auth_failed")
+            .map(|account| account.id)
+            .collect())
+    }
+
     pub fn pick_ai_account(&self, excluded: &[i64]) -> Result<Option<AiAccount>, String> {
+        self.pick_ai_account_preferring(excluded, None)
+    }
+
+    /// [`Self::pick_ai_account`], trying `preferred`'s accounts first instead of the first
+    /// account's provider: a review keeps the provider it started on.
+    pub fn pick_ai_account_preferring(
+        &self,
+        excluded: &[i64],
+        preferred: Option<&str>,
+    ) -> Result<Option<AiAccount>, String> {
         let now = now_millis();
         let mut accounts = self.list_ai_accounts()?;
         accounts.retain(|account| account.enabled && account.status != "auth_failed");
-        let Some(preferred) = accounts.first().map(|account| account.provider.clone()) else {
+        let Some(preferred) = preferred
+            .map(str::to_string)
+            .or_else(|| accounts.first().map(|account| account.provider.clone()))
+        else {
             return Ok(None);
         };
         // A stable sort keeps the priority order inside each group.
@@ -178,13 +207,12 @@ impl Database {
         Ok(())
     }
 
-    /// Drops accounts and engine choices of providers the app no longer runs, such as Gemini and
-    /// OpenCode, including ones an import of an older database brings back.
+    /// Drops accounts and engine choices of providers the app no longer runs, such as Gemini, including ones an import of an older database brings back.
     /// Returns the ids of the accounts it removed.
     pub fn remove_unsupported_ai_accounts(&self) -> Result<Vec<i64>, String> {
         let mut statement = self
             .conn
-            .prepare("DELETE FROM ai_accounts WHERE provider NOT IN ('claude', 'codex') RETURNING id")
+            .prepare("DELETE FROM ai_accounts WHERE provider NOT IN ('claude', 'codex', 'opencode') RETURNING id")
             .map_err(|error| error.to_string())?;
         let removed = statement
             .query_map([], |row| row.get::<_, i64>(0))
@@ -193,7 +221,7 @@ impl Database {
             .map_err(|error| error.to_string())?;
         self.conn
             .execute(
-                "DELETE FROM settings WHERE key LIKE 'review_engine_%' AND key NOT IN ('review_engine_claude', 'review_engine_codex')",
+                "DELETE FROM settings WHERE key LIKE 'review_engine_%' AND key NOT IN ('review_engine_claude', 'review_engine_codex', 'review_engine_opencode')",
                 [],
             )
             .map_err(|error| error.to_string())?;

@@ -2098,6 +2098,7 @@ fn terminal_pr_state_removes_needs_you_pending_actions() {
 fn accounts_of_removed_providers_are_dropped() {
     let db = Db::for_test().open().unwrap();
     let claude = db.create_ai_account("claude", "Work").unwrap();
+    let opencode = db.create_ai_account("opencode", "OpenCode Go").unwrap();
     db.conn
         .execute(
             "INSERT INTO ai_accounts (provider, label, priority, created_at, updated_at) VALUES ('gemini', 'Old', 9, 0, 0)",
@@ -2109,17 +2110,50 @@ fn accounts_of_removed_providers_are_dropped() {
     db.save_review_engine("claude", "claude-sonnet-5-5", "high").unwrap();
     let removed = db.remove_unsupported_ai_accounts().unwrap();
     assert_eq!(removed.len(), 1);
-    assert!(!removed.contains(&claude.id));
+    assert!(!removed.contains(&claude.id) && !removed.contains(&opencode.id));
     assert!(db.remove_unsupported_ai_accounts().unwrap().is_empty());
     let accounts = db.list_ai_accounts().unwrap();
     assert_eq!(
         accounts.iter().map(|account| account.id).collect::<Vec<_>>(),
-        vec![claude.id]
+        vec![claude.id, opencode.id]
     );
     assert_eq!(db.setting("review_engine_gemini").unwrap(), None);
     assert_eq!(
         db.review_engine("claude").unwrap(),
         ("claude-sonnet-5-5".to_string(), "high".to_string())
+    );
+}
+
+#[test]
+fn a_review_keeps_the_provider_and_engines_it_started_with() {
+    let db = Db::for_test().open().unwrap();
+    let claude = db.create_ai_account("claude", "Work").unwrap();
+    let codex = db.create_ai_account("codex", "Codex").unwrap();
+    db.save_review_engine("claude", "claude-sonnet-5-5", "high").unwrap();
+    let pinned = crate::review::PinnedEngines::current(&db).unwrap();
+    assert_eq!(pinned.provider.as_deref(), Some("claude"));
+    // The app switches to ChatGPT while the review runs.
+    db.reorder_ai_accounts(&[codex.id, claude.id]).unwrap();
+    db.save_review_engine("claude", "claude-opus-5-5", "low").unwrap();
+    assert_eq!(db.pick_ai_account(&[]).unwrap().unwrap().id, codex.id);
+    assert_eq!(
+        db.pick_ai_account_preferring(&[], pinned.provider.as_deref())
+            .unwrap()
+            .unwrap()
+            .id,
+        claude.id
+    );
+    assert_eq!(
+        pinned.engine("claude"),
+        Some(("claude-sonnet-5-5".to_string(), "high".to_string()))
+    );
+    // Once the pinned provider's accounts are used up, the review still fails over.
+    assert_eq!(
+        db.pick_ai_account_preferring(&[claude.id], Some("claude"))
+            .unwrap()
+            .unwrap()
+            .id,
+        codex.id
     );
 }
 

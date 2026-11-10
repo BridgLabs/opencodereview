@@ -268,6 +268,57 @@ export function ClaudeSignIn(props: { accountId?: number; onDone: () => void; on
   return <PasteCodeSignIn api={claudeApi} plan="Uses your Claude Pro, Max or Team plan." {...props} />;
 }
 
+/** Connects an OpenCode API key, checked with OpenCode before it is kept, to `accountId` or to a
+ * new account. */
+export function OpencodeKeySignIn({
+  accountId,
+  onDone,
+  onCancel,
+}: {
+  accountId?: number;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [key, setKey] = useState("");
+  const save = useMutation({
+    mutationFn: () => setupApi.opencodeKeySave(key.trim(), accountId),
+    onSuccess: onDone,
+  });
+  return (
+    <SignInFrame
+      hint="Create an API key in your OpenCode workspace. It runs Go models on the Go plan and Zen models on the workspace credits."
+      problems={save.error && <Problem>{friendlyError(save.error)}</Problem>}
+    >
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          save.mutate();
+        }}
+      >
+        <input
+          aria-label="OpenCode API key"
+          type="password"
+          className={codeInput}
+          value={key}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="Paste your OpenCode API key"
+          onChange={(event) => setKey(event.target.value)}
+        />
+        <button type="submit" className={brandButton} disabled={!key.trim() || save.isPending}>
+          {save.isPending ? "Checking the key…" : "Save key"}
+        </button>
+      </form>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button type="button" className={quietButton} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </SignInFrame>
+  );
+}
+
 /** Pastes a token made with `claude setup-token`, saving it to `accountId` or to a new account. */
 export function ClaudeTokenSignIn({
   accountId,
@@ -321,13 +372,62 @@ export function ClaudeTokenSignIn({
   );
 }
 
+/** The calls behind a sign-in the server finishes by itself, after the browser or a one-time code. */
+type DeviceFlowApi = {
+  key: string;
+  name: string;
+  plan: string;
+  /** What to do with the one-time code, and how assistive tech names it. */
+  deviceHint: string;
+  codeLabel: string;
+  start: (accountId?: number, mode?: "browser" | "device") => Promise<unknown>;
+  events: () => Promise<{ running: boolean; events: FlowEvent[] }>;
+  cancel: () => Promise<unknown>;
+};
+const codexApi: DeviceFlowApi = {
+  key: "codex-auth-events",
+  name: "ChatGPT",
+  plan: "Uses your ChatGPT plan's Codex usage.",
+  deviceHint: "Open the ChatGPT sign-in page on any device and enter this one-time code.",
+  codeLabel: "Codex sign-in code",
+  start: (id, mode) => setupApi.codexAuthStart(id, mode),
+  events: () => setupApi.codexAuthEvents(),
+  cancel: () => setupApi.codexAuthCancel(),
+};
+const opencodeApi: DeviceFlowApi = {
+  key: "opencode-auth-events",
+  name: "OpenCode",
+  plan: "Uses the workspace you approve: Go models on its Go plan, Zen models on its credits.",
+  deviceHint: "Open the OpenCode sign-in page, check that it shows this code and approve it.",
+  codeLabel: "OpenCode sign-in code",
+  start: (id) => setupApi.opencodeAuthStart(id),
+  events: () => setupApi.opencodeAuthEvents(),
+  cancel: () => setupApi.opencodeAuthCancel(),
+};
+
 /** Signs in to Codex right away, in the browser or with a one-time code, saving it to `accountId` or to a new account. */
-export function CodexSignIn({
+export function CodexSignIn(props: {
+  accountId?: number;
+  mode?: "browser" | "device";
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  return <DeviceFlowSignIn api={codexApi} {...props} />;
+}
+
+/** Signs in to the OpenCode console with a one-time code, saving it to `accountId` or to a new account. */
+export function OpencodeSignIn(props: { accountId?: number; onDone: () => void; onCancel: () => void }) {
+  return <DeviceFlowSignIn api={opencodeApi} mode="device" {...props} />;
+}
+
+function DeviceFlowSignIn({
+  api,
   accountId,
   mode = "browser",
   onDone,
   onCancel,
 }: {
+  api: DeviceFlowApi;
   accountId?: number;
   mode?: "browser" | "device";
   onDone: () => void;
@@ -336,20 +436,20 @@ export function CodexSignIn({
   const [started, setStarted] = useState(false);
   const [copied, setCopied] = useState(false);
   const events = useQuery({
-    queryKey: ["setup", "codex-auth-events"],
-    queryFn: () => setupApi.codexAuthEvents(),
+    queryKey: ["setup", api.key],
+    queryFn: () => api.events(),
     enabled: started,
     refetchInterval: (query) => (query.state.data?.running !== false ? 1000 : false),
   });
   const start = useMutation({
-    mutationFn: () => setupApi.codexAuthStart(accountId, mode),
+    mutationFn: () => api.start(accountId, mode),
     onSuccess: () => {
       setStarted(true);
       void events.refetch();
     },
   });
   const cancel = useMutation({
-    mutationFn: () => setupApi.codexAuthCancel(),
+    mutationFn: () => api.cancel(),
     onSettled: () => {
       setStarted(false);
       onCancel();
@@ -365,7 +465,7 @@ export function CodexSignIn({
   useEffect(() => {
     if (done?.success) onDone();
   }, [done?.success, onDone]);
-  const failure = done && !done.success ? (done.message ?? "ChatGPT sign-in did not finish.") : null;
+  const failure = done && !done.success ? (done.message ?? `${api.name} sign-in did not finish.`) : null;
   const error = start.error ?? events.error;
   const problems = (
     <>
@@ -381,7 +481,7 @@ export function CodexSignIn({
   };
   if (failure || error)
     return (
-      <SignInFrame hint="Uses your ChatGPT plan's Codex usage." problems={problems}>
+      <SignInFrame hint={api.plan} problems={problems}>
         <Retry busy={start.isPending} onRetry={() => start.mutate()} onCancel={onCancel} />
       </SignInFrame>
     );
@@ -392,11 +492,11 @@ export function CodexSignIn({
   );
   if (mode === "browser")
     return (
-      <SignInFrame hint="Sign in to ChatGPT in the browser. This page updates by itself when you're done.">
+      <SignInFrame hint={`Sign in to ${api.name} in the browser. This page updates by itself when you're done.`}>
         <div className="flex flex-wrap items-center gap-2">
           {prompt?.url ? (
             <a className={brandButton} href={prompt.url} target="_blank" rel="noreferrer">
-              Open ChatGPT sign-in
+              Open {api.name} sign-in
               <ArrowUpRight className="size-3.5" aria-hidden="true" />
             </a>
           ) : (
@@ -412,12 +512,12 @@ export function CodexSignIn({
       </SignInFrame>
     );
   return (
-    <SignInFrame hint="Open the ChatGPT sign-in page on any device and enter this one-time code.">
+    <SignInFrame hint={api.deviceHint}>
       {prompt?.code ? (
         <div className="flex flex-wrap items-center gap-2">
           {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the label names the one-time code for tests and screen readers that honour it; the code text stays visible */}
           <code
-            aria-label="Codex sign-in code"
+            aria-label={api.codeLabel}
             className="rounded-lg bg-surface-sunken px-3.5 py-1.5 font-mono text-body font-semibold tracking-[0.14em] text-fg"
           >
             {prompt.code}

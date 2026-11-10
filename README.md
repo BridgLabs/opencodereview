@@ -6,16 +6,16 @@
 
 [![License](https://img.shields.io/badge/license-PolyForm_Small_Business_1.0.0-blue.svg)](LICENSE)
 
-AI code review for GitHub pull requests that runs on your own machine, using the Claude or ChatGPT account you already have.
+AI code review for GitHub pull requests that runs on your own machine, using the Claude, ChatGPT or OpenCode (Go or Zen) plan you already have.
 
-OpenCodeReview watches the repositories you pick, reviews each pull request with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Codex](https://github.com/openai/codex) inside isolated containers, checks every finding against the code, and posts the result on the pull request.
+OpenCodeReview watches the repositories you pick, reviews each pull request with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex) or [OpenCode](https://opencode.ai) inside isolated containers, checks every finding against the code, and posts the result on the pull request.
 
 ![The OpenCodeReview review queue](site/app-reviews.png)
 
 ## Features
 
-- **Your own AI.** Reviews run on the Claude Code CLI (Claude Opus 5.5 at medium effort by default) or the Codex CLI, signed in with your Claude or ChatGPT account. The top bar picks each provider's model and effort. There is no OpenCodeReview account.
-- **Several accounts with failover.** Connect more than one account, of any provider, and pick the one new reviews start on. When an account hits its usage limit, the review continues on the next account of the same provider, then the other provider, and the limited account comes back after its window resets. Settings shows how much of each Claude and ChatGPT plan is left.
+- **Your own AI.** Reviews run on the Claude Code CLI (Claude Opus 5.5 at medium effort by default), the Codex CLI, signed in with your Claude or ChatGPT account, or the OpenCode CLI signed in to your OpenCode workspace, on its Go plan or Zen credits. OpenCode's models are listed from its public Go and Zen model lists on opencode.ai, so new ones show up without an OpenCodeReview update. The top bar picks each provider's model and effort. There is no OpenCodeReview account.
+- **Several accounts with failover.** Connect more than one account, of any provider, and pick the one new reviews start on. When an account hits its usage limit, the review continues on the next account of the same provider, then the other providers, and the limited account comes back after its window resets. Settings shows how much of each Claude and ChatGPT plan is left.
 - **Codebase indexing.** Each selected repository is indexed locally: file metadata, a package and import graph, and lightweight symbols. Reviews get the callers, dependencies and tests of the changed code, plus your convention files (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `REVIEW.md` and others).
 - **Usage.** See the tokens reviews used by day, pull request, repository, model and account, with findings, time and cache reuse. A pull request opens into each of its runs.
 - **Review skills.** The review methodology is a Markdown skill you can edit, version and roll back in the app.
@@ -33,7 +33,7 @@ git clone https://github.com/BridgLabs/opencodereview && cd opencodereview && do
 Open [http://localhost:1421](http://localhost:1421) and follow onboarding:
 
 1. **GitHub**: sign in with the GitHub device flow.
-2. **Your plan**: connect at least one account. Claude uses `claude setup-token` (you paste back the code it shows); ChatGPT uses the `codex login` browser flow or a device code.
+2. **Your plan**: connect at least one account. Claude uses `claude setup-token` (you paste back the code it shows); ChatGPT uses the `codex login` browser flow or a device code; OpenCode signs in to the OpenCode console with a device code (you approve the code it shows), or takes an API key from your OpenCode workspace, which OpenCodeReview checks with OpenCode before saving it.
 3. **Repositories**: choose the repositories to monitor. They are cloned and indexed in the background.
 4. **First review**: pick an open pull request. After that, new pull requests in monitored repositories are reviewed automatically.
 
@@ -51,7 +51,8 @@ Set `OCR_VERSION` (for example `OCR_VERSION=0.1.0`) to stay on one release; the 
 - A GitHub account with access to the repositories you want reviewed.
 - At least one of:
   - a Claude subscription that works with Claude Code (Pro, Max, Team or Enterprise);
-  - a ChatGPT plan that includes Codex.
+  - a ChatGPT plan that includes Codex;
+  - an OpenCode workspace with a Go plan (Go models) or Zen credits (Zen models). Go can bill past the plan through Extra Usage; OpenCodeReview can't stop that, so turn Extra Usage off in your Go workspace if you want reviews to stay within the plan.
 
 Local models through Ollama or similar are not supported: the review egress proxy refuses private networks by design.
 
@@ -118,8 +119,8 @@ browser ──> web (nginx, :1421) ──/api──> server (Rust API, 127.0.0.1
 | --- | --- |
 | `web` | Serves the React UI and proxies `/api` to `server`. |
 | `server` | Rust HTTP API: GitHub polling through the `gh` CLI, indexing, review orchestration, publication and background jobs. |
-| `review-runner` | Runs Claude Code or Codex on a frozen snapshot of the pull request, one review stage per container at a time. 20 replicas by default (`OCR_REVIEW_RUNNERS`); idle ones use almost no memory. Each receives only a private socket and a read-only copy of the sign-in. |
-| `review-egress` | Outbound proxy that allows only `api.anthropic.com`, `chatgpt.com`, `api.openai.com` and `auth.openai.com`, on port 443 and public addresses only. |
+| `review-runner` | Runs Claude Code, Codex or OpenCode on a frozen snapshot of the pull request, one review stage per container at a time. 20 replicas by default (`OCR_REVIEW_RUNNERS`); idle ones use almost no memory. Each receives only a private socket and a read-only copy of the sign-in. |
+| `review-egress` | Outbound proxy that allows only `api.anthropic.com`, `chatgpt.com`, `api.openai.com`, `auth.openai.com` and `opencode.ai`, on port 443 and public addresses only. |
 
 A review fetches the live base and head of the pull request, selects the scope (full, incremental, base sync or stacked), builds context from the index, freezes the evidence into an archive, runs the AI in a runner (split into chunks for large PRs), validates the report and publishes it. On GitHub, OpenCodeReview posts a collapsed summary comment that it updates on each push, a result comment that replaces the previous one, and the validated findings as a single non-blocking review with inline comments. It never approves a pull request on its own.
 

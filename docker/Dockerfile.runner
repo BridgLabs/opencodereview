@@ -13,7 +13,7 @@ RUN --mount=type=cache,id=ocr-cargo-registry,target=/usr/local/cargo/registry,sh
 
 # Keep the context name literal: Buildah does not resolve contexts through FROM arguments.
 FROM ocr_runtime
-RUN chmod -R a+rX /opt/claude /opt/codex
+RUN chmod -R a+rX /opt/claude /opt/codex /opt/opencode
 COPY --from=build /usr/local/bin/ocr-sandbox /usr/local/bin/ocr-sandbox
 WORKDIR /runner
 ENTRYPOINT ["ocr-sandbox"]

@@ -196,6 +196,9 @@ pub(crate) fn review(
         db_handle: Some(db.clone()),
         archive_dir,
         budget: Some(budget),
+        // Pinned as the server pins them, so the review plans its chunks for the provider it
+        // starts on.
+        engines: Some(Arc::new(crate::review::PinnedEngines::current(&database)?)),
     };
     drop(database);
     let cancel = Arc::new(AtomicBool::new(false));

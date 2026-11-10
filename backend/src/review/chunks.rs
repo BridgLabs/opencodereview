@@ -14,18 +14,36 @@ pub(crate) fn should_chunk_prepared_review(
                     > crate::review::policy::MAX_PROMPT_BYTES)
 }
 
-pub(crate) fn should_run_sharded_review(inputs: &ReviewInputs, reviewable_files: usize) -> bool {
-    let chunk_size = if inputs.review_chunk_size == 0 {
+/// OpenCode models think much slower than Claude and Codex, so a review that starts on OpenCode
+/// splits into chunks of at most this many files, run in parallel, once it has more than this many.
+pub(crate) const OPENCODE_CHUNK_SIZE: usize = 3;
+
+fn starts_on_opencode(inputs: &ReviewInputs) -> bool {
+    inputs.engines.as_ref().and_then(|engines| engines.provider.as_deref()) == Some("opencode")
+}
+
+pub(crate) fn review_chunk_size(inputs: &ReviewInputs) -> usize {
+    let size = if inputs.review_chunk_size == 0 {
         DEFAULT_REVIEW_CHUNK_SIZE
     } else {
         inputs.review_chunk_size.clamp(2, 20)
     };
+    if starts_on_opencode(inputs) {
+        size.min(OPENCODE_CHUNK_SIZE)
+    } else {
+        size
+    }
+}
+
+pub(crate) fn should_run_sharded_review(inputs: &ReviewInputs, reviewable_files: usize) -> bool {
+    let chunk_size = review_chunk_size(inputs);
     if reviewable_files <= chunk_size {
         return false;
     }
     match inputs.review_depth_mode.as_str() {
         "economic" => false,
         "deep" => true,
+        "auto" if starts_on_opencode(inputs) => true,
         "auto" => reviewable_files >= inputs.review_deep_threshold.max(chunk_size + 1),
         _ => reviewable_files >= DEFAULT_REVIEW_SHARD_THRESHOLD.max(chunk_size + 1),
     }
@@ -48,11 +66,7 @@ pub(crate) fn run_sharded_review(
         &sharded_phase_json("chunks", "running"),
         "Creating risk-aware review chunks...",
     );
-    let chunk_size = if inputs.review_chunk_size == 0 {
-        DEFAULT_REVIEW_CHUNK_SIZE
-    } else {
-        inputs.review_chunk_size.clamp(2, 20)
-    };
+    let chunk_size = review_chunk_size(inputs);
     let parallel_chunks = if inputs.review_parallel_chunks == 0 {
         DEFAULT_MAX_PARALLEL_REVIEW_CHUNKS
     } else {
@@ -1242,6 +1256,42 @@ pub(crate) fn prepare_review_chunk(
     validate_review_stage_inputs(&chunk_context, None, &prompt)
 }
 
+/// Whether every execution in `usage` ran on the provider the review started with. A stage whose
+/// accounts are all resting fails over to another provider, and its report then comes from another
+/// engine than the one the chunk's cache key names, so it is not kept for reuse.
+pub(crate) fn ran_on_pinned_provider(inputs: &ReviewInputs, usage: &RunUsage) -> bool {
+    let Some(pinned) = inputs.engines.as_ref().and_then(|pinned| pinned.provider.as_deref()) else {
+        return true;
+    };
+    // Codex and OpenCode transcripts name the provider; Claude's name its model.
+    usage.by_model.iter().all(|entry| {
+        pinned
+            == match entry.model.as_str() {
+                provider @ ("codex" | "opencode") => provider,
+                _ => "claude",
+            }
+    })
+}
+
+/// `payload` with the engine the review started with, so a chunk reviewed by one provider, model
+/// or effort is never reused for another, nor an OpenCode chunk across prompt adaptations.
+pub(crate) fn with_engine(mut payload: serde_json::Value, inputs: &ReviewInputs) -> serde_json::Value {
+    let Some(pinned) = inputs.engines.as_ref() else {
+        return payload;
+    };
+    let provider = pinned.provider.clone().unwrap_or_default();
+    // The engine the stages run with: the pinned one, or the current choice when the review
+    // started before the provider had a model to pin.
+    let (model, effort) = super::frozen::engine_for(inputs, &provider);
+    let runtime = if provider == "opencode" {
+        crate::providers::opencode::PROMPT_ADAPTATION
+    } else {
+        ""
+    };
+    payload["engine"] = serde_json::json!([provider, model, effort, runtime]);
+    payload
+}
+
 pub(crate) fn planned_chunk_prompt(
     inputs: &ReviewInputs,
     run_dir: &Path,
@@ -1320,6 +1370,7 @@ pub(crate) fn run_review_chunk(
         "diffHash": diff_hash,
         "lensPass": lens::enabled(inputs),
     });
+    let cache_payload = with_engine(cache_payload, inputs);
     let cache_key = sha256_hex(serde_json::to_string(&cache_payload).unwrap_or_default().as_bytes());
     let potential_cache_hit = inputs
         .open_db()
@@ -1339,10 +1390,8 @@ pub(crate) fn run_review_chunk(
                 &comments,
             )?;
             let comments_json = fs::read_to_string(&comments).map_err(|error| error.to_string())?;
-            let usage = RunUsage {
-                model: Some(inputs.model.clone()),
-                ..Default::default()
-            };
+            // No transcript: the stage is recorded with the model of the review's provider.
+            let usage = RunUsage::default();
             record_stage(
                 inputs,
                 "chunk",
@@ -1560,7 +1609,8 @@ pub(crate) fn run_review_chunk(
         .last()
         .ok_or("Incomplete review: no chunk execution recorded")?
         .metrics;
-    if let Some(db) = (attempts.len() == 1).then(|| inputs.open_db().ok()).flatten() {
+    let reusable = attempts.len() == 1 && ran_on_pinned_provider(inputs, &usage);
+    if let Some(db) = reusable.then(|| inputs.open_db().ok()).flatten() {
         let _ = db.upsert_review_chunk_cache(&ReviewChunkCacheInput {
             cache_key,
             repo_id: inputs.repo_id,
