@@ -1,7 +1,7 @@
 """Checks the newest release of each AI CLI before it is pinned in docker/Dockerfile.
 
-  resolve          Print the Docker build arguments for the newest Claude Code and Codex releases
-                   (linux/amd64) and write a version table to the step summary.
+  resolve          Print the Docker build arguments for the newest Claude Code, Codex and OpenCode
+                   releases (linux/amd64) and write a version table to the step summary.
   flags IMAGE      Check that each CLI in IMAGE still accepts every flag its provider passes.
 
 No step reads credentials or calls a model.
@@ -46,6 +46,7 @@ def pinned():
 def resolve():
     claude = fetch(f"{CLAUDE_RELEASES}/latest").strip()
     codex = latest_github("openai/codex", "rust-v")
+    opencode = latest_github("anomalyco/opencode", "v")
     manifest = json.loads(fetch(f"{CLAUDE_RELEASES}/{claude}/manifest.json"))
     args = {
         "CLAUDE_CLI_VERSION": claude,
@@ -53,10 +54,12 @@ def resolve():
         "CODEX_CLI_VERSION": codex,
         "CODEX_CLI_SHA256_AMD64": sha256(f"https://github.com/openai/codex/releases/download/rust-v{codex}/codex-x86_64-unknown-linux-musl.tar.gz"),
         "CODEX_CODE_MODE_HOST_SHA256_AMD64": sha256(f"https://github.com/openai/codex/releases/download/rust-v{codex}/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz"),
+        "OPENCODE_CLI_VERSION": opencode,
+        "OPENCODE_CLI_SHA256_AMD64": sha256(f"https://github.com/anomalyco/opencode/releases/download/v{opencode}/opencode-linux-x64.tar.gz"),
     }
     current = pinned()
     rows = ["| CLI | Pinned | Newest |", "| --- | --- | --- |"]
-    for name in ["CLAUDE", "CODEX"]:
+    for name in ["CLAUDE", "CODEX", "OPENCODE"]:
         key = name + "_CLI_VERSION"
         mark = "" if current.get(key) == args[key] else " (new)"
         rows.append(f"| {name.title()} | {current.get(key, '?')} | {args[key]}{mark} |")
@@ -87,6 +90,7 @@ def flags(image):
     help_commands = {
         "claude": ["claude", "--help"],
         "codex": ["codex", "exec", "--help"],
+        "opencode": ["opencode", "run", "--help"],
     }
     failures = []
     for name, command in help_commands.items():

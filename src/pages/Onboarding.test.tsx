@@ -26,6 +26,10 @@ vi.mock("../services/setupApi", () => ({
     codexAuthStart: vi.fn(),
     codexAuthEvents: vi.fn(),
     codexAuthCancel: vi.fn(),
+    opencodeKeySave: vi.fn(),
+    opencodeAuthStart: vi.fn(),
+    opencodeAuthEvents: vi.fn(),
+    opencodeAuthCancel: vi.fn(),
     refreshWorkspaces: vi.fn(),
     listWorkspaceRepos: vi.fn(),
     saveSelectedWorkspaces: vi.fn(),
@@ -88,9 +92,14 @@ const provider = (change: Partial<AiProvider>): AiProvider => ({
   label: null,
   ...change,
 });
-const providers = (claude: Partial<AiProvider> = {}, codex: Partial<AiProvider> = {}) => [
+const providers = (
+  claude: Partial<AiProvider> = {},
+  codex: Partial<AiProvider> = {},
+  opencode: Partial<AiProvider> = {},
+) => [
   provider(claude),
   provider({ provider: "codex", name: "ChatGPT", version: "0.163.0", ...codex }),
+  provider({ provider: "opencode", name: "OpenCode", version: "2.2.6", ...opencode }),
 ];
 
 let client: QueryClient;
@@ -233,6 +242,63 @@ describe("onboarding", () => {
     expect(setupApi.claudeAuthCancel).toHaveBeenCalled();
     expect(button("Cancel")).toBeUndefined();
     expect(row().querySelector("button")?.textContent).toBe("Connect");
+  });
+
+  it("signs in to OpenCode with a one-time code", async () => {
+    vi.mocked(setupApi.aiProviders).mockResolvedValue(providers());
+    vi.mocked(setupApi.opencodeAuthStart).mockResolvedValue(undefined);
+    vi.mocked(setupApi.opencodeAuthEvents).mockResolvedValue({
+      running: true,
+      events: [
+        {
+          kind: "prompt",
+          url: "https://opencode.ai/console/device?user_code=MCTD-DMGG&client_id=opencode-cli",
+          code: "MCTD-DMGG",
+        },
+      ],
+    });
+    await render(status({ auth: github, nextStep: 2 }));
+    const row = () => container.querySelector('[aria-label="OpenCode"]')!;
+    await vi.waitFor(() => expect(row().textContent).toContain("OpenCode Go plan or Zen credits"));
+    await act(async () =>
+      [...row().querySelectorAll("button")].find((entry) => entry.textContent === "Connect")!.click(),
+    );
+    await settle();
+    expect(setupApi.opencodeAuthStart).toHaveBeenCalledWith(undefined);
+    await vi.waitFor(() =>
+      expect(row().querySelector('[aria-label="OpenCode sign-in code"]')?.textContent).toBe("MCTD-DMGG"),
+    );
+    expect(setupApi.opencodeKeySave).not.toHaveBeenCalled();
+  });
+
+  it("connects OpenCode with an API key", async () => {
+    vi.mocked(setupApi.aiProviders).mockResolvedValue(providers());
+    vi.mocked(setupApi.opencodeKeySave).mockResolvedValue({ ok: true });
+    await render(status({ auth: github, nextStep: 2 }));
+    const row = () => container.querySelector('[aria-label="OpenCode"]')!;
+    await vi.waitFor(() => expect(row().textContent).toContain("OpenCode Go plan or Zen credits"));
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="More OpenCode options"]')!.click(),
+    );
+    await act(async () =>
+      [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+        .find((item) => item.textContent?.startsWith("Use an API key"))!
+        .click(),
+    );
+    expect(row().textContent).toContain("Zen models on the workspace credits");
+    expect(button("Use free models")).toBeUndefined();
+    expect(button("Save key")?.disabled).toBe(true);
+    const key = row().querySelector<HTMLInputElement>('input[aria-label="OpenCode API key"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(key, "sk-opencode-fixture-key");
+      key.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    vi.mocked(setupApi.aiProviders).mockResolvedValue(providers({}, {}, { accounts: 1, ready: 1, label: "OpenCode" }));
+    await act(async () => button("Save key")!.click());
+    await settle();
+    expect(setupApi.opencodeKeySave).toHaveBeenCalledWith("sk-opencode-fixture-key", undefined);
+    await vi.waitFor(() => expect(row().textContent).toContain("Connected"));
+    expect(button("Continue")?.disabled).toBe(false);
   });
 
   it("lets Claude sign in with a pasted setup token", async () => {

@@ -16,6 +16,11 @@ import { http } from "./setupApiTransport";
 let githubFlowSecret: string | null = sessionStorage.getItem("ocr.githubFlowSecret");
 let claudeFlowSecret: string | null = sessionStorage.getItem("ocr.claudeFlowSecret");
 let codexFlowSecret: string | null = sessionStorage.getItem("ocr.codexFlowSecret");
+let opencodeFlowSecret: string | null = sessionStorage.getItem("ocr.opencodeFlowSecret");
+const opencodeHeaders = () => ({
+  "content-type": "application/json",
+  ...(opencodeFlowSecret ? { "x-flow-secret": opencodeFlowSecret } : {}),
+});
 export const setupApiAccess = {
   githubAuthStatus: () => http<GitHubAuthStatus>("/auth/github/status"),
   githubAuthStart: async (action: "login" | "refresh" = "login") => {
@@ -123,6 +128,41 @@ export const setupApiAccess = {
     if (codexFlowSecret) headers["x-flow-secret"] = codexFlowSecret;
     return http<{ running: boolean }>("/auth/codex/cancel", { method: "POST", headers, body: JSON.stringify({}) });
   },
+  /** Signs in to the OpenCode console with a one-time code, saving it to `accountId` or to a new account. */
+  opencodeAuthStart: async (accountId?: number) => {
+    await http<{ running: boolean }>("/auth/opencode/cancel", {
+      method: "POST",
+      headers: opencodeHeaders(),
+      body: JSON.stringify({}),
+    }).catch(() => undefined);
+    opencodeFlowSecret = null;
+    sessionStorage.removeItem("ocr.opencodeFlowSecret");
+    const result = await http<{ running: boolean; flowSecret?: string }>("/auth/opencode/start", {
+      method: "POST",
+      body: JSON.stringify(accountId ? { accountId } : {}),
+    });
+    if (result.flowSecret) {
+      opencodeFlowSecret = result.flowSecret;
+      sessionStorage.setItem("ocr.opencodeFlowSecret", result.flowSecret);
+    }
+  },
+  opencodeAuthEvents: () =>
+    http<{
+      running: boolean;
+      events: Array<{ kind: string; code?: string; url?: string; success?: boolean; message?: string }>;
+    }>("/auth/opencode/events", { headers: opencodeHeaders() }),
+  opencodeAuthCancel: () =>
+    http<{ running: boolean }>("/auth/opencode/cancel", {
+      method: "POST",
+      headers: opencodeHeaders(),
+      body: JSON.stringify({}),
+    }),
+  /** Saves an OpenCode API key, once OpenCode accepts it, to `accountId` or to a new account. */
+  opencodeKeySave: (key: string, accountId?: number) =>
+    http<{ ok: boolean }>("/auth/opencode/key", {
+      method: "POST",
+      body: JSON.stringify({ key, ...(accountId ? { accountId } : {}) }),
+    }),
   githubAuthLogout: () => http<{ ok: boolean }>("/auth/github/logout", { method: "POST", body: JSON.stringify({}) }),
   getSettings: () => http<Settings>("/settings"),
   saveSettingsBatch: (payload: {

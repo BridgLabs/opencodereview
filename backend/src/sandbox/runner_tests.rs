@@ -124,6 +124,20 @@ fn round_trip_and_stage_scope_validation() {
         receive::<Request>(&mut bytes.as_slice()).unwrap(),
         Request::Run { .. }
     ));
+    // OpenCode models carry their provider; no other provider's model may hold a path.
+    let with = |provider: &str, name: &str| {
+        let mut request = request.clone();
+        if let Request::Run { provider: p, model, .. } = &mut request {
+            *p = provider.into();
+            *model = name.into();
+        }
+        validate(&request)
+    };
+    assert!(with("opencode", "opencode-go/deepseek-v4.1-flash").is_ok());
+    assert!(with("opencode", "opencode/claude-opus-5-5").is_ok());
+    assert!(with("opencode", "anthropic/claude-opus-5-5").is_err());
+    assert!(with("opencode", "opencode/../x").is_err());
+    assert!(with("claude", "opencode/claude-opus-5-5").is_err());
     if let Request::Run { files, .. } = &mut request {
         files.insert("../auth/worker-token".into(), "invalid".into());
     }

@@ -7,6 +7,8 @@ import {
   CodexSignIn,
   CopyCode,
   friendlyError,
+  OpencodeKeySignIn,
+  OpencodeSignIn,
   useGithubFlow,
 } from "../components/AccessConnect";
 import { BrandLoadingIcon } from "../components/BrandLoading";
@@ -139,6 +141,7 @@ type SignIn = { provider: AiProvider["provider"]; method: "oauth" | "code" };
 const planDetail: Record<AiProvider["provider"], string> = {
   claude: "Pro, Max or Team plan",
   codex: "ChatGPT Plus or Pro plan",
+  opencode: "OpenCode Go plan or Zen credits",
 };
 
 /** The second way into each provider, offered from the row's menu. */
@@ -156,6 +159,12 @@ const alternative: Record<
     label: "Sign in with a code",
     hint: "Enter a one-time code on any device",
     icon: <Smartphone />,
+    method: "code",
+  },
+  opencode: {
+    label: "Use an API key",
+    hint: "An API key from your OpenCode workspace",
+    icon: <KeyRound />,
     method: "code",
   },
 };
@@ -217,15 +226,11 @@ export function PlanStep({ onBack, onContinue }: { onBack: () => void; onContinu
                         },
                       ]
                     : []),
-                  ...(alternative[provider.provider].method === "oauth"
-                    ? []
-                    : [
-                        {
-                          ...alternative[provider.provider],
-                          onSelect: () =>
-                            setSignIn({ provider: provider.provider, method: alternative[provider.provider].method }),
-                        },
-                      ]),
+                  {
+                    ...alternative[provider.provider],
+                    onSelect: () =>
+                      setSignIn({ provider: provider.provider, method: alternative[provider.provider].method }),
+                  },
                 ]
               : [];
             return (
@@ -260,7 +265,13 @@ export function PlanStep({ onBack, onContinue }: { onBack: () => void; onContinu
                 menu={open ? undefined : menu}
               >
                 {open &&
-                  (provider.provider === "codex" ? (
+                  (provider.provider === "opencode" ? (
+                    open.method === "code" ? (
+                      <OpencodeKeySignIn onDone={finish} onCancel={() => setSignIn(null)} />
+                    ) : (
+                      <OpencodeSignIn onDone={finish} onCancel={() => setSignIn(null)} />
+                    )
+                  ) : provider.provider === "codex" ? (
                     <CodexSignIn
                       mode={open.method === "code" ? "device" : "browser"}
                       onDone={finish}

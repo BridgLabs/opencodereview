@@ -75,7 +75,7 @@ pub(crate) fn start_review_job_with_intent(
     let (repo_id, full_name, number, head_sha) = with_db_raw(state, |db| db.pr_review_coords(pr_id))?;
     let repo = with_db_raw(state, |db| db.repo_by_id(repo_id))?;
     let model = crate::providers::claude::MODEL.to_string();
-    let (last_reviewed_sha, unresolved_review, skill_content, db_handle, run_id) = with_db_raw(state, |db| {
+    let (last_reviewed_sha, unresolved_review, skill_content, db_handle, run_id, engines) = with_db_raw(state, |db| {
         let last_reviewed_sha = if force_full {
             None
         } else {
@@ -90,9 +90,10 @@ pub(crate) fn start_review_job_with_intent(
         let provider = db
             .pick_ai_account(&[])?
             .map_or_else(|| "claude".to_string(), |account| account.provider);
-        let (engine_model, effort) = db.review_engine(&provider)?;
+        let (engine_model, effort) = db.review_engine_offline(&provider)?;
         let label = crate::providers::engines::label(&provider, &engine_model, &effort);
         let run_id = db.start_review_skeleton_with(pr_id, Some(&label))?;
+        let engines = review::PinnedEngines::current(db)?;
         db.set_force_full_next_review(pr_id, false)?;
         db.set_reprocess_next_review(pr_id, false)?;
         Ok((
@@ -101,6 +102,7 @@ pub(crate) fn start_review_job_with_intent(
             db.active_skill_content(),
             db.handle(),
             run_id,
+            engines,
         ))
     })?;
     let cancel = Arc::new(AtomicBool::new(false));
@@ -207,6 +209,7 @@ pub(crate) fn start_review_job_with_intent(
                 db_handle: Some(db_handle.clone()),
                 archive_dir: state.config.archive_dir(),
                 budget: None,
+                engines: Some(Arc::new(engines)),
             };
             Ok(inputs)
         })();

@@ -8,10 +8,11 @@ import { ACCOUNTS_QUERY_KEY, AccountsPanel, accountHealth, ProviderGlyph, provid
 import { ENGINES_QUERY_KEY } from "./EnginePicker";
 
 type Provider = AiAccount["provider"];
-const PROVIDERS: Provider[] = ["claude", "codex"];
+const PROVIDERS: Provider[] = ["claude", "codex", "opencode"];
 const planHint: Record<Provider, string> = {
   claude: "Claude Pro, Max or Team plan",
   codex: "ChatGPT Plus or Pro plan",
+  opencode: "OpenCode Go plan or Zen credits",
 };
 
 const groupClass = "flex flex-col overflow-hidden rounded-xl border border-line/70 bg-surface";

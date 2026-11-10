@@ -196,6 +196,7 @@ pub(crate) fn review(
         db_handle: Some(db.clone()),
         archive_dir,
         budget: Some(budget),
+        engines: None,
     };
     drop(database);
     let cancel = Arc::new(AtomicBool::new(false));

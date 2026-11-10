@@ -629,22 +629,35 @@ fn accounts_db(inputs: &ReviewInputs) -> Result<Database, String> {
     inputs.open_db()
 }
 
-/// The model and effort `provider` reviews with, read for each stage so a change in the app
-/// reaches the next stage. Diagnostics, which have no database, use the defaults.
-fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, String) {
-    if inputs.db_handle.is_none() {
-        return crate::providers::engines::default_engine(provider);
+/// The model and effort `provider` reviews with: the ones the review started with, so a change in
+/// the app reaches only reviews that start later. Without a pinned choice the current one is read
+/// (a review that started before OpenCode's list was read pins none for OpenCode, so each of its
+/// stages reads it), and diagnostics, which have no database, use the defaults.
+pub(crate) fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, String) {
+    if let Some(engine) = inputs.engines.as_ref().and_then(|pinned| pinned.engine(provider)) {
+        return engine;
     }
-    accounts_db(inputs)
-        .and_then(|db| db.review_engine(provider))
-        .unwrap_or_else(|_| crate::providers::engines::default_engine(provider))
+    if inputs.db_handle.is_none() {
+        return crate::providers::engines::default_engine(provider, &None);
+    }
+    // When the database cannot say which OpenCode accounts reviews can run on, no OpenCode model
+    // is guessed: the stage fails instead of running a model no usable account pays for.
+    let unknown = || (provider == "opencode").then(Vec::new);
+    let Ok(db) = accounts_db(inputs) else {
+        return crate::providers::engines::default_engine(provider, &unknown());
+    };
+    db.review_engine(provider).unwrap_or_else(|_| {
+        let plans = db.engine_plans(provider).unwrap_or_else(|_| unknown());
+        crate::providers::engines::default_engine(provider, &plans)
+    })
 }
 
 /// The account a stage runs on: the first ready account by priority, the first account's provider
 /// before the other, skipping the ones this stage already tried.
 fn next_account(inputs: &ReviewInputs, tried: &[i64]) -> Result<crate::db::AiAccount, String> {
     let db = accounts_db(inputs)?;
-    if let Some(account) = db.pick_ai_account(tried)? {
+    let preferred = inputs.engines.as_ref().and_then(|pinned| pinned.provider.as_deref());
+    if let Some(account) = db.pick_ai_account_preferring(tried, preferred)? {
         return Ok(account);
     }
     Err(match db.next_ai_account_reset()? {

@@ -79,6 +79,7 @@ pub(super) fn review_inputs(depth: &str, threshold: usize, chunk_size: usize) ->
         db_handle: Some(crate::db::Db::for_test()),
         archive_dir: std::path::PathBuf::from("review-archives"),
         budget: None,
+        engines: None,
     }
 }
 
@@ -2354,4 +2355,55 @@ fn codex_turn_usage_counts_cached_input_separately() {
         (1000, 200, 300)
     );
     assert_eq!(usage.model.as_deref(), Some("codex"));
+}
+
+#[test]
+fn opencode_step_finish_events_sum_tokens() {
+    let raw = [
+        r#"{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":800,"output":150,"reasoning":50,"cache":{"read":120,"write":30}},"cost":0.01}}"#,
+        r#"{"type":"text","part":{"type":"text","text":"{}"}}"#,
+        r#"{"type":"step_finish","part":{"type":"step-finish","tokens":{"input":200,"output":100,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0.002}}"#,
+    ].join("\n");
+    let mut per_model = std::collections::HashMap::new();
+    collect_usage(&super::transcript_events(&raw).unwrap(), &mut per_model);
+    let usage = finalize_usage(per_model);
+    assert_eq!(
+        (
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_read_tokens,
+            usage.cache_creation_tokens
+        ),
+        (1000, 300, 120, 30)
+    );
+    assert_eq!(usage.model.as_deref(), Some("opencode"));
+}
+
+#[test]
+fn stages_record_the_model_they_ran_on() {
+    let mut inputs = review_inputs("auto", 0, 0);
+    inputs.engines = Some(std::sync::Arc::new(super::PinnedEngines {
+        provider: Some("opencode".into()),
+        engines: vec![
+            ("opencode".into(), "opencode/deepseek-v4.1-flash".into(), "high".into()),
+            ("codex".into(), "gpt-5.5".into(), "medium".into()),
+        ],
+    }));
+    let usage = |model: Option<&str>| super::RunUsage {
+        model: model.map(str::to_string),
+        ..Default::default()
+    };
+    assert_eq!(
+        super::stage_model(&inputs, &usage(Some("opencode"))),
+        "opencode/deepseek-v4.1-flash"
+    );
+    assert_eq!(super::stage_model(&inputs, &usage(Some("codex"))), "gpt-5.5");
+    assert_eq!(
+        super::stage_model(&inputs, &usage(Some("claude-opus-5-5"))),
+        "claude-opus-5-5"
+    );
+    assert_eq!(
+        super::stage_model(&inputs, &usage(None)),
+        "opencode/deepseek-v4.1-flash"
+    );
 }
