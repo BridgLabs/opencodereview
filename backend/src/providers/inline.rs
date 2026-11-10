@@ -10,7 +10,7 @@ const PROMPT_LIMIT: usize = 200_000;
 /// Rendered bytes of prepared files printed into a Claude or Codex prompt, about 40,000 tokens.
 const RENDERED_BYTES: usize = 160_000;
 
-const READING: &str = "The pull request text, the review methodology, the orientation files and the diff are printed at the end of this prompt with line numbers, so do not read them again. Changed, related and convention files are not printed: read them in bounded line ranges when a check needs more than the diff shows, and search for relevant callers, guards and tests. Line numbers are not part of the code: quotes must be the exact text of the line, without its number.";
+const READING: &str = "Prepared files are printed at the end of this prompt with line numbers: do not read the printed ones again, and read the ones listed there as not printed. Changed, related and convention files are never printed: read them in bounded line ranges when a check needs more than the diff shows, and search for relevant callers, guards and tests. Line numbers are not part of the code: quotes must be the exact text of the line, without its number.";
 
 /// Where a prepared file goes in the printed evidence, or `None` for files the model reads only
 /// when it needs them (stage metadata, related files).
@@ -45,16 +45,16 @@ fn lean_rank(name: &str) -> Option<u8> {
     }
 }
 
-/// Bytes `content` takes once printed: its text, a header and a number before each line.
-pub(crate) fn rendered(content: &str) -> usize {
-    content.len() + 8 * content.lines().count() + 300
+/// Bytes `content` takes once printed: its text, its header and a number before each line.
+pub(crate) fn rendered(name: &str, content: &str) -> usize {
+    content.len() + 8 * content.lines().count() + name.len() + 32
 }
 
 /// The prepared files to print, in order and within `budget` bytes of `cost`, and those left out.
 pub(crate) fn select(
     files: &BTreeMap<String, String>,
     budget: usize,
-    cost: fn(&str) -> usize,
+    cost: fn(&str, &str) -> usize,
     rank: fn(&str) -> Option<u8>,
 ) -> (Vec<(&str, &str)>, Vec<&str>) {
     let mut ranked = files
@@ -65,7 +65,7 @@ pub(crate) fn select(
     ranked.sort();
     let (mut printed, mut left, mut bytes) = (Vec::new(), Vec::new(), 0);
     for (_, _, name, content) in ranked {
-        let size = cost(content);
+        let size = cost(name, content);
         if bytes + size <= budget {
             bytes += size;
             printed.push((name, content));
@@ -169,6 +169,21 @@ mod tests {
             assert!(!printed.contains(left), "{left}");
         }
         assert!(adapted.len() <= PROMPT_LIMIT);
+    }
+
+    #[test]
+    fn a_diff_too_large_to_print_is_listed_to_read_and_never_called_printed() {
+        let prompt = stage_prompt();
+        let files = BTreeMap::from([
+            ("context/PR.md".to_string(), "# Title".to_string()),
+            ("context/PR_DIFF.patch".to_string(), "+x\n".repeat(RENDERED_BYTES)),
+        ]);
+        let adapted = adapt_prompt(&prompt, &files);
+        assert!(adapted.contains("==> /work/context/PR.md <=="));
+        assert!(adapted.contains("Not printed, read them when needed: /work/context/PR_DIFF.patch."));
+        // The reading rule names no file as printed: it points at the list.
+        assert!(adapted.contains("read the ones listed there as not printed"));
+        assert!(!READING.contains("the diff are printed"));
     }
 
     #[test]
