@@ -5,6 +5,8 @@ use std::sync::OnceLock;
 
 /// OpenCode Console device codes expire after 10 minutes.
 const FLOW_TIMEOUT: Duration = Duration::from_secs(600);
+/// How long the CLI calls after the approval may take; they only read the sign-in and list models.
+const CLI_TIMEOUT: Duration = Duration::from_secs(60);
 /// Where the Console asks the user to approve a device code.
 const DEVICE_PAGE: &str = "https://opencode.ai/console/device?";
 
@@ -23,29 +25,39 @@ const KEY_CHECKS: &[(&str, &str)] = &[
     ("zen", "https://opencode.ai/zen/v1/models"),
 ];
 
+/// The plans whose check accepted the key, from each check's HTTP status (None when OpenCode
+/// could not be reached). A plan is left out only when OpenCode refuses the key for it: any other
+/// failure fails the whole check, so a key is never saved without a plan it pays for.
+fn accepted_plans(checks: &[(&'static str, Option<u16>)]) -> Result<Vec<&'static str>, String> {
+    let mut plans = Vec::new();
+    for (plan, status) in checks {
+        match status {
+            Some(200..=299) => plans.push(*plan),
+            Some(401 | 403) => {}
+            Some(status) => return Err(format!("OpenCode could not check the key (HTTP {status}); try again")),
+            None => return Err("Could not reach OpenCode to check the key; try again".into()),
+        }
+    }
+    if plans.is_empty() {
+        return Err("OpenCode rejected that key".into());
+    }
+    Ok(plans)
+}
+
 /// The plans OpenCode accepts `key` for, or why it accepts it for none.
 fn verify_key(key: &str) -> Result<Vec<&'static str>, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
         .build()
         .map_err(|error| error.to_string())?;
-    let mut plans = Vec::new();
-    let mut last = None;
-    for (plan, url) in KEY_CHECKS {
-        let Ok(response) = client.get(*url).bearer_auth(key).send() else {
-            last = Some("Could not reach OpenCode to check the key; try again".to_string());
-            continue;
-        };
-        match response.status().as_u16() {
-            200..=299 => plans.push(*plan),
-            401 | 403 => last = last.or(Some("OpenCode rejected that key".into())),
-            status => last = Some(format!("OpenCode could not check the key (HTTP {status}); try again")),
-        }
-    }
-    if plans.is_empty() {
-        return Err(last.unwrap_or_else(|| "OpenCode rejected that key".into()));
-    }
-    Ok(plans)
+    let checks = KEY_CHECKS
+        .iter()
+        .map(|(plan, url)| {
+            let status = client.get(*url).bearer_auth(key).send().ok();
+            (*plan, status.map(|response| response.status().as_u16()))
+        })
+        .collect::<Vec<_>>();
+    accepted_plans(&checks)
 }
 
 /// Saves `raw` to `account` (a re-sign-in) or to a new OpenCode account named `label`.
@@ -83,7 +95,9 @@ fn store_account(
     let stored =
         crate::accounts::store_opencode_auth(id, raw).and_then(|()| crate::accounts::store_opencode_plans(id, plans));
     if stored.is_err() && account.is_none() {
+        // The folder goes with the row: a sign-in without its account would still reach runners.
         let _ = db.delete_ai_account(id);
+        let _ = crate::accounts::remove(id);
     }
     stored?;
     db.reset_ai_account_status(id)
@@ -176,24 +190,69 @@ pub(crate) fn plans_listed(models: &str) -> Vec<&'static str> {
         .collect()
 }
 
+/// Runs `command` to its end and returns its exit status and output. It is killed when the flow
+/// is cancelled or it takes longer than `limit`, so the thread watching a sign-in always finishes.
+fn bounded_output(
+    mut command: Command,
+    cancel: &AtomicBool,
+    limit: Duration,
+) -> Result<(std::process::ExitStatus, String), String> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("Could not start the OpenCode CLI: {error}"))?;
+    let pid = child.id();
+    let stdout = child.stdout.take();
+    let reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(stdout) = stdout {
+            let _ = stdout.take(1 << 20).read_to_end(&mut bytes);
+        }
+        String::from_utf8_lossy(&bytes).into_owned()
+    });
+    let started = Instant::now();
+    loop {
+        let stopped = match child.try_wait() {
+            Ok(Some(status)) => return Ok((status, reader.join().unwrap_or_default())),
+            Ok(None) if cancel.load(Ordering::Relaxed) => "Sign-in was cancelled.".to_string(),
+            Ok(None) if started.elapsed() > limit => "OpenCode did not answer in time. Start again.".to_string(),
+            Ok(None) => {
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            Err(error) => error.to_string(),
+        };
+        crate::review::kill_tree(pid, &mut child);
+        return Err(stopped);
+    }
+}
+
 /// The signed-in Console credential, the email it signed in with and its workspace's plans.
-fn signed_in(home: &std::path::Path) -> Result<(String, Option<String>, Vec<&'static str>), String> {
-    let export = opencode(home)
-        .args([
-            "auth",
-            "export",
-            crate::providers::opencode::CONSOLE_INTEGRATION,
-            "--standalone",
-        ])
-        .output()
-        .map_err(|error| format!("Could not start the OpenCode CLI: {error}"))?;
-    let raw = crate::providers::opencode::exported(&String::from_utf8_lossy(&export.stdout))
+fn signed_in(
+    home: &std::path::Path,
+    cancel: &AtomicBool,
+) -> Result<(String, Option<String>, Vec<&'static str>), String> {
+    let mut export = opencode(home);
+    export.args([
+        "auth",
+        "export",
+        crate::providers::opencode::CONSOLE_INTEGRATION,
+        "--standalone",
+    ]);
+    let (status, exported) = bounded_output(export, cancel, CLI_TIMEOUT)?;
+    let raw = Some(exported)
+        .filter(|_| status.success())
+        .and_then(|exported| crate::providers::opencode::exported(&exported))
         .ok_or("OpenCode sign-in did not finish. Start again.")?;
-    let models = opencode(home)
-        .args(["models", "--standalone"])
-        .output()
-        .map_err(|error| format!("Could not start the OpenCode CLI: {error}"))?;
-    let plans = plans_listed(&String::from_utf8_lossy(&models.stdout));
+    let mut models = opencode(home);
+    models.args(["models", "--standalone"]);
+    let (status, listed) = bounded_output(models, cancel, CLI_TIMEOUT)?;
+    // A list that could not be read says nothing about the workspace's plans.
+    if !status.success() || listed.trim().is_empty() {
+        return Err("Signed in to OpenCode, but could not read its workspace's models. Start again.".into());
+    }
+    let plans = plans_listed(&listed);
     if plans.is_empty() {
         return Err("Signed in to OpenCode, but its workspace offers no Go or Zen models. Start again.".into());
     }
@@ -312,7 +371,7 @@ pub(crate) fn start_opencode_auth(request: &Request, state: &SharedState) -> Res
             match child.try_wait() {
                 Ok(Some(status)) => {
                     let saved = if status.success() {
-                        signed_in(&home)
+                        signed_in(&home, &cancel)
                             .and_then(|(raw, label, plans)| store_account(&db_handle, account, &raw, label, &plans))
                     } else {
                         Err("OpenCode sign-in did not finish. Start again.".into())
@@ -364,6 +423,51 @@ mod tests {
         assert!(serde_json::from_str::<OpencodeKey>(r#"{"key":"x","model":"opencode/big-pickle"}"#).is_err());
         let request: OpencodeKey = serde_json::from_str(r#"{"key":"x","accountId":3}"#).unwrap();
         assert_eq!(request.account_id, Some(3));
+    }
+
+    #[test]
+    fn a_key_loses_a_plan_only_when_opencode_refuses_it() {
+        assert_eq!(
+            accepted_plans(&[("go", Some(200)), ("zen", Some(200))]),
+            Ok(vec!["go", "zen"])
+        );
+        assert_eq!(
+            accepted_plans(&[("go", Some(401)), ("zen", Some(200))]),
+            Ok(vec!["zen"])
+        );
+        assert_eq!(
+            accepted_plans(&[("go", Some(403)), ("zen", Some(401))]),
+            Err("OpenCode rejected that key".into())
+        );
+        // A check that failed for another reason never saves the key without that plan.
+        for failed in [None, Some(500), Some(429)] {
+            let error = accepted_plans(&[("go", failed), ("zen", Some(200))]).unwrap_err();
+            assert!(error.ends_with("try again"), "{error}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cli_call_after_the_approval_ends_when_cancelled_or_late() {
+        let shell = |script: &str| {
+            let mut command = Command::new("/bin/sh");
+            command.args(["-c", script]).stdin(Stdio::null());
+            command
+        };
+        let running = AtomicBool::new(false);
+        let (status, output) = bounded_output(shell("echo listed"), &running, Duration::from_secs(30)).unwrap();
+        assert!(status.success());
+        assert_eq!(output, "listed\n");
+        let started = Instant::now();
+        assert_eq!(
+            bounded_output(shell("sleep 30"), &running, Duration::from_millis(200)).unwrap_err(),
+            "OpenCode did not answer in time. Start again."
+        );
+        assert_eq!(
+            bounded_output(shell("sleep 30"), &AtomicBool::new(true), Duration::from_secs(30)).unwrap_err(),
+            "Sign-in was cancelled."
+        );
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 
     #[test]

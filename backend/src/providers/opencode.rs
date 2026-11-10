@@ -77,13 +77,13 @@ pub(crate) fn config(model: &str) -> Value {
 /// only what they leave out. Part of the chunk cache key.
 pub(crate) const PROMPT_ADAPTATION: &str = "opencode-inline-evidence-v1";
 
-/// Bytes of prepared files printed into an OpenCode prompt, about 40,000 tokens. Files past it
-/// are listed for the model to read.
+/// Bytes of printed prepared files (line numbers and headers included) an OpenCode prompt gets,
+/// about 40,000 tokens. Files past it are listed for the model to read.
 pub(crate) const INLINE_BYTES: usize = 160_000;
 
 const BATCHED_READING: &str = "Read the prepared files whole and early instead of in small ranges: print PR.md, skill/SKILL.md, PR_DIFF.patch and every assigned changed file with line numbers in as few shell commands as possible, several files per command (for example /usr/bin/cat -n -- 'a' 'b'). Then search for relevant callers, guards and tests, combining several searches in one command. Line numbers printed by cat -n are not part of the code: quotes must be the exact text of the line, without its number.";
 
-const INLINE_READING: &str = "The prepared files are printed at the end of this prompt with line numbers, as /usr/bin/cat -n prints them, so do not read them again; read whole, several per command, only the prepared files listed there as not printed. Then search for relevant callers, guards and tests, combining several searches in one command. Line numbers are not part of the code: quotes must be the exact text of the line, without its number.";
+const INLINE_READING: &str = "The prepared files are printed at the end of this prompt with line numbers, as /usr/bin/cat -n prints them, so do not read the printed ones again; read whole, several per command, the prepared files listed there as not printed and any other prepared file these instructions name. Then search for relevant callers, guards and tests, combining several searches in one command. Line numbers are not part of the code: quotes must be the exact text of the line, without its number.";
 
 const BATCHED_COMMANDS: &str = "\nSnapshot access through the shell tool is read-only: use /usr/bin/cat -n, /usr/bin/sed -n, /usr/bin/grep -r -n -F, /usr/bin/head, /usr/bin/wc and /usr/bin/ls on absolute paths within /work or /evidence/snapshot, and combine several of them in one shell call with ; when you need more than one file or search. Project commands, other shell operations, network and writes remain forbidden. Read assigned files before adding them to reviewedFiles.\n";
 
@@ -96,15 +96,25 @@ fn inline_rank(name: &str) -> Option<u8> {
         "skill/SKILL.md" => 1,
         "CONTEXT.md" => 2,
         "REVIEW_MAP.md" => 3,
-        "PR_DIFF.patch" => 4,
-        "PUBLICATION_DIFF.patch" => 5,
-        _ if name.starts_with("conventions/") => 6,
-        _ if name.starts_with("changed/") || name.starts_with("integration/") => 7,
+        // Files the prompt tells the model to read when they exist.
+        "PENDING_REVIEW.md" => 4,
+        "CONTEXT_RETRIEVAL.md" => 5,
+        "CHUNK_SCOPE" => 6,
+        "PR_DIFF.patch" => 7,
+        "PUBLICATION_DIFF.patch" => 8,
+        _ if name.starts_with("conventions/") => 9,
+        _ if name.starts_with("changed/") || name.starts_with("integration/") => 10,
         _ => return None,
     })
 }
 
-/// The prepared files to print, in order and within [`INLINE_BYTES`], and those left out.
+/// Bytes `content` takes once printed: its text, its header and a number before each line.
+fn printed_bytes(name: &str, content: &str) -> usize {
+    content.len() + 8 * content.lines().count() + name.len() + 32
+}
+
+/// The prepared files to print, in order and within [`INLINE_BYTES`] of printed text, and those
+/// left out.
 fn inline_files(files: &BTreeMap<String, String>) -> (Vec<(&str, &str)>, Vec<&str>) {
     let mut ranked = files
         .iter()
@@ -115,7 +125,8 @@ fn inline_files(files: &BTreeMap<String, String>) -> (Vec<(&str, &str)>, Vec<&st
     // Smaller files first within a rank, so one large file never crowds out several others.
     ranked.sort();
     let (mut printed, mut left, mut bytes) = (Vec::new(), Vec::new(), 0);
-    for (_, size, name, content) in ranked {
+    for (_, _, name, content) in ranked {
+        let size = printed_bytes(name, content);
         if bytes + size <= INLINE_BYTES {
             bytes += size;
             printed.push((name, content));
@@ -489,6 +500,12 @@ mod tests {
             ("context/changed/src/big.rs".to_string(), big),
             ("context/related/src/caller.rs".to_string(), "a();".to_string()),
             ("context/STAGE.json".to_string(), "{}".to_string()),
+            ("context/PENDING_REVIEW.md".to_string(), "Open finding".to_string()),
+            // Fits as raw bytes, not once every short line gets its number.
+            (
+                "context/changed/src/lines.rs".to_string(),
+                "x\n".repeat(INLINE_BYTES / 4),
+            ),
         ]);
         let adapted = adapt_prompt(&prompt, &files);
         assert!(adapted.contains(INLINE_READING) && !adapted.contains(BATCHED_READING));
@@ -506,7 +523,17 @@ mod tests {
         assert!(printed.contains("     1\t# Title\n     2\tBody\n"));
         assert!(printed.contains("     2\t\tguard();\n"));
         // What passes the budget is listed to read; metadata and related files are left to search.
-        assert!(printed.contains("Not printed, read them when needed: /work/context/changed/src/big.rs."));
+        assert!(printed.contains(
+            "Not printed, read them when needed: /work/context/changed/src/lines.rs, /work/context/changed/src/big.rs."
+        ));
+        assert!(printed.len() <= INLINE_BYTES + 1_000);
+        // A file the prompt says to read when present is printed, before the diff.
+        assert!(
+            printed
+                .find("/work/context/PENDING_REVIEW.md <==\n     1\tOpen finding")
+                .unwrap()
+                < printed.find("/work/context/PR_DIFF.patch <==").unwrap()
+        );
         assert!(!printed.contains("==> /work/context/changed/src/big.rs <=="));
         assert!(!printed.contains("caller.rs") && !printed.contains("STAGE.json"));
         assert!(printed.ends_with("==> end of prepared files <==\n"));

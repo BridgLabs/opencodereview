@@ -947,5 +947,9 @@ mod tests;
 mod concurrency_tests;
 
 #[cfg(test)]
+#[path = "engines_tests.rs"]
+mod engines_tests;
+
+#[cfg(test)]
 #[path = "instances_tests.rs"]
 mod instances_tests;

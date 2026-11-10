@@ -102,6 +102,8 @@ export function EnginePicker() {
         onClick={() => {
           setView(null);
           setAdding(false);
+          // A model list that could not be loaded is asked for again each time the menu opens.
+          if (!open) void engines.refetch();
           setOpen(!open);
         }}
       >

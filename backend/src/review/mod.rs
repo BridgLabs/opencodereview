@@ -212,16 +212,19 @@ pub struct PinnedEngines {
 }
 
 impl PinnedEngines {
-    /// The current choice in `db`, to keep for a review starting now.
+    /// The current choice in `db`, to keep for a review starting now. It is read without asking
+    /// opencode.ai, since a review starts under the lock every other start waits on; a provider
+    /// with no model to pin yet (OpenCode before its list was read) is left out, so its stages
+    /// read the choice when they run.
     pub(crate) fn current(db: &Database) -> Result<Self, String> {
         let provider = db.pick_ai_account(&[])?.map(|account| account.provider);
-        let engines = crate::providers::engines::PROVIDERS
-            .iter()
-            .map(|(provider, _)| {
-                db.review_engine(provider)
-                    .map(|(model, effort)| (provider.to_string(), model, effort))
-            })
-            .collect::<Result<_, String>>()?;
+        let mut engines = Vec::new();
+        for (provider, _) in crate::providers::engines::PROVIDERS {
+            let (model, effort) = db.review_engine_offline(provider)?;
+            if !model.is_empty() {
+                engines.push((provider.to_string(), model, effort));
+            }
+        }
         Ok(Self { provider, engines })
     }
 
