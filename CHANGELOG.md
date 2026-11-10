@@ -6,6 +6,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-10
+
+### Added
+
+- Support rootless Podman on Linux with the native podman-compose provider, using
+  the same Compose stack and runner sandbox as Docker. Document provider selection
+  and add container checks for startup and persistence without real AI calls.
+- Review with OpenCode: sign in to the OpenCode console with a one-time code, like ChatGPT, or
+  connect an OpenCode API key, which OpenCodeReview checks with OpenCode before saving it. The top bar
+  lists OpenCode's models straight from opencode.ai, refreshed hourly: Go models on the Go plan and
+  Zen models on the workspace credits, each with the efforts OpenCode offers for it, and only for
+  the plans your OpenCode workspace has. Free models are left out. OpenCode accounts take part in failover like Claude and ChatGPT ones. Review runners run
+  OpenCode 2.2.6 with a private server, no project configuration, plugins, MCP servers, skills, free
+  models or web tools, and may reach `opencode.ai` only. Settings doesn't show OpenCode usage limits;
+  check them in your OpenCode workspace, and turn off Go's Extra Usage there to keep Go reviews
+  within the plan.
+- Each review stage records how many model round trips and tool calls it took, the reasoning
+  tokens the CLI reported and the time spent on the provider. The stage breakdown of a review
+  returns them.
+
+### Changed
+
+- A review keeps the provider, model and effort chosen when it started. Switching the engine in
+  the top bar no longer moves reviews that are already running; it applies to the next ones.
+- OpenCode reviews read the prepared files several at a time instead of one small range per
+  step, so each chunk takes far fewer model steps. Claude and Codex prompts are unchanged.
+- OpenCode reviews get the prepared pull request text, skill, diff and changed files in their
+  prompt instead of reading them step by step, and split into chunks of up to three files that
+  run in parallel once a review has more than three. Claude and Codex reviews are unchanged.
+
+### Fixed
+
+- Wait for PostgreSQL's final TCP listener before starting the backend, rather than
+  accepting the temporary initialization server as ready.
+- Keep runtime smoke images separate from installed images, remove only the smoke's
+  image tags after success or failure, and refuse projects with stopped containers.
+- Reviews no longer fail with "Invalid operational runner configuration" after a few updates: the
+  sockets that replaced review runners leave behind are now cleared before they are counted.
+- A chunk reviewed with one provider, model or effort is no longer reused for a review that runs
+  on another.
+- An OpenCode or Codex review no longer fails when the model writes report fields beside the
+  report, sends the report without its wrapper, leaves its JSON fence unclosed, or repeats the
+  report's snapshot identity in every finding.
+- An OpenCode or Codex review no longer fails when the model writes the contract version as a
+  string.
+- A review no longer fails when a finding cites code without its revision but the quote is the
+  exact text at the pull request's head; the citation is bound to the head.
+- Posting a review of a commit that already has a posted review now says so, instead of a generic
+  "settings changed or publication in progress" error.
+
+### Security
+
+- Update the bundled SQLite used by `ocr-server import-sqlite` to a version without
+  CVE-2026-119375 (RUSTSEC-2026-0459), which could expose page-cache memory when opening a
+  database file together with a write-ahead log written by a less trusted party.
+
 ## [0.2.0] - 2026-11-04
 
 ### Changed
@@ -103,7 +159,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Source-available project files: PolyForm Small Business 1.0.0 license, NOTICE, contributing guide, code of
   conduct, security policy, issue and pull request templates.
 
-[Unreleased]: https://github.com/BridgLabs/opencodereview/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/BridgLabs/opencodereview/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/BridgLabs/opencodereview/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/BridgLabs/opencodereview/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/BridgLabs/opencodereview/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/BridgLabs/opencodereview/releases/tag/v0.1.0
