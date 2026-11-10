@@ -770,6 +770,32 @@ fn finding_selection_is_versioned_and_locked_during_publication() {
     assert!(!db.finding_audit(pr_id, run_id).unwrap().editable);
     assert!(db.save_finding_selection(pr_id, run_id, second.revision, &[]).is_err());
     assert!(db.finding_audit(pr_id + 100, run_id).is_err());
+    // Another review of the posted commit and base is refused with the reason, not a generic one.
+    assert!(db
+        .review_post_refusal(run_id, true)
+        .starts_with("Review, finding selection"));
+    // A run that cannot be read still gets the general refusal, never a database error.
+    assert_eq!(
+        db.review_post_refusal(i64::MAX, false),
+        crate::db::post_refusal(false, false)
+    );
+    let other: i64 = db
+        .handle()
+        .open()
+        .unwrap()
+        .query_row(
+            "INSERT INTO review_runs (pr_id, head_sha, status, created_at, updated_at, reviewed_base_sha, stacked_base_ref)
+             SELECT pr_id, head_sha, 'preview', created_at, updated_at, reviewed_base_sha, stacked_base_ref
+             FROM review_runs WHERE id = $1 RETURNING id",
+            crate::pg_params![run_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    for automatic in [true, false] {
+        assert!(db
+            .review_post_refusal(other, automatic)
+            .starts_with("A review of this commit was already posted to GitHub."));
+    }
     drop(db);
     std::fs::remove_dir_all(root).unwrap();
 }

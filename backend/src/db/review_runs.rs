@@ -1,5 +1,15 @@
 use super::*;
 
+/// The message for a post `try_begin_review_post` refused: `posted` when another review of the
+/// same commit and base is already on GitHub, `automatic` for the auto-post flow.
+pub(crate) fn post_refusal(posted: bool, automatic: bool) -> &'static str {
+    match (posted, automatic) {
+        (true, _) => "A review of this commit was already posted to GitHub. A new commit can be reviewed and posted again.",
+        (false, true) => "Review, finding selection, or automatic publishing settings changed, or publication is already in progress. Reload before retrying.",
+        (false, false) => "This review or its finding selection changed, or publication is already in progress. Reload before retrying.",
+    }
+}
+
 impl Database {
     /// Serializes changes to one pull request's review state. SQLite let one writer in at a time;
     /// Postgres lets concurrent transactions interleave their checks and writes, which could post
@@ -743,6 +753,27 @@ impl Database {
         ).map_err(|error| error.to_string())?;
         tx.commit().map_err(|error| error.to_string())?;
         Ok(changed == 1)
+    }
+
+    /// Why `try_begin_review_post` refused `run_id`, worded for the user. A post of a commit and
+    /// base another review already posted is the common case, so it gets its own message. When
+    /// that cannot be read the refusal keeps its general wording.
+    pub fn review_post_refusal(&self, run_id: i64, automatic: bool) -> String {
+        let posted = self
+            .conn
+            .query_row(
+                "SELECT EXISTS (
+                   SELECT 1 FROM review_runs run JOIN review_runs other
+                     ON other.pr_id = run.pr_id AND other.head_sha = run.head_sha AND other.id != run.id
+                   WHERE run.id = $1 AND other.status = 'posted'
+                     AND other.stacked_base_ref IS NOT DISTINCT FROM run.stacked_base_ref
+                     AND other.reviewed_base_sha IS NOT DISTINCT FROM run.reviewed_base_sha
+                 )",
+                params![run_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        post_refusal(posted, automatic).to_string()
     }
 
     pub fn reset_review_posting(&self, run_id: i64) -> Result<(), String> {
