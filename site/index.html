@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>OpenCodeReview — a code reviewer for people who ship alone</title>
-  <meta name="description" content="Self-hosted AI code review for indie hackers and solo SaaS builders. Every pull request gets reviewed by Claude Code or Codex with the Claude or ChatGPT account you already have.">
+  <meta name="description" content="Self-hosted AI code review for indie hackers and solo SaaS builders. Every pull request gets reviewed by Claude Code, Codex or OpenCode with the Claude, ChatGPT or OpenCode plan you already have.">
   <link rel="canonical" href="https://opencodereview.run/">
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
   <meta name="theme-color" content="#111111">
@@ -13,16 +13,16 @@
   <meta property="og:locale" content="en_US">
   <meta property="og:url" content="https://opencodereview.run/">
   <meta property="og:title" content="OpenCodeReview — a code reviewer for people who ship alone">
-  <meta property="og:description" content="Every pull request reviewed by the Claude or ChatGPT account you already have. Self-hosted, with the code on GitHub.">
-  <meta property="og:image" content="https://opencodereview.run/og.png?v=3">
+  <meta property="og:description" content="Every pull request reviewed by the AI plan you already have. Self-hosted, with the code on GitHub.">
+  <meta property="og:image" content="https://opencodereview.run/og.png?v=4">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="OpenCodeReview: every pull request, reviewed. A diff with a high-severity review comment from the OpenCodeReview mascot.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="OpenCodeReview — a code reviewer for people who ship alone">
-  <meta name="twitter:description" content="Every pull request reviewed by the Claude or ChatGPT account you already have. Self-hosted, with the code on GitHub.">
-  <meta name="twitter:image" content="https://opencodereview.run/og.png?v=3">
+  <meta name="twitter:description" content="Every pull request reviewed by the AI plan you already have. Self-hosted, with the code on GitHub.">
+  <meta name="twitter:image" content="https://opencodereview.run/og.png?v=4">
   <meta name="twitter:image:alt" content="OpenCodeReview: every pull request, reviewed. A diff with a high-severity review comment from the OpenCodeReview mascot.">
   <link rel="icon" href="favicon.ico" sizes="32x32">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
@@ -59,7 +59,7 @@
         "@id": "https://opencodereview.run/#software",
         "name": "OpenCodeReview",
         "url": "https://opencodereview.run/",
-        "description": "Self-hosted, source-available AI code review for GitHub pull requests. Reviews run on the Claude Code or Codex CLI with the Claude or ChatGPT account you already have.",
+        "description": "Self-hosted, source-available AI code review for GitHub pull requests. Reviews run on the Claude Code, Codex or OpenCode CLI with the Claude, ChatGPT or OpenCode plan you already have.",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Linux, macOS, Windows (Docker)",
         "image": "https://opencodereview.run/og.png",
@@ -73,8 +73,8 @@
           "priceCurrency": "USD"
         },
         "featureList": [
-          "Reviews every GitHub pull request with Claude Code or Codex",
-          "Uses the Claude or ChatGPT account you already have",
+          "Reviews every GitHub pull request with Claude Code, Codex or OpenCode",
+          "Uses the Claude, ChatGPT or OpenCode plan you already have",
           "Fails over between several AI accounts when one hits its usage limit",
           "Indexes each repository for callers, dependencies, tests and convention files",
           "Checks every finding against the changed code before publishing it",
@@ -109,7 +109,7 @@
             "name": "Is OpenCodeReview really free?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "For individuals and companies under 100 people and $1M in yearly revenue, yes, including commercial use. Larger companies need a commercial license: write to contato@bridglabs.com. Reviews run on your own Claude or ChatGPT account, so the only cost is what you already pay your AI provider."
+              "text": "For individuals and companies under 100 people and $1M in yearly revenue, yes, including commercial use. Larger companies need a commercial license: write to contato@bridglabs.com. Reviews run on your own Claude, ChatGPT or OpenCode account, so the only cost is what you already pay your AI provider."
             }
           },
           {
@@ -117,7 +117,7 @@
             "name": "Which plans work?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Claude Pro, Max, Team or Enterprise through Claude Code, and ChatGPT plans that include Codex. Local models are not supported. You can connect several accounts; when one hits its usage limit, the review continues on the next."
+              "text": "Claude Pro, Max, Team or Enterprise through Claude Code, ChatGPT plans that include Codex, and OpenCode workspaces with a Go plan or Zen credits. Local models are not supported. You can connect several accounts; when one hits its usage limit, the review continues on the next."
             }
           },
           {
@@ -125,7 +125,7 @@
             "name": "Where does my code go?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Only to your AI provider. OpenCodeReview runs on your machine and sends the pull request's code to Anthropic or OpenAI with your own sign-in, the same way their CLIs do when you use them yourself. There are no OpenCodeReview servers and no telemetry."
+              "text": "Only to your AI provider. OpenCodeReview runs on your machine and sends the pull request's code to Anthropic, OpenAI or OpenCode with your own sign-in, the same way their CLIs do when you use them yourself. There are no OpenCodeReview servers and no telemetry."
             }
           },
           {
@@ -165,6 +165,7 @@
       <rect x="72" y="38" width="16" height="30" rx="8" fill="#0f1115" /><rect x="76" y="42" width="5" height="9" rx="2.5" fill="#fff" />
     </symbol>
     <symbol id="codex" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 4.2a4 4 0 0 1 6.9 2.6l-.1 5.4-4.6 2.7" /><path d="M12 4.2a4 4 0 0 1 6.9 2.6l-.1 5.4-4.6 2.7" transform="rotate(60 12 12)" /><path d="M12 4.2a4 4 0 0 1 6.9 2.6l-.1 5.4-4.6 2.7" transform="rotate(120 12 12)" /><path d="M12 4.2a4 4 0 0 1 6.9 2.6l-.1 5.4-4.6 2.7" transform="rotate(180 12 12)" /><path d="M12 4.2a4 4 0 0 1 6.9 2.6l-.1 5.4-4.6 2.7" transform="rotate(240 12 12)" /><path d="M12 4.2a4 4 0 0 1 6.9 2.6l-.1 5.4-4.6 2.7" transform="rotate(300 12 12)" /></g></symbol>
+    <symbol id="opencode" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><rect x="4.5" y="3.5" width="15" height="17" rx="1" /></g><rect x="8" y="11" width="8" height="6" fill="currentColor" /></symbol>
     <symbol id="claude" viewBox="0 0 24 24"><g stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" /></g></symbol>
   </svg>
 
@@ -187,7 +188,7 @@
       <div class="wrap hero-copy">
         <p class="eyebrow">For indie hackers and solo SaaS builders</p>
         <h1 class="headline">Nobody reviews your code.<span>Now something does.</span></h1>
-        <p class="lede">Every pull request reviewed by the <strong><svg class="provider-mark" style="color:var(--claude)"><use href="#claude" /></svg>Claude</strong> or <strong><svg class="provider-mark"><use href="#codex" /></svg>ChatGPT</strong> account you already have.</p>
+        <p class="lede">Every pull request reviewed by the <strong><svg class="provider-mark" style="color:var(--claude)"><use href="#claude" /></svg>Claude</strong> or <strong><svg class="provider-mark"><use href="#codex" /></svg>ChatGPT</strong> or <strong><svg class="provider-mark"><use href="#opencode" /></svg>OpenCode</strong> plan you already have.</p>
         <div class="ctas"><a class="btn btn-light btn-lg" href="https://github.com/BridgLabs/opencodereview">Run it free<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg></a></div>
         <p class="trigger">Free · 5 minutes with Docker · No card</p>
       </div>
@@ -227,7 +228,7 @@
         <h2 class="h2">It's for you if…</h2>
         <ol class="stagger">
           <li><span>You <strong>ship alone</strong>, and nobody reviews your code.</span></li>
-          <li><span>You <strong>already pay for Claude or ChatGPT</strong>.</span></li>
+          <li><span>You <strong>already pay for Claude, ChatGPT or OpenCode</strong>.</span></li>
           <li><span>You've <strong>shipped a bug</strong> a second pair of eyes would have caught.</span></li>
         </ol>
       </div>
@@ -240,7 +241,7 @@
       <ol class="steps stagger">
         <li><h3>Start it</h3><p>One Docker command.</p></li>
         <li><h3>Pick your repos</h3><p>Sign in with GitHub.</p></li>
-        <li><h3>Connect your AI</h3><p>Claude or ChatGPT, in the browser.</p></li>
+        <li><h3>Connect your AI</h3><p>Claude, ChatGPT or OpenCode, in the browser.</p></li>
         <li><h3>Open a pull request</h3><p>The review lands in minutes.</p></li>
       </ol>
       <div class="run reveal">
@@ -307,7 +308,7 @@
                 <ul><li>Repositories and index</li><li>AI sign-ins</li><li>Review history</li></ul>
               </div>
               <div class="wire"><span>review calls</span></div>
-              <div class="provider"><span class="marks"><svg class="provider-mark" style="color:var(--claude)"><use href="#claude" /></svg><svg class="provider-mark"><use href="#codex" /></svg></span><small>Your AI provider</small></div>
+              <div class="provider"><span class="marks"><svg class="provider-mark" style="color:var(--claude)"><use href="#claude" /></svg><svg class="provider-mark"><use href="#codex" /></svg><svg class="provider-mark"><use href="#opencode" /></svg></span><small>Your AI provider</small></div>
             </div>
           </div>
         </article>
@@ -323,10 +324,10 @@
         <table>
           <thead><tr><th scope="col"><span class="sr-only">Compared on</span></th><th scope="col" class="us"><span class="us-name"><svg width="26" height="26" style="color:var(--mascot)"><use href="#bubble" /></svg>OpenCodeReview</span></th><th scope="col">Hosted AI reviewers</th></tr></thead>
           <tbody>
-            <tr><th scope="row">What you pay</th><td class="us"><svg class="tick" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><div><b>$0</b><small>On the Claude or ChatGPT plan you already have</small></div></td><td><b>A monthly bill</b><small>Per developer, or per review</small></td></tr>
+            <tr><th scope="row">What you pay</th><td class="us"><svg class="tick" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><div><b>$0</b><small>On the Claude, ChatGPT or OpenCode plan you already have</small></div></td><td><b>A monthly bill</b><small>Per developer, or per review</small></td></tr>
             <tr><th scope="row">Where it runs</th><td class="us"><svg class="tick" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><div><b>Your machine</b><small>Anywhere Docker runs</small></div></td><td><b>Their cloud</b><small>Self-hosting, if offered, on enterprise plans</small></td></tr>
             <tr><th scope="row">Who sees your code</th><td class="us"><svg class="tick" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><div><b>You and your AI provider</b><small>Nothing passes through us</small></div></td><td><b>The vendor</b><small>And the AI providers it uses</small></td></tr>
-            <tr><th scope="row">The model</th><td class="us"><svg class="tick" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><div><b>Your choice</b><small>Claude Code or Codex, on your account</small></div></td><td><b>Theirs</b><small>Picked by the vendor</small></td></tr>
+            <tr><th scope="row">The model</th><td class="us"><svg class="tick" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><div><b>Your choice</b><small>Claude Code, Codex or OpenCode, on your account</small></div></td><td><b>Theirs</b><small>Picked by the vendor</small></td></tr>
             <tr><th scope="row">Source code</th><td class="us"><svg class="tick" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg><div><b>On GitHub</b><small>Read every line</small></div></td><td><b>Usually closed</b></td></tr>
           </tbody>
         </table>
@@ -361,9 +362,9 @@
         <div>
           <details><summary>I work alone. Isn't code review for teams?</summary><p>That is exactly why you need it. On a team, someone else reads your diff before it ships. Alone, nobody does. OpenCodeReview is that someone, for every pull request, in a few minutes.</p></details>
           <details><summary>I push straight to main. Does it still work?</summary><p>It reviews pull requests. Open a branch and a pull request for each change, even if you merge it yourself ten minutes later. The review lands before you merge.</p></details>
-          <details><summary>Is OpenCodeReview really free?</summary><p>For individuals and companies under 100 people and $1M in yearly revenue, yes, including commercial use. Larger companies need a commercial license: write to <a href="mailto:contato@bridglabs.com">contato@bridglabs.com</a>. Reviews run on your own Claude or ChatGPT account, so the only cost is what you already pay your AI provider.</p></details>
-          <details><summary>Which plans work?</summary><p>Claude Pro, Max, Team or Enterprise through Claude Code, and ChatGPT plans that include Codex. Local models are not supported. You can connect several accounts; when one hits its usage limit, the review continues on the next.</p></details>
-          <details><summary>Where does my code go?</summary><p>Only to your AI provider. OpenCodeReview runs on your machine and sends the pull request's code to Anthropic or OpenAI with your own sign-in, the same way their CLIs do when you use them yourself. There are no OpenCodeReview servers and no telemetry.</p></details>
+          <details><summary>Is OpenCodeReview really free?</summary><p>For individuals and companies under 100 people and $1M in yearly revenue, yes, including commercial use. Larger companies need a commercial license: write to <a href="mailto:contato@bridglabs.com">contato@bridglabs.com</a>. Reviews run on your own Claude, ChatGPT or OpenCode account, so the only cost is what you already pay your AI provider.</p></details>
+          <details><summary>Which plans work?</summary><p>Claude Pro, Max, Team or Enterprise through Claude Code, ChatGPT plans that include Codex, and OpenCode workspaces with a Go plan or Zen credits. Local models are not supported. You can connect several accounts; when one hits its usage limit, the review continues on the next.</p></details>
+          <details><summary>Where does my code go?</summary><p>Only to your AI provider. OpenCodeReview runs on your machine and sends the pull request's code to Anthropic, OpenAI or OpenCode with your own sign-in, the same way their CLIs do when you use them yourself. There are no OpenCodeReview servers and no telemetry.</p></details>
           <details><summary>How is it different from hosted AI reviewers?</summary><p>They run in their own cloud and bill per developer or per review. OpenCodeReview runs on your own machine, its code is on GitHub, and it reviews with the AI plan you already pay for.</p></details>
           <details><summary>Does my laptop need to stay on?</summary><p>Reviews run while OpenCodeReview is running. For reviews around the clock, run it on any always-on machine with Docker, such as a small VPS or a home server.</p></details>
         </div>

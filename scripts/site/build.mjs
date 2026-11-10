@@ -54,7 +54,7 @@ export function structuredData(html) {
     name: "OpenCodeReview",
     url: `${origin}/`,
     description:
-      "Self-hosted, source-available AI code review for GitHub pull requests. Reviews run on the Claude Code or Codex CLI with the Claude or ChatGPT account you already have.",
+      "Self-hosted, source-available AI code review for GitHub pull requests. Reviews run on the Claude Code, Codex or OpenCode CLI with the Claude, ChatGPT or OpenCode plan you already have.",
     applicationCategory: "DeveloperApplication",
     operatingSystem: "Linux, macOS, Windows (Docker)",
     image: `${origin}/og.png`,
@@ -64,8 +64,8 @@ export function structuredData(html) {
     isAccessibleForFree: true,
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
     featureList: [
-      "Reviews every GitHub pull request with Claude Code or Codex",
-      "Uses the Claude or ChatGPT account you already have",
+      "Reviews every GitHub pull request with Claude Code, Codex or OpenCode",
+      "Uses the Claude, ChatGPT or OpenCode plan you already have",
       "Fails over between several AI accounts when one hits its usage limit",
       "Indexes each repository for callers, dependencies, tests and convention files",
       "Checks every finding against the changed code before publishing it",

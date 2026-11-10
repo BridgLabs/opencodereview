@@ -126,7 +126,7 @@ A review fetches the live base and head of the pull request, selects the scope (
 
 ## Security and privacy
 
-- **Your code goes only to your AI provider.** The pull request evidence is sent to Anthropic or OpenAI with your own sign-in, the same way their CLIs work when you use them directly. OpenCodeReview has no servers and sends no telemetry.
+- **Your code goes only to your AI provider.** The pull request evidence is sent to Anthropic, OpenAI or OpenCode with your own sign-in, the same way their CLIs work when you use them directly. OpenCodeReview has no servers and sends no telemetry.
 - **Sign-ins stay local.** GitHub credentials, AI sign-ins and keys are stored in the `ocr-data` Docker volume (AI sign-ins and keys with file mode `0600`). They are never logged or sent to the browser. **Sign out** (GitHub, in Integrations) and **Remove account** (AI accounts, in Providers) delete them.
 - **Runners are sandboxed.** Read-only root filesystem, no Linux capabilities beyond what supervision needs, an unprivileged user for the AI process, no access to the database or repository cache, and provider-only network access.
 - **The UI is meant for a trusted network.** The API is protected by an installation token that the web container injects into the UI, so anyone who can open the UI can use it. Compose publishes port 1421 on every network interface of the host, and Docker's port rules bypass host firewalls such as ufw. On a shared network or a VPS, change the mapping to `127.0.0.1:1421:1421` and reach it through an SSH tunnel, or put an authenticated reverse proxy in front.
@@ -158,4 +158,4 @@ Licensed under the [PolyForm Small Business License 1.0.0](LICENSE). Individuals
 
 See [NOTICE](NOTICE) for attribution and third-party notices.
 
-OpenCodeReview is an independent source-available project and is not affiliated with, endorsed by, or sponsored by Anthropic or OpenAI. Their product names are used only to describe compatibility.
+OpenCodeReview is an independent source-available project and is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI or OpenCode. Their product names are used only to describe compatibility.
