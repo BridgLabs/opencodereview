@@ -370,8 +370,8 @@ impl Database {
     }
 
     /// [`Self::review_engine`] without asking opencode.ai, for a review that is starting: an
-    /// OpenCode choice is checked for its shape, and its default comes from the list already
-    /// read, empty until one was.
+    /// OpenCode choice is checked against the list already read and the plans (its shape, before
+    /// any list was read), and its default comes from that list, empty until one was read.
     pub(crate) fn review_engine_offline(&self, provider: &str) -> Result<(String, String), String> {
         self.stored_review_engine(provider, false)
     }
@@ -388,7 +388,7 @@ impl Database {
                 if online {
                     engines::resolve(provider, model, effort, &plans).ok()
                 } else {
-                    engines::resolve_offline(provider, model, effort).ok()
+                    engines::resolve_cached(provider, model, effort, &plans).ok()
                 }
             })
             .unwrap_or_else(|| {
