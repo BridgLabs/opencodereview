@@ -2489,6 +2489,26 @@ fn chunk_cache_keys_keep_engines_apart() {
     ));
     inputs.engines = None;
     assert!(super::chunks::ran_on_pinned_provider(&inputs, &ran(&["codex"])));
+    // A review that pinned OpenCode before it had a model keys its chunks by the model in use.
+    let db = crate::db::Db::for_test();
+    inputs.db_handle = Some(db.clone());
+    inputs.engines = Some(std::sync::Arc::new(super::PinnedEngines {
+        provider: Some("opencode".into()),
+        engines: Vec::new(),
+    }));
+    let choose = |model: &str| {
+        db.open()
+            .unwrap()
+            .save_setting_value(
+                "review_engine_opencode",
+                &serde_json::json!({ "model": model, "effort": "high" }).to_string(),
+            )
+            .unwrap();
+        super::chunks::with_engine(serde_json::json!({}), &inputs)
+    };
+    let first = choose("opencode/glm-5.3");
+    assert_eq!(first["engine"][1], "opencode/glm-5.3");
+    assert_ne!(first, choose("opencode/glm-5.3-flash"));
     assert_eq!(opencode["engine"][3], crate::providers::opencode::PROMPT_ADAPTATION);
     assert_eq!(claude["engine"][3], "");
 }

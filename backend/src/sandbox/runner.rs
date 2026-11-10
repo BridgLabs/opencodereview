@@ -816,6 +816,68 @@ struct FinalResponse {
     snapshot_id: Option<serde_json::Value>,
 }
 
+/// A JSON value whose outer object refuses a repeated key, as the response struct does. Reading
+/// it as a plain `serde_json::Value` would keep the last `report` or `findingDecisions` and drop
+/// the other one without a word.
+struct UniqueKeys(serde_json::Value);
+
+impl<'de> serde::Deserialize<'de> for UniqueKeys {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Outer;
+        impl<'de> serde::de::Visitor<'de> for Outer {
+            type Value = serde_json::Value;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a JSON value")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut fields = serde_json::Map::new();
+                while let Some((key, value)) = map.next_entry::<String, serde_json::Value>()? {
+                    if fields.contains_key(&key) {
+                        return Err(serde::de::Error::custom(format!("duplicate field `{key}`")));
+                    }
+                    fields.insert(key, value);
+                }
+                Ok(serde_json::Value::Object(fields))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                let mut items = Vec::new();
+                while let Some(item) = seq.next_element()? {
+                    items.push(item);
+                }
+                Ok(serde_json::Value::Array(items))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E> {
+                Ok(value.into())
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(serde_json::Value::Null)
+            }
+        }
+        deserializer.deserialize_any(Outer).map(UniqueKeys)
+    }
+}
+
 /// Other CLIs sometimes write the report without its wrapper, or some report fields (such as an
 /// empty `requestedFiles`) beside it instead of inside it. A field the report already holds with
 /// another value stays outside, so the response is rejected instead of one of the two being
@@ -1011,12 +1073,12 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
                 .map_err(invalid)?;
             return Ok((response, closed(objects.byte_offset())));
         }
-        let mut objects = serde_json::Deserializer::from_str(body).into_iter::<serde_json::Value>();
+        let mut objects = serde_json::Deserializer::from_str(body).into_iter::<UniqueKeys>();
         let value = objects
             .next()
             .ok_or_else(|| "Review final response is empty".to_string())?
             .map_err(invalid)?;
-        let response = serde_json::from_value(wrap_report(value)).map_err(invalid)?;
+        let response = serde_json::from_value(wrap_report(value.0)).map_err(invalid)?;
         Ok((response, closed(objects.byte_offset())))
     };
     let (response, closed) = parse(&text[start..]).or_else(|error| {

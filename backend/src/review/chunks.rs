@@ -1280,7 +1280,9 @@ pub(crate) fn with_engine(mut payload: serde_json::Value, inputs: &ReviewInputs)
         return payload;
     };
     let provider = pinned.provider.clone().unwrap_or_default();
-    let (model, effort) = pinned.engine(&provider).unwrap_or_default();
+    // The engine the stages run with: the pinned one, or the current choice when the review
+    // started before the provider had a model to pin.
+    let (model, effort) = super::frozen::engine_for(inputs, &provider);
     let runtime = if provider == "opencode" {
         crate::providers::opencode::PROMPT_ADAPTATION
     } else if super::frozen::prints_prepared_files(inputs, &provider) {
