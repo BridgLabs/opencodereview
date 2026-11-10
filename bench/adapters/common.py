@@ -146,7 +146,7 @@ def review(image, repo, nwo, pr_number, base, head, title, body, out_dir, provid
         # runs only: a benchmark reads RB_OUT and nothing else from /work/out.
         "-e", "OCR_REVIEW_DEBUG_DIR=/work/out/debug",
     ]
-    for name in ("RB_CONFIG_MODEL", "RB_CONFIG_EFFORT", "RB_CONFIG_MAX_FILES", "RB_CONFIG_FOCUS_FILES", "RB_CONFIG_LENS_PASS", "RB_CONFIG_SUGGESTIONS", "RB_CONFIG_DIFF_RENAMES", "RB_CONFIG_DEADLINE_SECS", "OCR_BENCH_DEADLINE_SECS"):
+    for name in ("RB_CONFIG_MODEL", "RB_CONFIG_EFFORT", "RB_CONFIG_MAX_FILES", "RB_CONFIG_FOCUS_FILES", "RB_CONFIG_LENS_PASS", "RB_CONFIG_INLINE_EVIDENCE", "RB_CONFIG_SUGGESTIONS", "RB_CONFIG_DIFF_RENAMES", "RB_CONFIG_DEADLINE_SECS", "OCR_BENCH_DEADLINE_SECS"):
         if os.environ.get(name):
             command += ["-e", f"{name}={os.environ[name]}"]
     credential = os.environ.get("OCR_BENCH_CREDENTIAL_FILE")
