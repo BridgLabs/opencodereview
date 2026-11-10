@@ -637,12 +637,20 @@ pub(crate) fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, Stri
     if let Some(engine) = inputs.engines.as_ref().and_then(|pinned| pinned.engine(provider)) {
         return engine;
     }
+    // Without the database the plans come from the stored sign-ins, so the default is still a
+    // model some account pays for.
+    let stored = || {
+        let plans = (provider == "opencode")
+            .then(|| crate::accounts::opencode_plans(&crate::accounts::stored_ids()))
+            .flatten();
+        crate::providers::engines::default_engine(provider, &plans)
+    };
     if inputs.db_handle.is_none() {
-        return crate::providers::engines::default_engine(provider, &None);
+        return stored();
     }
     accounts_db(inputs)
         .and_then(|db| db.review_engine(provider))
-        .unwrap_or_else(|_| crate::providers::engines::default_engine(provider, &None))
+        .unwrap_or_else(|_| stored())
 }
 
 /// The account a stage runs on: the first ready account by priority, the first account's provider

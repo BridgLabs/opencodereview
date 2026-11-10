@@ -152,12 +152,18 @@ impl Cache {
     }
 }
 
-static CACHE: Mutex<Cache> = Mutex::new(Cache {
-    models: None,
-    error: None,
-    next: None,
-    refreshing: false,
-});
+/// A cache and the signal that a read of the list ended.
+type Shared = (Mutex<Cache>, std::sync::Condvar);
+
+static CACHE: Shared = (
+    Mutex::new(Cache {
+        models: None,
+        error: None,
+        next: None,
+        refreshing: false,
+    }),
+    std::sync::Condvar::new(),
+);
 
 fn lock(cache: &Mutex<Cache>) -> std::sync::MutexGuard<'_, Cache> {
     cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -171,48 +177,58 @@ pub(crate) fn models() -> Result<Vec<Model>, String> {
     refreshed(&CACHE, Instant::now(), fetch)
 }
 
-/// `cache`'s list, read again with `fetch` when it is due. The lock is not held while `fetch`
-/// runs: other callers get the list already read, or the last error, and only one of them fetches.
+/// `shared`'s list, read again with `fetch` when it is due. The lock is not held while `fetch`
+/// runs and only one caller fetches: the others get the list already read, or, while the first
+/// list is still being read, wait for it.
 fn refreshed(
-    cache: &Mutex<Cache>,
+    shared: &Shared,
     now: Instant,
     fetch: impl FnOnce() -> Result<Vec<Model>, String>,
 ) -> Result<Vec<Model>, String> {
+    let (cache, read) = shared;
     {
         let mut cache = lock(cache);
+        while cache.refreshing && cache.models.is_none() {
+            cache = read.wait(cache).unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
         if cache.refreshing || cache.next.is_some_and(|next| now < next) {
             return cache.answer();
         }
         cache.refreshing = true;
     }
-    // Clears the flag even if `fetch` panics, so a later call can read the list.
-    struct Refreshing<'a>(&'a Mutex<Cache>);
-    impl Drop for Refreshing<'_> {
+    // Ends the read even if `fetch` panics, so a later call can read the list and no caller waits
+    // forever. The result is stored and the flag cleared under one lock, so no caller sees the
+    // read over with the old deadline still in place.
+    struct Reading<'a>(&'a Shared, Option<Result<Vec<Model>, String>>, Instant);
+    impl Drop for Reading<'_> {
         fn drop(&mut self) {
-            lock(self.0).refreshing = false;
+            let ((cache, read), now) = (self.0, self.2);
+            let mut cache = lock(cache);
+            match self.1.take() {
+                Some(Ok(models)) => {
+                    cache.models = Some(models);
+                    cache.error = None;
+                    cache.next = Some(now + FRESH);
+                }
+                Some(Err(error)) => {
+                    cache.error = Some(error);
+                    cache.next = Some(now + RETRY);
+                }
+                None => {}
+            }
+            cache.refreshing = false;
+            read.notify_all();
         }
     }
-    let refreshing = Refreshing(cache);
-    let result = fetch();
-    drop(refreshing);
-    let mut cache = lock(cache);
-    match result {
-        Ok(models) => {
-            cache.models = Some(models);
-            cache.error = None;
-            cache.next = Some(now + FRESH);
-        }
-        Err(error) => {
-            cache.error = Some(error);
-            cache.next = Some(now + RETRY);
-        }
-    }
-    cache.answer()
+    let mut reading = Reading(shared, None, now);
+    reading.1 = Some(fetch());
+    drop(reading);
+    lock(cache).answer()
 }
 
 /// The list already read, without asking opencode.ai.
 pub(crate) fn cached() -> Vec<Model> {
-    lock(&CACHE).models.clone().unwrap_or_default()
+    lock(&CACHE.0).models.clone().unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -269,7 +285,7 @@ mod tests {
 
     #[test]
     fn a_failed_read_is_not_repeated_before_its_retry_and_never_holds_the_lock() {
-        let cache = Mutex::new(Cache::default());
+        let cache: Shared = Default::default();
         let calls = std::cell::Cell::new(0);
         let model = || Model {
             id: "opencode/glm-5.3".into(),
@@ -280,7 +296,7 @@ mod tests {
         let fail = || {
             calls.set(calls.get() + 1);
             // The list already read stays readable while opencode.ai is asked.
-            assert!(cache.try_lock().is_ok());
+            assert!(cache.0.try_lock().is_ok());
             Err("unreachable".to_string())
         };
         let start = Instant::now();
@@ -300,9 +316,47 @@ mod tests {
         assert_eq!(refreshed(&cache, stale + RETRY / 2, fail), Ok(vec![model()]));
         assert_eq!(calls.get(), 2);
         // While one caller reads the list, another gets what is known instead of waiting.
-        lock(&cache).refreshing = true;
+        lock(&cache.0).refreshing = true;
         assert_eq!(refreshed(&cache, stale + FRESH, fail), Ok(vec![model()]));
         assert_eq!(calls.get(), 2);
+    }
+
+    #[test]
+    fn callers_wait_for_the_first_read_and_only_one_of_them_asks() {
+        let cache: Shared = Default::default();
+        let model = Model {
+            id: "opencode/glm-5.3".into(),
+            label: "Zen · GLM-5.3".into(),
+            efforts: vec![],
+            default_effort: String::new(),
+        };
+        let (started, has_started) = std::sync::mpsc::channel();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let now = Instant::now();
+        let (shared, listed) = (&cache, &model);
+        std::thread::scope(|scope| {
+            let first = scope.spawn(move || {
+                refreshed(shared, now, || {
+                    started.send(()).unwrap();
+                    released.recv().unwrap();
+                    // The read is still marked as running here: the result and the flag change
+                    // together, so nobody sees it over with the old deadline.
+                    assert!(lock(&shared.0).refreshing);
+                    Ok(vec![listed.clone()])
+                })
+            });
+            has_started.recv().unwrap();
+            // Nothing was ever read: a second caller waits for the list instead of failing.
+            let second = scope.spawn(move || refreshed(shared, now, || panic!("a second request to opencode.ai")));
+            std::thread::sleep(Duration::from_millis(50));
+            assert!(!second.is_finished());
+            release.send(()).unwrap();
+            assert_eq!(first.join().unwrap(), Ok(vec![listed.clone()]));
+            assert_eq!(second.join().unwrap(), Ok(vec![listed.clone()]));
+        });
+        let cache = lock(&cache.0);
+        assert!(!cache.refreshing);
+        assert_eq!(cache.next, Some(now + FRESH));
     }
 
     #[test]

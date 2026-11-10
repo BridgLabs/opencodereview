@@ -663,6 +663,16 @@ fn final_response_of_other_clis_takes_report_fields_written_beside_or_without_th
         assert!(parse_final_response(&strict, false).is_err(), "{strict}");
     }
     assert!(parse_final_response(&json!({"title":"x"}).to_string(), true).is_err());
+    // Nor is one of two reports or decision lists written under the same key.
+    let report_text = report.to_string();
+    for repeated in [
+        format!(r#"{{"report":{report_text},"report":{report_text}}}"#),
+        format!(r#"{{"report":{report_text},"findingDecisions":[],"findingDecisions":[]}}"#),
+    ] {
+        let error = parse_final_response(&repeated, true).unwrap_err();
+        assert!(error.contains("duplicate field"), "{error}");
+        assert!(parse_final_response(&repeated, false).is_err());
+    }
     // Findings written beside a report that holds other findings are never dropped: the response fails.
     let conflict = json!({"report":report,"findings":[{"title":"lost"}]}).to_string();
     assert!(parse_final_response(&conflict, true).is_err());

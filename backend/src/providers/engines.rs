@@ -83,17 +83,25 @@ pub(crate) fn models(provider: &str, plans: &Plans) -> Vec<Model> {
 /// the list is the one already read, whole; `refresh` false never asks either.
 fn opencode_models(plans: &Plans, refresh: bool) -> Vec<Model> {
     use crate::providers::opencode_catalogue as catalogue;
-    let Some(plans) = plans else {
-        return catalogue::cached();
-    };
-    let models = if refresh {
+    let models = if refresh && plans.is_some() {
         catalogue::models().unwrap_or_default()
     } else {
         catalogue::cached()
     };
-    models
+    paid(models, plans)
+}
+
+/// The models of `listed` that `plans` pay for; all of them without an OpenCode account.
+fn paid(listed: Vec<Model>, plans: &Plans) -> Vec<Model> {
+    let Some(plans) = plans else {
+        return listed;
+    };
+    listed
         .into_iter()
-        .filter(|model| catalogue::plan(&model.id).is_some_and(|plan| plans.iter().any(|known| known == plan)))
+        .filter(|model| {
+            crate::providers::opencode_catalogue::plan(&model.id)
+                .is_some_and(|plan| plans.iter().any(|known| known == plan))
+        })
         .collect()
 }
 
@@ -174,6 +182,33 @@ pub(crate) fn resolve_offline(provider: &str, model: &str, effort: &str) -> Resu
     }
 }
 
+/// [`resolve`] for a review that is starting, which must not wait on opencode.ai: an OpenCode
+/// choice is checked against the list already read and the plans, so a model the remaining
+/// accounts no longer pay for is not kept; only before any list was read is its shape enough.
+pub(crate) fn resolve_cached(
+    provider: &str,
+    model: &str,
+    effort: &str,
+    plans: &Plans,
+) -> Result<(String, String), String> {
+    if provider == "opencode" {
+        offered(crate::providers::opencode_catalogue::cached(), plans, model, effort)
+    } else {
+        resolve(provider, model, effort, plans)
+    }
+}
+
+fn offered(listed: Vec<Model>, plans: &Plans, model: &str, effort: &str) -> Result<(String, String), String> {
+    if listed.is_empty() {
+        return checked_shape(model, effort);
+    }
+    let entry = paid(listed, plans)
+        .into_iter()
+        .find(|entry| entry.id == model)
+        .ok_or_else(|| format!("{model} is not an OpenCode model this workspace's plans offer"))?;
+    check(&entry, effort)
+}
+
 /// "Claude · Opus 5.5 · medium", as reviews show the engine they ran on.
 pub(crate) fn label(provider: &str, model: &str, effort: &str) -> String {
     let name = PROVIDERS
@@ -237,6 +272,28 @@ mod tests {
         }
         assert!(resolve_offline("opencode", "opencode/x#y", "").is_err());
         assert_eq!(default_engine_offline("claude", &None), default_engine("claude", &None));
+    }
+
+    #[test]
+    fn a_starting_review_keeps_an_opencode_choice_only_while_the_plans_offer_it() {
+        let model = |id: &str| Model {
+            id: id.into(),
+            label: id.into(),
+            efforts: vec!["low".into(), "high".into()],
+            default_effort: "high".into(),
+        };
+        let listed = || vec![model("opencode-go/glm-5.3"), model("opencode/glm-5.3")];
+        let plans = |plans: &[&str]| Some(plans.iter().map(|plan| plan.to_string()).collect::<Vec<_>>());
+        let go = ("opencode-go/glm-5.3".to_string(), "low".to_string());
+        assert_eq!(offered(listed(), &plans(&["go", "zen"]), &go.0, &go.1), Ok(go.clone()));
+        // The Go account was disabled or signed out: its model is no longer kept, nor defaulted to.
+        assert!(offered(listed(), &plans(&["zen"]), &go.0, &go.1).is_err());
+        assert_eq!(first(paid(listed(), &plans(&["zen"]))).0, "opencode/glm-5.3");
+        // Nor a model that left the list, or an effort it does not take.
+        assert!(offered(listed(), &plans(&["go"]), "opencode-go/gone", "").is_err());
+        assert!(offered(listed(), &plans(&["go"]), &go.0, "max").is_err());
+        // Before any list was read, the shape is all there is to check.
+        assert_eq!(offered(vec![], &plans(&["zen"]), &go.0, &go.1), Ok(go));
     }
 
     #[test]
