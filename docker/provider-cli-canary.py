@@ -1,7 +1,8 @@
 """Checks the newest release of each AI CLI before it is pinned in docker/Dockerfile.
 
   resolve          Print the Docker build arguments for the newest Claude Code, Codex and OpenCode
-                   releases (linux/amd64) and write a version table to the step summary.
+                   releases (linux/amd64) and write a version table to the step summary. Needs
+                   GH_TOKEN to list the GitHub releases.
   flags IMAGE      Check that each CLI in IMAGE still accepts every flag its provider passes.
 
 No step reads credentials or calls a model.
@@ -63,11 +64,16 @@ query($owner: String!, $name: String!, $after: String) {
 def latest_github(repository, prefix, pages=5):
     # GraphQL asks only for tags and flags: REST release pages carry every release body and time out.
     # Several pages, so a long prerelease series cannot push every stable release off the first.
+    if not os.environ.get("GH_TOKEN"):
+        sys.exit("GH_TOKEN is required: GitHub's GraphQL API refuses anonymous requests")
     owner, name = repository.split("/")
     releases, after = [], None
     for _ in range(pages):
         body = json.dumps({"query": RELEASES_QUERY, "variables": {"owner": owner, "name": name, "after": after}})
-        page = json.loads(fetch("https://api.github.com/graphql", data=body.encode()))["data"]["repository"]["releases"]
+        response = json.loads(fetch("https://api.github.com/graphql", data=body.encode()))
+        if response.get("errors") or not (response.get("data") or {}).get("repository"):
+            sys.exit(f"Could not list the releases of {repository}: {response.get('errors') or 'no such repository'}")
+        page = response["data"]["repository"]["releases"]
         releases += [
             {"tag_name": node["tagName"], "draft": node["isDraft"], "prerelease": node["isPrerelease"]}
             for node in page["nodes"]
