@@ -4,3 +4,5 @@
   anyone who could reach it could use the app and its API token. To open it to other machines, set
   `OCR_WEB_BIND=0.0.0.0` and `OCR_WEB_APP_URL` to the address you use. This is a change for anyone who
   opens the page from another machine, such as a server or a remote Docker host.
+  Use Docker Engine 28.3.3 or newer: older versions can expose a port published on `127.0.0.1` to other
+  hosts, so update Docker too.

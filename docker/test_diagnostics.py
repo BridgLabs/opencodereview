@@ -61,5 +61,38 @@ class ExecutionBudgetTests(unittest.TestCase):
                 limit(*args)
 
 
+class WebPortBindingTests(unittest.TestCase):
+    """The resolved Compose file, not the YAML text, decides who can reach the web page."""
+
+    @classmethod
+    def setUpClass(cls):
+        probe = subprocess.run(["docker", "compose", "version"], capture_output=True)
+        if probe.returncode != 0:
+            raise unittest.SkipTest("docker compose is not available")
+
+    def published(self, bind=None):
+        env = {key: value for key, value in os.environ.items() if key != "OCR_WEB_BIND"}
+        if bind is not None:
+            env["OCR_WEB_BIND"] = bind
+        root = pathlib.Path(__file__).resolve().parent.parent
+        out = subprocess.run(
+            ["docker", "compose", "config", "--format", "json"],
+            cwd=root,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        return [port for port in json.loads(out)["services"]["web"]["ports"] if int(port["target"]) == 1421]
+
+    def test_default_publishes_on_loopback_only(self):
+        ports = self.published()
+        self.assertEqual([port["host_ip"] for port in ports], ["127.0.0.1"])
+
+    def test_override_opens_every_interface(self):
+        ports = self.published("0.0.0.0")
+        self.assertEqual([port["host_ip"] for port in ports], ["0.0.0.0"])
+
+
 if __name__ == "__main__":
     unittest.main()
