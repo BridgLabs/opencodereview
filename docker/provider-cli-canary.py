@@ -33,9 +33,24 @@ def sha256(url):
     return hashlib.sha256(fetch(url, binary=True)).hexdigest()
 
 
+def newest_stable(releases, prefix):
+    # The highest X.Y.Z release, not the one GitHub marks latest: a project can mark an older
+    # maintenance release latest after a newer major (OpenCode marked v1.19.5 after v2.2.6).
+    pattern = re.compile(re.escape(prefix) + r"(\d+)\.(\d+)\.(\d+)")
+    versions = [
+        tuple(map(int, match.groups()))
+        for release in releases
+        if not release["draft"] and not release["prerelease"]
+        and (match := pattern.fullmatch(release["tag_name"]))
+    ]
+    if not versions:
+        sys.exit(f"No stable release tagged {prefix}X.Y.Z")
+    return ".".join(map(str, max(versions)))
+
+
 def latest_github(repository, prefix):
-    tag = json.loads(fetch(f"https://api.github.com/repos/{repository}/releases/latest"))["tag_name"]
-    return tag.removeprefix(prefix)
+    releases = json.loads(fetch(f"https://api.github.com/repos/{repository}/releases?per_page=100"))
+    return newest_stable(releases, prefix)
 
 
 def pinned():
