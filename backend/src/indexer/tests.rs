@@ -635,3 +635,375 @@ fn indexes_synthetic_monorepo() {
 
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn extracts_ruby_symbols_with_nesting_and_end_lines() {
+    let src = r#"# frozen_string_literal: true
+module Billing
+  class Invoice < ApplicationRecord
+    # def commented_out
+    def total
+      items.sum do |item|
+        item.price
+      end
+    end
+
+    def paid? = status == "paid"
+
+    def self.overdue
+      where("due < ?", Time.now) if respond_to?(:where)
+    end
+
+    private
+
+    def _cache; end
+  end
+end
+
+=begin
+def ignored
+end
+=end
+def helper(a, b = (1 + 2))
+  case a
+  when 1 then b
+  end
+end
+"#;
+    let lines: Vec<&str> = src.lines().collect();
+    let symbols = extract_ruby_symbols(&lines);
+    let found: Vec<(&str, &str, i64, i64)> = symbols
+        .iter()
+        .map(|s| (s.name.as_str(), s.kind.as_str(), s.start_line, s.end_line))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            ("Billing", "module", 2, 21),
+            ("Invoice", "class", 3, 20),
+            ("total", "method", 5, 9),
+            ("paid?", "method", 11, 11),
+            ("overdue", "method", 13, 15),
+            ("_cache", "method", 19, 19),
+            ("helper", "function", 27, 31),
+        ]
+    );
+    assert!(!symbols.iter().find(|s| s.name == "_cache").unwrap().is_exported);
+    assert!(symbols.iter().find(|s| s.name == "total").unwrap().is_exported);
+}
+
+#[test]
+fn ruby_blocks_ignore_trailing_comments_and_strings() {
+    let src =
+        "def total\n  items.sum do |item| # Skipped.call\n    item.price\n    label = \"Hidden.call\"\n  end\nend\n";
+    let lines: Vec<&str> = src.lines().collect();
+    let symbols = extract_ruby_symbols(&lines);
+    assert_eq!(
+        symbols.len(),
+        1,
+        "{:?}",
+        symbols.iter().map(|symbol| &symbol.name).collect::<Vec<_>>()
+    );
+    assert_eq!(symbols[0].name, "total");
+    assert_eq!((symbols[0].start_line, symbols[0].end_line), (1, 6));
+    let calls = ruby_symbol_calls(&lines, 1, 6, "total", &[], &[]);
+    assert!(calls.contains(&"price".to_string()), "{calls:?}");
+    assert!(
+        !calls.iter().any(|name| name == "Skipped" || name == "Hidden"),
+        "{calls:?}"
+    );
+}
+
+#[test]
+fn extracts_ruby_requires() {
+    let src = "# require 'commented'\nrequire 'json'\nrequire \"active_support/core_ext\"\nrequire_relative 'models/user'\nrequire_relative '../lib/tool'\nrequire(\"net/http\")\nload 'tasks/seed.rb'\nrequire some_variable\nrequirements = 1\n";
+    let imports = extract_ruby_imports(src);
+    let specs: Vec<(&str, &str)> = imports.iter().map(|(s, k)| (s.as_str(), k.as_str())).collect();
+    assert_eq!(
+        specs,
+        vec![
+            ("json", "require"),
+            ("active_support/core_ext", "require"),
+            ("./models/user", "require_relative"),
+            ("../lib/tool", "require_relative"),
+            ("net/http", "require"),
+            ("tasks/seed.rb", "load"),
+        ]
+    );
+}
+
+#[test]
+fn resolves_ruby_requires_to_repo_files() {
+    let files: HashSet<String> = ["lib/tool/runner.rb", "app/models/user.rb", "spec/support/helper.rb"]
+        .iter()
+        .map(|path| path.to_string())
+        .collect();
+    assert_eq!(
+        resolve_ruby_spec("tool/runner", &files).as_deref(),
+        Some("lib/tool/runner.rb")
+    );
+    assert_eq!(
+        resolve_ruby_spec("models/user", &files).as_deref(),
+        Some("app/models/user.rb")
+    );
+    assert_eq!(
+        resolve_ruby_spec("support/helper", &files).as_deref(),
+        Some("spec/support/helper.rb")
+    );
+    assert_eq!(resolve_ruby_spec("json", &files), None);
+    let (resolved, path) = resolve_spec(
+        "app/models/order.rb",
+        Some("ruby"),
+        "./user",
+        &files,
+        &HashSet::new(),
+        None,
+    );
+    assert!(resolved);
+    assert_eq!(path.as_deref(), Some("app/models/user.rb"));
+}
+
+#[test]
+fn recognizes_ruby_files_and_tests() {
+    for name in ["a.rb", "tasks/b.rake", "tool.gemspec", "config.ru"] {
+        assert_eq!(language_for_path(name), Some("ruby"), "{name}");
+    }
+    assert!(is_code_language("ruby"));
+    for path in [
+        "spec/models/user_spec.rb",
+        "test/models/user_test.rb",
+        "engines/x/spec/a.rb",
+        "app/models/user_spec.rb",
+    ] {
+        assert!(crate::review::is_test_path(path), "{path}");
+    }
+    for path in ["app/models/user.rb", "lib/inspector.rb", "lib/spectrum/a.rb"] {
+        assert!(!crate::review::is_test_path(path), "{path}");
+    }
+}
+
+#[test]
+fn extracts_ruby_symbol_calls() {
+    let src = "class Report\n  def render(order)\n    total = order.total\n    # skipped.call\n    Billing::Invoice.new(order).render_pdf(total) if ready?\n    format_row(total, helper_value)\n  end\nend\n";
+    let lines: Vec<&str> = src.lines().collect();
+    let calls = ruby_symbol_calls(&lines, 2, 7, "render", &[], &[]);
+    for expected in ["total", "Billing", "Invoice", "render_pdf", "format_row"] {
+        assert!(calls.contains(&expected.to_string()), "missing {expected}: {calls:?}");
+    }
+    for unexpected in ["render", "order", "new", "helper_value", "skipped", "call"] {
+        assert!(
+            !calls.contains(&unexpected.to_string()),
+            "unexpected {unexpected}: {calls:?}"
+        );
+    }
+}
+
+#[test]
+fn parses_ruby_gemfile_and_gemspec() {
+    let gemspec = parse_manifest(
+        "tool.gemspec",
+        b"Gem::Specification.new do |spec|\n  spec.name = \"tool\"\n  spec.add_dependency \"json\", \"~> 2.0\"\n  spec.add_runtime_dependency(\"rack\")\n  spec.add_development_dependency 'rspec'\nend\n",
+    )
+    .unwrap();
+    assert_eq!(gemspec.name, "tool");
+    assert!(gemspec.deps.contains(&("json".to_string(), false)));
+    assert!(gemspec.deps.contains(&("rack".to_string(), false)));
+    assert!(gemspec.deps.contains(&("rspec".to_string(), true)));
+
+    let gemfile = parse_manifest(
+        "services/api/Gemfile",
+        b"source 'https://rubygems.org'\ngem 'rails', '~> 7.1'\ngem 'pry', group: :development\ngroup :development, :test do\n  gem 'rspec-rails'\nend\ngem 'puma'\n",
+    )
+    .unwrap();
+    assert_eq!(gemfile.name, "services-api");
+    assert!(gemfile.deps.contains(&("rails".to_string(), false)));
+    assert!(gemfile.deps.contains(&("puma".to_string(), false)));
+    assert!(gemfile.deps.contains(&("pry".to_string(), true)));
+    assert!(gemfile.deps.contains(&("rspec-rails".to_string(), true)));
+    assert_eq!(manifest_dir("services/api/Gemfile"), "services/api");
+    assert_eq!(manifest_dir("gems/tool/tool.gemspec"), "gems/tool");
+    assert_eq!(manifest_dir("tool.gemspec"), "");
+
+    let commented = parse_manifest(
+        "Gemfile",
+        b"group :development do # tools\n  gem 'pry'\nend\ngem 'puma' # group: :test\n",
+    )
+    .unwrap();
+    assert!(commented.deps.contains(&("pry".to_string(), true)));
+    assert!(commented.deps.contains(&("puma".to_string(), false)));
+}
+
+#[test]
+fn indexes_ruby_packages_symbols_and_call_edges() {
+    let dir = std::env::temp_dir().join(format!("ocr-indexer-rb-test-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    write_file(&dir, "Gemfile", "source 'https://rubygems.org'\ngemspec\ngem 'rake'\n");
+    write_file(
+        &dir,
+        "tool.gemspec",
+        "Gem::Specification.new do |spec|\n  spec.name = \"tool\"\nend\n",
+    );
+    write_file(
+        &dir,
+        "lib/tool/formatter.rb",
+        "module Tool\n  class Formatter\n    def pretty(value)\n      value.to_s\n    end\n  end\nend\n",
+    );
+    write_file(
+        &dir,
+        "lib/tool/runner.rb",
+        "require_relative 'formatter'\n\nmodule Tool\n  class Runner\n    def run(value)\n      Formatter.new.pretty(value)\n    end\n  end\nend\n",
+    );
+    run_git(&dir, &["init", "-q"]);
+    run_git(&dir, &["add", "-A"]);
+    run_git(&dir, &["commit", "-q", "-m", "init"]);
+
+    let write = run_index(&dir, None, &AtomicBool::new(false), &mut |_| {}).expect("index ruby repo");
+    assert_eq!(
+        write.packages.len(),
+        1,
+        "{:?}",
+        write.packages.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+    assert_eq!(write.packages[0].name, "tool");
+    assert_eq!(write.packages[0].manager, "bundler");
+    let idx = |name: &str| {
+        write
+            .symbols
+            .iter()
+            .position(|s| s.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+    };
+    let (run_i, formatter_i, pretty_i) = (idx("run"), idx("Formatter"), idx("pretty"));
+    let has = |from: usize, to: usize| {
+        write
+            .symbol_edges
+            .iter()
+            .any(|edge| edge.from_symbol_index == from && edge.to_symbol_index == to)
+    };
+    assert!(has(run_i, formatter_i), "run should refer to Formatter");
+    assert!(has(run_i, pretty_i), "run should call pretty");
+    assert!(
+        write
+            .edges
+            .iter()
+            .any(|edge| edge.from_path == "lib/tool/runner.rb"
+                && edge.to_path.as_deref() == Some("lib/tool/formatter.rb")),
+        "require_relative should link the two files"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ruby_containers_own_only_their_own_lines() {
+    let src = "module Tool\n  class Runner < BaseRunner\n    include Loggable\n    def run\n      Formatter.new.pretty(1)\n    end\n  end\nend\n";
+    let lines: Vec<&str> = src.lines().collect();
+    // Runner owns lines 2-7 but not the method on lines 4-6, and sits inside Tool.
+    let runner = ruby_symbol_calls(&lines, 2, 7, "Runner", &[(4, 6)], &["Tool"]);
+    assert_eq!(runner, vec!["BaseRunner".to_string(), "Loggable".to_string()]);
+    // The method refers to Formatter, and not to the namespaces around it.
+    let run = ruby_symbol_calls(&lines, 4, 6, "run", &[], &["Tool", "Runner"]);
+    assert_eq!(run, vec!["Formatter".to_string(), "pretty".to_string()]);
+}
+
+#[test]
+fn finds_ruby_constants_outside_strings_and_comments() {
+    let src = "# Skipped\nclass Spec < Minitest::Test\n  def a\n    puts \"Hello World #{1}\" # Ignored\n    Mutineer::Config.load('Not Real')\n  end\nend\n=begin\nHidden\n=end\n";
+    let refs = ruby_constant_refs(src);
+    assert_eq!(refs, vec!["Spec", "Minitest", "Test", "Mutineer", "Config"]);
+}
+
+#[test]
+fn links_ruby_files_through_unique_constants() {
+    let sym = |name: &str, kind: &str, path: &str| RepoIndexSymbolInput {
+        name: name.to_string(),
+        kind: kind.to_string(),
+        language: "ruby".to_string(),
+        path: path.to_string(),
+        package_path: None,
+        start_line: 1,
+        end_line: 2,
+        signature: None,
+        is_exported: true,
+    };
+    let symbols = vec![
+        sym("Config", "class", "lib/config.rb"),
+        sym("Tool", "module", "lib/config.rb"),
+        sym("Tool", "module", "lib/runner.rb"),
+        sym("Runner", "class", "lib/runner.rb"),
+    ];
+    let refs = vec![
+        (
+            "test/config_test.rb".to_string(),
+            vec!["Tool".to_string(), "Config".to_string(), "Runner".to_string()],
+        ),
+        (
+            "lib/runner.rb".to_string(),
+            vec!["Config".to_string(), "Runner".to_string()],
+        ),
+    ];
+    let existing = vec![RepoIndexEdgeInput {
+        from_path: "lib/runner.rb".to_string(),
+        to_ref: "./config".to_string(),
+        kind: "require_relative".to_string(),
+        resolved: true,
+        to_path: Some("lib/config.rb".to_string()),
+    }];
+    let edges = ruby_constant_edges(&symbols, &refs, &existing);
+    let found: Vec<(&str, &str, &str)> = edges
+        .iter()
+        .map(|edge| {
+            (
+                edge.from_path.as_str(),
+                edge.to_path.as_deref().unwrap(),
+                edge.kind.as_str(),
+            )
+        })
+        .collect();
+    // `Tool` is defined in two files so it links nothing; runner.rb already requires config.rb
+    // and does not link to itself.
+    assert_eq!(
+        found,
+        vec![
+            ("test/config_test.rb", "lib/config.rb", "constant"),
+            ("test/config_test.rb", "lib/runner.rb", "constant"),
+        ]
+    );
+}
+
+#[test]
+fn ruby_compact_namespaces_are_named_by_their_last_segment() {
+    let src = "class Admin::UsersController < Base\n  def index\n    Admin::Audit.record(1)\n  end\nend\n";
+    let lines: Vec<&str> = src.lines().collect();
+    let symbols = extract_ruby_symbols(&lines);
+    assert_eq!(symbols[0].name, "UsersController");
+    assert_eq!(symbols[0].kind, "class");
+    // The class does not refer to the namespace in its own name, but its method refers to `Audit`.
+    let class_calls = ruby_symbol_calls(&lines, 1, 5, "UsersController", &[(2, 4)], &[]);
+    assert_eq!(class_calls, vec!["Base".to_string()]);
+    let method_calls = ruby_symbol_calls(&lines, 2, 4, "index", &[], &["UsersController"]);
+    assert!(method_calls.contains(&"Audit".to_string()), "{method_calls:?}");
+}
+
+#[test]
+fn ruby_gemfile_conditionals_do_not_close_groups() {
+    let gemfile = parse_manifest(
+        "Gemfile",
+        b"group :development do\n  if RUBY_VERSION > '3'\n    gem 'pry'\n  end\n  gem 'rubocop'\nend\ngem 'puma'\n",
+    )
+    .unwrap();
+    assert!(gemfile.deps.contains(&("pry".to_string(), true)));
+    assert!(gemfile.deps.contains(&("rubocop".to_string(), true)));
+    assert!(gemfile.deps.contains(&("puma".to_string(), false)));
+}
+
+#[test]
+fn ruby_gemspec_name_can_be_an_argument() {
+    let gemspec = parse_manifest(
+        "tool.gemspec",
+        b"Gem::Specification.new \"tool\", Tool::VERSION do |spec|\n  spec.add_dependency \"json\"\nend\n",
+    )
+    .unwrap();
+    assert_eq!(gemspec.name, "tool");
+    assert!(gemspec.deps.contains(&("json".to_string(), false)));
+}

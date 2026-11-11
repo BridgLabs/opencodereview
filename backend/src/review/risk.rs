@@ -217,7 +217,21 @@ pub(crate) fn review_comment_count(comments_json: Option<&str>) -> i64 {
 }
 
 pub(crate) fn is_test_path(path: &str) -> bool {
-    path.contains(".test.") || path.contains(".spec.") || path.contains("/__tests__/") || path.contains("/tests/")
+    path.contains(".test.")
+        || path.contains(".spec.")
+        || path.contains("/__tests__/")
+        || path.contains("/tests/")
+        || is_ruby_test_path(path)
+}
+
+/// RSpec and Minitest files: `spec/` or `test/` directories and `_spec.rb` or `_test.rb` names.
+fn is_ruby_test_path(path: &str) -> bool {
+    path.ends_with(".rb")
+        && (path.ends_with("_spec.rb")
+            || path.ends_with("_test.rb")
+            || ["spec/", "test/"]
+                .iter()
+                .any(|dir| path.starts_with(dir) || path.contains(&format!("/{dir}"))))
 }
 
 pub(crate) fn is_risky_path(path: &str) -> bool {

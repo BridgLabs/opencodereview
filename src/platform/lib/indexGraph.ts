@@ -30,6 +30,21 @@ export function normalizeGraph(graph: IndexGraph): IndexGraph {
   return { nodes, edges };
 }
 
+/** Test files by common conventions: RSpec and Minitest, Jest and Vitest, pytest and Go. */
+export function isTestFile(path: string) {
+  return (
+    /(^|\/)(test|tests|spec|specs|__tests__)\//.test(path) ||
+    /(_spec\.rb|_test\.(rb|go|py)|\.(test|spec)\.[jt]sx?|(^|\/)test_[^/]*\.py)$/.test(path)
+  );
+}
+
+/** Drops test files and every edge that touches one. */
+export function withoutTests(graph: IndexGraph): IndexGraph {
+  const nodes = graph.nodes.filter((node) => !isTestFile(node.path));
+  const ids = new Set(nodes.map((node) => node.id));
+  return { nodes, edges: graph.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)) };
+}
+
 export function searchNodes(nodes: IndexGraphNode[], query: string) {
   const text = query.trim().toLowerCase();
   return nodes.filter((node) => `${node.name} ${node.path}`.toLowerCase().includes(text));
@@ -42,7 +57,7 @@ export function graphSlice(
     filePath,
     includeIsolated = false,
     nodeLimit = 150,
-    edgeLimit = 300,
+    edgeLimit = 450,
   }: {
     focusId?: string | null;
     filePath?: string | null;
@@ -67,10 +82,13 @@ export function graphSlice(
   const isolated = nodes.filter((node) => !connected.has(node.id));
   const hiddenIsolated = !focus && !includeIsolated && edges.length > 0 ? isolated.length : 0;
   if (hiddenIsolated) nodes = nodes.filter((node) => connected.has(node.id));
-  const sorted = [...nodes].sort((a, b) => Number(b.id === focus) - Number(a.id === focus) || compareNodes(a, b));
-  const visibleNodes = sorted.slice(0, Math.max(1, nodeLimit));
-  const ids = new Set(visibleNodes.map((node) => node.id));
-  const visibleEdges = edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).slice(0, edgeLimit);
+  const { nodes: visibleNodes, edges: visibleEdges } = connectedSelection(
+    nodes,
+    edges,
+    focus,
+    Math.max(1, nodeLimit),
+    edgeLimit,
+  );
   return {
     nodes: visibleNodes,
     edges: visibleEdges,
@@ -79,6 +97,75 @@ export function graphSlice(
     omittedNodes: nodes.length - visibleNodes.length,
     omittedEdges: edges.length - visibleEdges.length,
   };
+}
+
+/**
+ * Cuts a large graph down to `nodeLimit` nodes and `edgeLimit` edges that still read as one
+ * graph. It grows from the best connected node, always adding the best connected node that
+ * touches what it already has. A second cluster starts only when two nodes still fit, so its
+ * first link is kept. Isolated nodes stay, including when the caller asked for them. The edges
+ * that joined each node come first, then the rest by how connected their ends are.
+ */
+function connectedSelection(
+  nodes: IndexGraphNode[],
+  edges: IndexGraphEdge[],
+  focus: string | null | undefined,
+  nodeLimit: number,
+  edgeLimit: number,
+) {
+  const degree = new Map<string, number>();
+  const adjacency = new Map<string, { id: string; edge: IndexGraphEdge }[]>();
+  for (const edge of edges) {
+    degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
+    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
+    for (const [from, to] of [
+      [edge.source, edge.target],
+      [edge.target, edge.source],
+    ]) {
+      const links = adjacency.get(from);
+      if (links) links.push({ id: to, edge });
+      else adjacency.set(from, [{ id: to, edge }]);
+    }
+  }
+  const rank = (a: IndexGraphNode, b: IndexGraphNode) =>
+    Number(b.id === focus) - Number(a.id === focus) ||
+    (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) ||
+    compareNodes(a, b);
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const ranked = [...nodes].sort(rank);
+  const chosen = new Set<string>();
+  const order: IndexGraphNode[] = [];
+  const joining: IndexGraphEdge[] = [];
+  const frontier = new Map<string, IndexGraphEdge>();
+  let seed = 0;
+  while (order.length < Math.min(nodeLimit, nodes.length)) {
+    let next: IndexGraphNode | undefined;
+    let via: IndexGraphEdge | undefined;
+    for (const [id, edge] of frontier) {
+      const candidate = byId.get(id);
+      if (candidate && (!next || rank(candidate, next) < 0)) [next, via] = [candidate, edge];
+    }
+    if (!next) {
+      const room = Math.min(nodeLimit, nodes.length) - order.length;
+      while (seed < ranked.length && chosen.has(ranked[seed].id)) seed++;
+      const candidate = ranked[seed];
+      // One spare slot cannot hold a new cluster and the link that joins it.
+      if (candidate && order.length > 0 && (degree.get(candidate.id) ?? 0) > 0 && room < 2) break;
+      next = candidate;
+    }
+    if (!next) break;
+    chosen.add(next.id);
+    order.push(next);
+    frontier.delete(next.id);
+    if (via) joining.push(via);
+    for (const { id, edge } of adjacency.get(next.id) ?? [])
+      if (!chosen.has(id) && !frontier.has(id)) frontier.set(id, edge);
+  }
+  const between = edges.filter((edge) => chosen.has(edge.source) && chosen.has(edge.target));
+  const first = new Set(joining);
+  const strength = (edge: IndexGraphEdge) => (degree.get(edge.source) ?? 0) + (degree.get(edge.target) ?? 0);
+  const rest = between.filter((edge) => !first.has(edge)).sort((a, b) => strength(b) - strength(a));
+  return { nodes: order, edges: [...joining, ...rest].slice(0, edgeLimit) };
 }
 
 export function layoutGraph(graph: IndexGraph) {

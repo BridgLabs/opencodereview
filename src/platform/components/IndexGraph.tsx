@@ -7,7 +7,7 @@ import { BrandMark } from "../../components/BrandMark";
 import { DSButton } from "../../components/DesignSystem";
 import { setupApi } from "../../services/setupApi";
 import type { IndexGraph, IndexGraphNode, RepoIndexStatus } from "../../types";
-import { type GraphMode, graphSlice, normalizeGraph, searchNodes } from "../lib/indexGraph";
+import { type GraphMode, graphSlice, isTestFile, normalizeGraph, searchNodes, withoutTests } from "../lib/indexGraph";
 
 const emptyGraph: IndexGraph = { nodes: [], edges: [] };
 type Scope = { mode: GraphMode; package: { id: string; name: string } | null; filePath: string | null };
@@ -29,6 +29,7 @@ export function IndexGraphView({
   const [scope, setScope] = useState<Scope>(rootScope);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [includeIsolated, setIncludeIsolated] = useState(false);
+  const [hideTests, setHideTests] = useState(false);
   const [search, setSearch] = useState("");
   const [searchPage, setSearchPage] = useState(0);
   const graphQuery = useQuery({
@@ -41,7 +42,12 @@ export function IndexGraphView({
           : setupApi.indexGraph(repoId),
     refetchOnWindowFocus: false,
   });
-  const graph = useMemo(() => normalizeGraph(graphQuery.data ?? emptyGraph), [graphQuery.data]);
+  const fullGraph = useMemo(() => normalizeGraph(graphQuery.data ?? emptyGraph), [graphQuery.data]);
+  const hasTests = scope.mode !== "packages" && fullGraph.nodes.some((node) => isTestFile(node.path));
+  const graph = useMemo(
+    () => (hideTests && scope.mode !== "packages" ? withoutTests(fullGraph) : fullGraph),
+    [fullGraph, hideTests, scope.mode],
+  );
   const slice = useMemo(
     () =>
       graphSlice(graph, {
@@ -62,6 +68,7 @@ export function IndexGraphView({
     setSearch("");
     setSearchPage(0);
     setIncludeIsolated(false);
+    setHideTests(false);
     onSelect(null);
   };
   const explore = (id: string | null) => {
@@ -205,16 +212,29 @@ export function IndexGraphView({
               Back to {scope.filePath ? "file symbols" : scope.mode}
             </DSButton>
           ) : (
-            scope.mode !== "packages" &&
-            slice.isolatedCount > 0 && (
-              <label className="index-isolated-toggle flex cursor-pointer items-center gap-1.5 text-caption text-fg-muted [&_input]:accent-brand">
-                <input
-                  type="checkbox"
-                  checked={includeIsolated}
-                  onChange={(event) => setIncludeIsolated(event.target.checked)}
-                />
-                Show isolated
-              </label>
+            scope.mode !== "packages" && (
+              <div className="flex items-center gap-4">
+                {hasTests && (
+                  <label className="index-tests-toggle flex cursor-pointer items-center gap-1.5 text-caption text-fg-muted [&_input]:accent-brand">
+                    <input
+                      type="checkbox"
+                      checked={hideTests}
+                      onChange={(event) => setHideTests(event.target.checked)}
+                    />
+                    Hide tests
+                  </label>
+                )}
+                {slice.isolatedCount > 0 && (
+                  <label className="index-isolated-toggle flex cursor-pointer items-center gap-1.5 text-caption text-fg-muted [&_input]:accent-brand">
+                    <input
+                      type="checkbox"
+                      checked={includeIsolated}
+                      onChange={(event) => setIncludeIsolated(event.target.checked)}
+                    />
+                    Show isolated
+                  </label>
+                )}
+              </div>
             )
           )}
         </div>
@@ -272,7 +292,7 @@ export function IndexGraphView({
               />
             ) : (
               <IndexNetwork
-                key={`${scope.mode}:${scope.package?.id}:${scope.filePath}:${focusId}:${includeIsolated}`}
+                key={`${scope.mode}:${scope.package?.id}:${scope.filePath}:${focusId}:${includeIsolated}:${hideTests}`}
                 graph={slice}
                 mode={scope.mode}
                 selectedId={selectedId}
@@ -380,6 +400,10 @@ function IndexNetwork({
     [graph, activeId],
   );
   const legend = useMemo(() => [...new Set(graph.nodes.map((node) => node.kind))].sort(), [graph]);
+  const hasTests = useMemo(
+    () => mode !== "packages" && graph.nodes.some((node) => isTestFile(node.path)),
+    [graph, mode],
+  );
   const fitToView = useCallback(() => {
     const instance = ref.current;
     const bounds = instance?.getGraphBbox();
@@ -452,8 +476,18 @@ function IndexNetwork({
           ctx.globalAlpha = dimmed ? 0.18 : 1;
           ctx.beginPath();
           ctx.arc(node.x ?? 0, node.y ?? 0, radius, 0, Math.PI * 2);
-          ctx.fillStyle = token(kindColors[mode][node.kind] ?? "--text-2");
-          ctx.fill();
+          const color = token(kindColors[mode][node.kind] ?? "--text-2");
+          if (mode !== "packages" && isTestFile(node.path)) {
+            // Tests are hollow so they stand apart from the code they cover.
+            ctx.fillStyle = token("--bg");
+            ctx.fill();
+            ctx.lineWidth = 1.6 / scale;
+            ctx.strokeStyle = color;
+            ctx.stroke();
+          } else {
+            ctx.fillStyle = color;
+            ctx.fill();
+          }
           if (active) {
             ctx.lineWidth = 1.8 / scale;
             ctx.strokeStyle = token("--text-1");
@@ -506,6 +540,12 @@ function IndexNetwork({
             {kind}
           </span>
         ))}
+        {hasTests && (
+          <span className="graph-legend-item inline-flex items-center gap-1.5">
+            <span className="graph-legend-dot inline-block size-2.5 rounded-full border-[1.5px] border-fg-muted" />
+            test
+          </span>
+        )}
       </div>
     </div>
   );

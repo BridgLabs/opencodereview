@@ -15,11 +15,13 @@ use crate::db::{
 mod imports;
 mod manifests;
 mod paths;
+mod ruby;
 mod symbols;
 
 pub(crate) use imports::*;
 pub(crate) use manifests::*;
 pub(crate) use paths::*;
+pub(crate) use ruby::*;
 pub(crate) use symbols::*;
 
 const MAX_BLOB_READ_BYTES: i64 = 2_000_000;
@@ -176,7 +178,7 @@ pub fn run_index_for_ref(
             // makes up, which sorts first.
             if let Some((_, existing)) = pending_deps.iter_mut().find(|(from, _)| *from == package_path) {
                 existing.extend(parsed.deps);
-                if !path.ends_with("requirements.txt") {
+                if !declares_no_name(path) {
                     if let Some(package) = packages
                         .iter_mut()
                         .find(|package| package.package_path == package_path && unnamed.remove(&package_path))
@@ -188,7 +190,7 @@ pub fn run_index_for_ref(
                 }
                 continue;
             }
-            if path.ends_with("requirements.txt") {
+            if declares_no_name(path) {
                 unnamed.insert(package_path.clone());
             }
             package_names.insert(parsed.name.clone());
@@ -272,6 +274,8 @@ pub fn run_index_for_ref(
     // Called-symbol-name candidates per symbol (parallel to `symbols`), used to
     // build the symbol-level call/reference graph after all symbols are known.
     let mut symbol_refs: Vec<Vec<String>> = Vec::new();
+    // Constants each Ruby file mentions, for the links between files that `require` does not show.
+    let mut ruby_constants: Vec<(String, Vec<String>)> = Vec::new();
     for (processed, index) in source_indexes.iter().enumerate() {
         if processed % PROGRESS_EVERY == 0 {
             check_cancel_kill(cancel, &mut batch)?;
@@ -304,6 +308,29 @@ pub fn run_index_for_ref(
                     &symbol.name,
                 ));
             }
+        } else if file.language.as_deref() == Some("ruby") {
+            let lines: Vec<&str> = text.lines().collect();
+            for symbol in &file_symbols {
+                let nested: Vec<(i64, i64)> = file_symbols
+                    .iter()
+                    .filter(|other| other.start_line > symbol.start_line && other.end_line <= symbol.end_line)
+                    .map(|other| (other.start_line, other.end_line))
+                    .collect();
+                let enclosing: Vec<&str> = file_symbols
+                    .iter()
+                    .filter(|other| other.start_line < symbol.start_line && other.end_line >= symbol.end_line)
+                    .map(|other| other.name.as_str())
+                    .collect();
+                symbol_refs.push(ruby_symbol_calls(
+                    &lines,
+                    symbol.start_line,
+                    symbol.end_line,
+                    &symbol.name,
+                    &nested,
+                    &enclosing,
+                ));
+            }
+            ruby_constants.push((file.path.clone(), ruby_constant_refs(&text)));
         } else {
             for _ in &file_symbols {
                 symbol_refs.push(Vec::new());
@@ -330,6 +357,8 @@ pub fn run_index_for_ref(
         }
     }
     batch.finish();
+    let constant_edges = ruby_constant_edges(&symbols, &ruby_constants, &edges);
+    edges.extend(constant_edges);
     let symbol_edges = build_symbol_edges(&symbols, &symbol_refs);
 
     // Stage: write (handled by caller in a transaction)

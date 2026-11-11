@@ -10,6 +10,9 @@ pub(crate) fn extract_imports(path: &str, language: Option<&str>, content: &str)
     if language == Some("python") || path.ends_with(".py") {
         return extract_python_imports(content);
     }
+    if language == Some("ruby") || path.ends_with(".rb") {
+        return extract_ruby_imports(content);
+    }
     extract_js_like_imports(content)
 }
 
@@ -184,6 +187,11 @@ pub(crate) fn resolve_spec(
             return (true, Some(path));
         }
     }
+    if language == Some("ruby") || from_path.ends_with(".rb") {
+        if let Some(path) = resolve_ruby_spec(spec, files) {
+            return (true, Some(path));
+        }
+    }
     if spec.starts_with('.') {
         let dir = parent_dir(from_path);
         let path = resolve_candidate(&format!("{dir}/{spec}"), files);
@@ -293,6 +301,7 @@ pub(crate) fn resolve_candidate(raw: &str, files: &HashSet<String>) -> Option<St
         format!("{joined}.go"),
         format!("{joined}.rs"),
         format!("{joined}.py"),
+        format!("{joined}.rb"),
         format!("{joined}/index.ts"),
         format!("{joined}/index.tsx"),
         format!("{joined}/index.js"),
