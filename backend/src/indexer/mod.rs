@@ -310,23 +310,19 @@ pub fn run_index_for_ref(
             }
         } else if file.language.as_deref() == Some("ruby") {
             let lines: Vec<&str> = text.lines().collect();
-            for symbol in &file_symbols {
-                let nested: Vec<(i64, i64)> = file_symbols
-                    .iter()
-                    .filter(|other| other.start_line > symbol.start_line && other.end_line <= symbol.end_line)
-                    .map(|other| (other.start_line, other.end_line))
-                    .collect();
-                let enclosing: Vec<&str> = file_symbols
-                    .iter()
-                    .filter(|other| other.start_line < symbol.start_line && other.end_line >= symbol.end_line)
-                    .map(|other| other.name.as_str())
-                    .collect();
+            let spans: Vec<(i64, i64, &str)> = file_symbols
+                .iter()
+                .map(|symbol| (symbol.start_line, symbol.end_line, symbol.name.as_str()))
+                .collect();
+            let scopes = ruby_symbol_scopes(&spans);
+            for (symbol, (nested, enclosing)) in file_symbols.iter().zip(&scopes) {
+                let enclosing: Vec<&str> = enclosing.iter().map(String::as_str).collect();
                 symbol_refs.push(ruby_symbol_calls(
                     &lines,
                     symbol.start_line,
                     symbol.end_line,
                     &symbol.name,
-                    &nested,
+                    nested,
                     &enclosing,
                 ));
             }

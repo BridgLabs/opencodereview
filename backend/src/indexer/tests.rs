@@ -1007,3 +1007,51 @@ fn ruby_gemspec_name_can_be_an_argument() {
     assert_eq!(gemspec.name, "tool");
     assert!(gemspec.deps.contains(&("json".to_string(), false)));
 }
+
+#[test]
+fn ruby_scopes_find_children_and_enclosing_names_in_one_pass() {
+    let src = "module Tool\n  class Runner\n    def run\n    end\n    def stop; end\n  end\nend\ndef helper; end\n";
+    let lines: Vec<&str> = src.lines().collect();
+    let symbols = extract_ruby_symbols(&lines);
+    let spans: Vec<(i64, i64, &str)> = symbols
+        .iter()
+        .map(|s| (s.start_line, s.end_line, s.name.as_str()))
+        .collect();
+    let scopes = ruby_symbol_scopes(&spans);
+    let names: Vec<&str> = symbols.iter().map(|symbol| symbol.name.as_str()).collect();
+    assert_eq!(names, ["Tool", "Runner", "run", "stop", "helper"]);
+    assert_eq!(scopes[0], (vec![(2, 6)], vec![]));
+    assert_eq!(scopes[1], (vec![(3, 4), (5, 5)], vec!["Tool".to_string()]));
+    assert_eq!(scopes[2], (vec![], vec!["Runner".to_string(), "Tool".to_string()]));
+    assert_eq!(scopes[4], (vec![], vec![]));
+}
+
+#[test]
+fn ruby_indexing_stays_fast_on_a_file_with_many_methods() {
+    let mut src = String::from("class Big\n");
+    for index in 0..20_000 {
+        src.push_str(&format!("  def method_{index}\n    other_{index}(1)\n  end\n"));
+    }
+    src.push_str("end\n");
+    let lines: Vec<&str> = src.lines().collect();
+    let started = std::time::Instant::now();
+    let symbols = extract_ruby_symbols(&lines);
+    let spans: Vec<(i64, i64, &str)> = symbols
+        .iter()
+        .map(|s| (s.start_line, s.end_line, s.name.as_str()))
+        .collect();
+    let scopes = ruby_symbol_scopes(&spans);
+    for (symbol, (nested, enclosing)) in symbols.iter().zip(&scopes) {
+        let enclosing: Vec<&str> = enclosing.iter().map(String::as_str).collect();
+        ruby_symbol_calls(
+            &lines,
+            symbol.start_line,
+            symbol.end_line,
+            &symbol.name,
+            nested,
+            &enclosing,
+        );
+    }
+    assert_eq!(symbols.len(), 20_001);
+    assert!(started.elapsed().as_secs() < 5, "took {:?}", started.elapsed());
+}

@@ -68,6 +68,42 @@ pub(crate) fn extract_ruby_symbols(lines: &[&str]) -> Vec<ParsedSymbol> {
     symbols
 }
 
+/// For each symbol `(start line, end line, name)`, in one pass over the symbols in file order: the line ranges of its direct
+/// children and the names of the symbols around it. Checking every pair of symbols instead would
+/// take quadratic time on a file with thousands of methods.
+pub(crate) fn ruby_symbol_scopes(symbols: &[(i64, i64, &str)]) -> Vec<(Vec<(i64, i64)>, Vec<String>)> {
+    let mut parents: Vec<Option<usize>> = Vec::with_capacity(symbols.len());
+    let mut children: Vec<Vec<(i64, i64)>> = vec![Vec::new(); symbols.len()];
+    let mut open: Vec<usize> = Vec::new();
+    for (index, &(start, end, _)) in symbols.iter().enumerate() {
+        while let Some(&top) = open.last() {
+            if symbols[top].0 < start && symbols[top].1 >= end {
+                break;
+            }
+            open.pop();
+        }
+        let parent = open.last().copied();
+        if let Some(parent) = parent {
+            children[parent].push((start, end));
+        }
+        parents.push(parent);
+        open.push(index);
+    }
+    children
+        .into_iter()
+        .enumerate()
+        .map(|(index, nested)| {
+            let mut enclosing = Vec::new();
+            let mut up = parents[index];
+            while let Some(parent) = up {
+                enclosing.push(symbols[parent].2.to_string());
+                up = parents[parent];
+            }
+            (nested, enclosing)
+        })
+        .collect()
+}
+
 fn is_ruby_end(line: &str) -> bool {
     line.strip_prefix("end")
         .is_some_and(|rest| !rest.starts_with(|ch: char| ch.is_alphanumeric() || ch == '_'))
@@ -229,7 +265,8 @@ pub(crate) fn resolve_ruby_spec(spec: &str, files: &HashSet<String>) -> Option<S
 /// being resolved; the symbol edge builder drops names that match no or too many definitions.
 ///
 /// A class or module only owns the lines that no nested symbol owns, and a symbol never refers to
-/// the namespaces it sits in (`nested` and `enclosing` carry that).
+/// the namespaces it sits in (`nested` and `enclosing` carry that). `nested` holds the line ranges
+/// of the symbol's direct children, in file order and without overlap (`ruby_symbol_scopes`).
 pub(crate) fn ruby_symbol_calls(
     lines: &[&str],
     start_line: i64,
@@ -245,9 +282,14 @@ pub(crate) fn ruby_symbol_calls(
     }
     let start = start_line.max(1) as usize;
     let end = (end_line.max(start_line) as usize).min(lines.len());
+    let mut nested_next = 0;
     for (offset, raw) in lines[start - 1..end].iter().enumerate() {
         let line_no = (start + offset) as i64;
-        if nested.iter().any(|(from, to)| line_no >= *from && line_no <= *to) {
+        // `nested` is sorted and does not overlap, so one moving index replaces a scan per line.
+        while nested_next < nested.len() && nested[nested_next].1 < line_no {
+            nested_next += 1;
+        }
+        if nested.get(nested_next).is_some_and(|(from, _)| line_no >= *from) {
             continue;
         }
         let line = raw.trim();
