@@ -1,7 +1,8 @@
 """Checks the newest release of each AI CLI before it is pinned in docker/Dockerfile.
 
   resolve          Print the Docker build arguments for the newest Claude Code, Codex and OpenCode
-                   releases (linux/amd64) and write a version table to the step summary.
+                   releases (linux/amd64) and write a version table to the step summary. Needs
+                   GH_TOKEN to list the GitHub releases.
   flags IMAGE      Check that each CLI in IMAGE still accepts every flag its provider passes.
 
 No step reads credentials or calls a model.
@@ -20,8 +21,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 CLAUDE_RELEASES = "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases"
 
 
-def fetch(url, binary=False):
-    request = urllib.request.Request(url, headers={"User-Agent": "opencodereview-provider-cli-canary"})
+def fetch(url, binary=False, data=None):
+    request = urllib.request.Request(url, data=data, headers={"User-Agent": "opencodereview-provider-cli-canary"})
     if "api.github.com" in url and os.environ.get("GH_TOKEN"):
         request.add_header("Authorization", "Bearer " + os.environ["GH_TOKEN"])
     with urllib.request.urlopen(request, timeout=120) as response:
@@ -33,9 +34,54 @@ def sha256(url):
     return hashlib.sha256(fetch(url, binary=True)).hexdigest()
 
 
-def latest_github(repository, prefix):
-    tag = json.loads(fetch(f"https://api.github.com/repos/{repository}/releases/latest"))["tag_name"]
-    return tag.removeprefix(prefix)
+def newest_stable(releases, prefix):
+    # The highest X.Y.Z release, not the one GitHub marks latest: a project can mark an older
+    # maintenance release latest after a newer major (OpenCode marked v1.19.5 after v2.2.6).
+    pattern = re.compile(re.escape(prefix) + r"(\d+)\.(\d+)\.(\d+)")
+    versions = [
+        tuple(map(int, match.groups()))
+        for release in releases
+        if not release["draft"] and not release["prerelease"]
+        and (match := pattern.fullmatch(release["tag_name"]))
+    ]
+    if not versions:
+        sys.exit(f"No stable release tagged {prefix}X.Y.Z")
+    return ".".join(map(str, max(versions)))
+
+
+RELEASES_QUERY = """
+query($owner: String!, $name: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    releases(first: 100, after: $after, orderBy: {field: CREATED_AT, direction: DESC}) {
+      nodes { tagName isDraft isPrerelease }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}
+"""
+
+
+def latest_github(repository, prefix, pages=5):
+    # GraphQL asks only for tags and flags: REST release pages carry every release body and time out.
+    # Several pages, so a long prerelease series cannot push every stable release off the first.
+    if not os.environ.get("GH_TOKEN"):
+        sys.exit("GH_TOKEN is required: GitHub's GraphQL API refuses anonymous requests")
+    owner, name = repository.split("/")
+    releases, after = [], None
+    for _ in range(pages):
+        body = json.dumps({"query": RELEASES_QUERY, "variables": {"owner": owner, "name": name, "after": after}})
+        response = json.loads(fetch("https://api.github.com/graphql", data=body.encode()))
+        if response.get("errors") or not (response.get("data") or {}).get("repository"):
+            sys.exit(f"Could not list the releases of {repository}: {response.get('errors') or 'no such repository'}")
+        page = response["data"]["repository"]["releases"]
+        releases += [
+            {"tag_name": node["tagName"], "draft": node["isDraft"], "prerelease": node["isPrerelease"]}
+            for node in page["nodes"]
+        ]
+        if not page["pageInfo"]["hasNextPage"]:
+            break
+        after = page["pageInfo"]["endCursor"]
+    return newest_stable(releases, prefix)
 
 
 def pinned():
