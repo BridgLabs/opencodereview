@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import sqlite3
 import struct
 import subprocess
@@ -66,6 +67,8 @@ class WebPortBindingTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        if shutil.which("docker") is None:
+            raise unittest.SkipTest("docker is not installed")
         probe = subprocess.run(["docker", "compose", "version"], capture_output=True)
         if probe.returncode != 0:
             raise unittest.SkipTest("docker compose is not available")

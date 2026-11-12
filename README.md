@@ -47,7 +47,7 @@ Set `OCR_VERSION` (for example `OCR_VERSION=0.1.0`) to stay on one release; the 
 
 ## Requirements
 
-- Docker Engine or Docker Desktop with Docker Compose v2 (the Compose file uses `additional_contexts`; use Engine 28.3.3 or newer so a port published on `127.0.0.1` stays local), or rootless Podman on Linux as described below.
+- Docker Engine or Docker Desktop with Docker Compose v2 (the Compose file uses `additional_contexts`; use Engine 28.3.3 or newer so a port published on `127.0.0.1` stays local; `docker version --format '{{.Server.Version}}'` prints yours), or rootless Podman on Linux as described below.
 - A GitHub account with access to the repositories you want reviewed.
 - At least one of:
   - a Claude subscription that works with Claude Code (Pro, Max, Team or Enterprise);
@@ -130,7 +130,7 @@ A review fetches the live base and head of the pull request, selects the scope (
 - **Your code goes only to your AI provider.** The pull request evidence is sent to Anthropic, OpenAI or OpenCode with your own sign-in, the same way their CLIs work when you use them directly. OpenCodeReview has no servers and sends no telemetry.
 - **Sign-ins stay local.** GitHub credentials, AI sign-ins and keys are stored in the `ocr-data` Docker volume (AI sign-ins and keys with file mode `0600`). They are never logged or sent to the browser. **Sign out** (GitHub, in Integrations) and **Remove account** (AI accounts, in Providers) delete them.
 - **Runners are sandboxed.** Read-only root filesystem, no Linux capabilities beyond what supervision needs, an unprivileged user for the AI process, no access to the database or repository cache, and provider-only network access.
-- **The UI is reachable from your machine only.** The API is protected by an installation token that the web container injects into the UI, so anyone who can open the UI can use it. Compose therefore publishes port 1421 on `127.0.0.1` only. Use Docker Engine 28.3.3 or newer: older versions can let other hosts reach a port published on `127.0.0.1`, on the same local network or after a firewalld reload. To open the page to other machines on a trusted network, set `OCR_WEB_BIND=0.0.0.0` and change `OCR_WEB_APP_URL` to the address you use. Docker's port rules bypass host firewalls such as ufw, and anyone who can reach the port gets the token, so a reverse proxy cannot protect it while the port is open. For a remote host, keep the default and use an SSH tunnel, or run an authenticated reverse proxy on the same host that forwards to `127.0.0.1:1421`.
+- **The UI is reachable from your machine only.** The API is protected by an installation token that the web container injects into the UI, so anyone who can open the UI can use it. Compose therefore publishes port 1421 on `127.0.0.1` only. Use Docker Engine 28.3.3 or newer: older versions can let other hosts reach a port published on `127.0.0.1`, on the same local network or after a firewalld reload. To open the page to other machines on a trusted network, set `OCR_WEB_BIND=0.0.0.0` and change `OCR_WEB_APP_URL` to the address you use. Docker's port rules bypass host firewalls such as ufw, and anyone who can reach the port gets the token, so a reverse proxy cannot protect it while the port is open. For a remote host, keep the default and use an SSH tunnel (`ssh -L 1421:127.0.0.1:1421 <host>`, then open `http://localhost:1421` on your own machine), or run an authenticated reverse proxy on the same host that forwards to `127.0.0.1:1421`.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
