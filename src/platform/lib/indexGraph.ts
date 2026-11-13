@@ -165,7 +165,8 @@ function connectedSelection(
   const first = new Set(joining);
   const strength = (edge: IndexGraphEdge) => (degree.get(edge.source) ?? 0) + (degree.get(edge.target) ?? 0);
   const rest = between.filter((edge) => !first.has(edge)).sort((a, b) => strength(b) - strength(a));
-  return { nodes: order, edges: [...joining, ...rest].slice(0, edgeLimit) };
+  const sorted = [...order].sort((a, b) => Number(b.id === focus) - Number(a.id === focus) || compareNodes(a, b));
+  return { nodes: sorted, edges: [...joining, ...rest].slice(0, edgeLimit) };
 }
 
 export function layoutGraph(graph: IndexGraph) {

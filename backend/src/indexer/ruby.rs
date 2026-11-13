@@ -212,8 +212,19 @@ fn ruby_declaration(line: &str) -> Option<(String, String, bool)> {
 /// written with a leading `./` so that they resolve against the importing file.
 pub(crate) fn extract_ruby_imports(content: &str) -> Vec<(String, String)> {
     let mut imports = Vec::new();
+    let mut in_block_comment = false;
     for raw in content.lines() {
+        if raw.starts_with("=begin") {
+            in_block_comment = true;
+        }
+        if in_block_comment {
+            in_block_comment = !raw.starts_with("=end");
+            continue;
+        }
         let line = raw.trim();
+        if line.starts_with('#') {
+            continue;
+        }
         for keyword in ["require_relative", "require", "load"] {
             let Some(rest) = line.strip_prefix(keyword) else {
                 continue;
@@ -239,9 +250,18 @@ pub(crate) fn extract_ruby_imports(content: &str) -> Vec<(String, String)> {
     imports
 }
 
-/// Resolves a load-path `require` against the usual Ruby source roots.
-pub(crate) fn resolve_ruby_spec(spec: &str, files: &HashSet<String>) -> Option<String> {
-    if spec.starts_with('.') || spec.starts_with('/') {
+/// Resolves a load-path or relative `require` to a tracked `.rb` file.
+pub(crate) fn resolve_ruby_spec(from_path: &str, spec: &str, files: &HashSet<String>) -> Option<String> {
+    if spec.starts_with('.') {
+        let base = normalize_path(&format!("{}/{}", parent_dir(from_path), spec));
+        let with_rb = if base.ends_with(".rb") {
+            base
+        } else {
+            format!("{base}.rb")
+        };
+        return files.contains(&with_rb).then_some(with_rb);
+    }
+    if spec.starts_with('/') {
         return None;
     }
     let file = if spec.ends_with(".rb") {
@@ -283,6 +303,7 @@ pub(crate) fn ruby_symbol_calls(
     let start = start_line.max(1) as usize;
     let end = (end_line.max(start_line) as usize).min(lines.len());
     let mut nested_next = 0;
+    let mut in_block_comment = false;
     for (offset, raw) in lines[start - 1..end].iter().enumerate() {
         let line_no = (start + offset) as i64;
         // `nested` is sorted and does not overlap, so one moving index replaces a scan per line.
@@ -290,6 +311,14 @@ pub(crate) fn ruby_symbol_calls(
             nested_next += 1;
         }
         if nested.get(nested_next).is_some_and(|(from, _)| line_no >= *from) {
+            continue;
+        }
+        // `=begin` starts a comment only at column zero, matching extract_ruby_symbols.
+        if raw.starts_with("=begin") {
+            in_block_comment = true;
+        }
+        if in_block_comment {
+            in_block_comment = !raw.starts_with("=end");
             continue;
         }
         let line = raw.trim();

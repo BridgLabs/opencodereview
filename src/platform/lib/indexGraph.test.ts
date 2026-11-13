@@ -92,12 +92,12 @@ describe("index graph", () => {
     expect(slice.nodes.map((item) => item.id)).toEqual(["a", "hub"]);
     expect(slice.edges).toEqual([edge("hub", "a")]);
   });
-  it("shows the best connected nodes first when a graph is cut down", () => {
+  it("keeps the best connected nodes when a graph is cut down, sorted by path", () => {
     const hub = {
       nodes: [node("a"), node("b"), node("c"), node("hub")],
       edges: [edge("hub", "a"), edge("hub", "b"), edge("hub", "c"), edge("a", "b")],
     };
-    expect(graphSlice(hub, { nodeLimit: 2 }).nodes.map((item) => item.id)).toEqual(["hub", "a"]);
+    expect(graphSlice(hub, { nodeLimit: 2 }).nodes.map((item) => item.id)).toEqual(["a", "hub"]);
   });
   it("recognizes test files across languages", () => {
     for (const path of [

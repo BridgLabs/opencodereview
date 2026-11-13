@@ -188,7 +188,7 @@ pub(crate) fn resolve_spec(
         }
     }
     if language == Some("ruby") || from_path.ends_with(".rb") {
-        if let Some(path) = resolve_ruby_spec(spec, files) {
+        if let Some(path) = resolve_ruby_spec(from_path, spec, files) {
             return (true, Some(path));
         }
     }
@@ -301,7 +301,6 @@ pub(crate) fn resolve_candidate(raw: &str, files: &HashSet<String>) -> Option<St
         format!("{joined}.go"),
         format!("{joined}.rs"),
         format!("{joined}.py"),
-        format!("{joined}.rb"),
         format!("{joined}/index.ts"),
         format!("{joined}/index.tsx"),
         format!("{joined}/index.js"),

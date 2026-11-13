@@ -715,6 +715,31 @@ fn ruby_blocks_ignore_trailing_comments_and_strings() {
 }
 
 #[test]
+fn ruby_block_comments_inside_symbols_are_not_calls_or_requires() {
+    let src = r#"class Runner
+  def run
+=begin
+    require 'tool'
+    Formatter.new.pretty(x)
+=end
+    Helper.call
+  end
+end
+"#;
+    let lines: Vec<&str> = src.lines().collect();
+    let calls = ruby_symbol_calls(&lines, 2, 8, "run", &[], &["Runner"]);
+    assert!(calls.contains(&"Helper".to_string()), "{calls:?}");
+    assert!(
+        !calls
+            .iter()
+            .any(|name| name == "Formatter" || name == "pretty" || name == "tool"),
+        "{calls:?}"
+    );
+    let imports = extract_ruby_imports(src);
+    assert!(imports.iter().all(|(spec, _)| spec != "tool"), "{imports:?}");
+}
+
+#[test]
 fn extracts_ruby_requires() {
     let src = "# require 'commented'\nrequire 'json'\nrequire \"active_support/core_ext\"\nrequire_relative 'models/user'\nrequire_relative '../lib/tool'\nrequire(\"net/http\")\nload 'tasks/seed.rb'\nrequire some_variable\nrequirements = 1\n";
     let imports = extract_ruby_imports(src);
@@ -734,23 +759,31 @@ fn extracts_ruby_requires() {
 
 #[test]
 fn resolves_ruby_requires_to_repo_files() {
-    let files: HashSet<String> = ["lib/tool/runner.rb", "app/models/user.rb", "spec/support/helper.rb"]
-        .iter()
-        .map(|path| path.to_string())
-        .collect();
+    let files: HashSet<String> = [
+        "lib/tool/runner.rb",
+        "app/models/user.rb",
+        "spec/support/helper.rb",
+        "app/models/formatter.rb",
+        "app/models/formatter.js",
+        "app/config.rb",
+        "app/config/index.ts",
+    ]
+    .iter()
+    .map(|path| path.to_string())
+    .collect();
     assert_eq!(
-        resolve_ruby_spec("tool/runner", &files).as_deref(),
+        resolve_ruby_spec("app/models/order.rb", "tool/runner", &files).as_deref(),
         Some("lib/tool/runner.rb")
     );
     assert_eq!(
-        resolve_ruby_spec("models/user", &files).as_deref(),
+        resolve_ruby_spec("app/models/order.rb", "models/user", &files).as_deref(),
         Some("app/models/user.rb")
     );
     assert_eq!(
-        resolve_ruby_spec("support/helper", &files).as_deref(),
+        resolve_ruby_spec("app/models/order.rb", "support/helper", &files).as_deref(),
         Some("spec/support/helper.rb")
     );
-    assert_eq!(resolve_ruby_spec("json", &files), None);
+    assert_eq!(resolve_ruby_spec("app/models/order.rb", "json", &files), None);
     let (resolved, path) = resolve_spec(
         "app/models/order.rb",
         Some("ruby"),
@@ -761,6 +794,28 @@ fn resolves_ruby_requires_to_repo_files() {
     );
     assert!(resolved);
     assert_eq!(path.as_deref(), Some("app/models/user.rb"));
+    // Relative Ruby requires must prefer .rb over a sibling .js of the same stem.
+    let (resolved, path) = resolve_spec(
+        "app/models/order.rb",
+        Some("ruby"),
+        "./formatter",
+        &files,
+        &HashSet::new(),
+        None,
+    );
+    assert!(resolved);
+    assert_eq!(path.as_deref(), Some("app/models/formatter.rb"));
+    // Other languages must still resolve index files before a sibling .rb.
+    let (resolved, path) = resolve_spec(
+        "app/main.ts",
+        Some("typescript"),
+        "./config",
+        &files,
+        &HashSet::new(),
+        None,
+    );
+    assert!(resolved);
+    assert_eq!(path.as_deref(), Some("app/config/index.ts"));
 }
 
 #[test]
