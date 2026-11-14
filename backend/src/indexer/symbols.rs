@@ -12,6 +12,7 @@ pub(crate) fn extract_symbols(file: &RepoIndexFileInput, content: &str) -> Vec<R
         "rust" => extract_brace_symbols(&lines, rust_symbol_name, "//"),
         "go" => extract_brace_symbols(&lines, go_symbol_name, "//"),
         "python" => extract_python_symbols(&lines),
+        "ruby" => extract_ruby_symbols(&lines),
         _ => Vec::new(),
     };
     parsed

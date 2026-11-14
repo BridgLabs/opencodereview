@@ -628,7 +628,8 @@ pub(crate) struct HistoricalReviewCoverageCandidate {
     pub manifest_json: Option<String>,
 }
 
-pub const INDEX_SPEC_VERSION: i64 = 4;
+// Raise this whenever indexing output changes, so existing repositories re-index.
+pub const INDEX_SPEC_VERSION: i64 = 5;
 
 #[derive(Debug, Clone)]
 pub struct RepoIndexFileInput {

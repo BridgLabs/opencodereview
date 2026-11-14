@@ -10,6 +10,9 @@ pub(crate) fn extract_imports(path: &str, language: Option<&str>, content: &str)
     if language == Some("python") || path.ends_with(".py") {
         return extract_python_imports(content);
     }
+    if language == Some("ruby") || path.ends_with(".rb") {
+        return extract_ruby_imports(content);
+    }
     extract_js_like_imports(content)
 }
 
@@ -181,6 +184,11 @@ pub(crate) fn resolve_spec(
     }
     if language == Some("python") || from_path.ends_with(".py") {
         if let Some(path) = resolve_python_spec(from_path, spec, files) {
+            return (true, Some(path));
+        }
+    }
+    if language == Some("ruby") || from_path.ends_with(".rb") {
+        if let Some(path) = resolve_ruby_spec(from_path, spec, files) {
             return (true, Some(path));
         }
     }
