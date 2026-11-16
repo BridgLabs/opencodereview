@@ -286,6 +286,7 @@ pub(crate) fn path_stem_key(path: &str) -> String {
         .replace(".test", "")
         .replace(".spec", "")
         .replace("_test", "")
+        .replace("_spec", "")
         .to_ascii_lowercase()
 }
 

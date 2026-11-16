@@ -784,6 +784,11 @@ fn resolves_ruby_requires_to_repo_files() {
         Some("spec/support/helper.rb")
     );
     assert_eq!(resolve_ruby_spec("app/models/order.rb", "json", &files), None);
+    let rake: HashSet<String> = ["lib/tasks/seed.rake".to_string()].into();
+    assert_eq!(
+        resolve_ruby_spec("Rakefile", "tasks/seed.rake", &rake).as_deref(),
+        Some("lib/tasks/seed.rake")
+    );
     let (resolved, path) = resolve_spec(
         "app/models/order.rb",
         Some("ruby"),
@@ -848,6 +853,55 @@ fn recognizes_ruby_files_and_tests() {
     for path in ["app/models/user.rb", "lib/inspector.rb", "lib/spectrum/a.rb"] {
         assert!(!crate::review::is_test_path(path), "{path}");
     }
+    // An RSpec file is matched to its source by name, as a Minitest file is.
+    for changed in [
+        ["app/models/user.rb", "spec/models/user_spec.rb"],
+        ["app/models/user.rb", "test/models/user_test.rb"],
+    ] {
+        let changed = changed.map(String::from);
+        assert_eq!(
+            crate::review::test_relationship_hints(&changed),
+            vec![format!("{} may test {}", changed[1], changed[0])]
+        );
+    }
+}
+
+#[test]
+fn ruby_hash_keys_named_like_keywords_are_not_blocks() {
+    let src = "class User
+  validates :email, presence: true,
+    if: :active?
+  def range
+    build(start: 1,
+      end: 5)
+  end
+  class << self
+    def find_all
+      all
+    end
+  end
+end
+
+class Admin
+end
+
+def helper
+end
+";
+    let lines: Vec<&str> = src.lines().collect();
+    let found: Vec<(String, String, i64, i64)> = extract_ruby_symbols(&lines)
+        .into_iter()
+        .map(|s| (s.name, s.kind, s.start_line, s.end_line))
+        .collect();
+    let expected = [
+        ("User", "class", 1, 13),
+        ("range", "method", 4, 7),
+        ("find_all", "method", 9, 11),
+        ("Admin", "class", 15, 16),
+        ("helper", "function", 18, 19),
+    ]
+    .map(|(name, kind, start, end)| (name.to_string(), kind.to_string(), start, end));
+    assert_eq!(found, expected);
 }
 
 #[test]
@@ -952,11 +1006,9 @@ fn indexes_ruby_packages_symbols_and_call_edges() {
     assert!(has(run_i, formatter_i), "run should refer to Formatter");
     assert!(has(run_i, pretty_i), "run should call pretty");
     assert!(
-        write
-            .edges
-            .iter()
-            .any(|edge| edge.from_path == "lib/tool/runner.rb"
-                && edge.to_path.as_deref() == Some("lib/tool/formatter.rb")),
+        write.edges.iter().any(|edge| edge.from_path == "lib/tool/runner.rb"
+            && edge.to_path.as_deref() == Some("lib/tool/formatter.rb")
+            && edge.kind == "require_relative"),
         "require_relative should link the two files"
     );
     let _ = fs::remove_dir_all(&dir);

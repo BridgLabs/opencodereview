@@ -105,8 +105,9 @@ pub(crate) fn ruby_symbol_scopes(symbols: &[(i64, i64, &str)]) -> Vec<(Vec<(i64,
 }
 
 fn is_ruby_end(line: &str) -> bool {
+    // `end: 5` on a continuation line is a hash key, not the keyword.
     line.strip_prefix("end")
-        .is_some_and(|rest| !rest.starts_with(|ch: char| ch.is_alphanumeric() || ch == '_'))
+        .is_some_and(|rest| !rest.starts_with(|ch: char| ch.is_alphanumeric() || ch == '_' || ch == ':'))
 }
 
 fn closes_on_same_line(line: &str) -> bool {
@@ -119,8 +120,13 @@ fn opens_ruby_block(line: &str) -> bool {
         .split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
         .next()
         .unwrap_or_default();
+    // `if: :active?` on a continuation line is a hash key, not the keyword (`if ::Flag` is one).
+    let rest = &line[first.len()..];
+    let hash_key = rest.starts_with(':') && !rest.starts_with("::");
     // A keyword at the start of a line is never a trailing modifier (`return x if y`).
-    if matches!(first, "if" | "unless" | "while" | "until" | "case" | "begin" | "for") || line.starts_with("class <<") {
+    if (!hash_key && matches!(first, "if" | "unless" | "while" | "until" | "case" | "begin" | "for"))
+        || line.starts_with("class <<")
+    {
         return true;
     }
     // `value = if ...` and friends.
@@ -250,25 +256,24 @@ pub(crate) fn extract_ruby_imports(content: &str) -> Vec<(String, String)> {
     imports
 }
 
-/// Resolves a load-path or relative `require` to a tracked `.rb` file.
+/// Resolves a load-path or relative `require` to a tracked Ruby file. A spec that already names
+/// a Ruby file (`load "tasks/seed.rake"`) is used as written; any other spec gets `.rb`.
 pub(crate) fn resolve_ruby_spec(from_path: &str, spec: &str, files: &HashSet<String>) -> Option<String> {
-    if spec.starts_with('.') {
-        let base = normalize_path(&format!("{}/{}", parent_dir(from_path), spec));
-        let with_rb = if base.ends_with(".rb") {
+    let with_ext = |base: String| {
+        if language_for_path(&base) == Some("ruby") {
             base
         } else {
             format!("{base}.rb")
-        };
-        return files.contains(&with_rb).then_some(with_rb);
+        }
+    };
+    if spec.starts_with('.') {
+        let file = with_ext(normalize_path(&format!("{}/{}", parent_dir(from_path), spec)));
+        return files.contains(&file).then_some(file);
     }
     if spec.starts_with('/') {
         return None;
     }
-    let file = if spec.ends_with(".rb") {
-        spec.to_string()
-    } else {
-        format!("{spec}.rb")
-    };
+    let file = with_ext(spec.to_string());
     ["lib", "app", "", "spec", "test"].iter().find_map(|root| {
         let candidate = if root.is_empty() {
             file.clone()

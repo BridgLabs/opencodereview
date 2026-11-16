@@ -59,6 +59,11 @@ export function IndexGraphView({
   );
   const selected = graph.nodes.find((node) => node.id === selectedId) ?? null;
   const nodes = slice.nodes;
+  // "Hide tests" emptied the view: the scope has nodes, and all of them are tests.
+  const hiddenByTests =
+    graph !== fullGraph &&
+    nodes.length === 0 &&
+    graphSlice(fullGraph, { focusId, filePath: scope.filePath, includeIsolated: true }).nodes.length > 0;
   useEffect(() => {
     if (graphQuery.isSuccess && selectedId && !selected) onSelect(null);
   }, [graphQuery.isSuccess, selectedId, selected, onSelect]);
@@ -275,6 +280,8 @@ export function IndexGraphView({
                 title="No commits yet"
                 description={`Push to ${repoName} and it will be indexed automatically.`}
               />
+            ) : nodes.length === 0 && hiddenByTests ? (
+              <GraphEmpty title="Only tests in this scope" description="Clear Hide tests to show them." />
             ) : nodes.length === 0 ? (
               <GraphEmpty
                 title={

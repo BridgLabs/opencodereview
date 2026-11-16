@@ -30,10 +30,14 @@ export function normalizeGraph(graph: IndexGraph): IndexGraph {
   return { nodes, edges };
 }
 
-/** Test files by common conventions: RSpec and Minitest, Jest and Vitest, pytest and Go. */
+/**
+ * Test files by common conventions: RSpec and Minitest, Jest and Vitest, pytest and Go. A `spec/`
+ * directory counts only for Ruby, as in the backend's `is_test_path`: `packages/spec/src/a.ts` is source.
+ */
 export function isTestFile(path: string) {
   return (
-    /(^|\/)(test|tests|spec|specs|__tests__)\//.test(path) ||
+    /(^|\/)(test|tests|__tests__)\//.test(path) ||
+    /(^|\/)specs?\/.*\.rb$/.test(path) ||
     /(_spec\.rb|_test\.(rb|go|py)|\.(test|spec)\.[jt]sx?|(^|\/)test_[^/]*\.py)$/.test(path)
   );
 }
@@ -82,13 +86,17 @@ export function graphSlice(
   const isolated = nodes.filter((node) => !connected.has(node.id));
   const hiddenIsolated = !focus && !includeIsolated && edges.length > 0 ? isolated.length : 0;
   if (hiddenIsolated) nodes = nodes.filter((node) => connected.has(node.id));
-  const { nodes: visibleNodes, edges: visibleEdges } = connectedSelection(
-    nodes,
-    edges,
-    focus,
-    Math.max(1, nodeLimit),
-    edgeLimit,
-  );
+  // Isolated nodes rank last, so a large graph would cut every one of them. They get the room the
+  // connected nodes do not need, and at least a quarter of the limit.
+  const limit = Math.max(1, nodeLimit);
+  const linked = nodes.filter((node) => connected.has(node.id));
+  const shownIsolated = hiddenIsolated ? [] : isolated;
+  const reserved = Math.min(shownIsolated.length, Math.max(Math.floor(limit / 4), limit - linked.length));
+  const selection = connectedSelection(linked, edges, focus, limit - reserved, edgeLimit);
+  const visibleEdges = selection.edges;
+  const visibleNodes = reserved
+    ? [...selection.nodes, ...shownIsolated.slice(0, reserved)].sort(compareNodes)
+    : selection.nodes;
   return {
     nodes: visibleNodes,
     edges: visibleEdges,
@@ -103,8 +111,8 @@ export function graphSlice(
  * Cuts a large graph down to `nodeLimit` nodes and `edgeLimit` edges that still read as one
  * graph. It grows from the best connected node, always adding the best connected node that
  * touches what it already has. A second cluster starts only when two nodes still fit, so its
- * first link is kept. Isolated nodes stay, including when the caller asked for them. The edges
- * that joined each node come first, then the rest by how connected their ends are.
+ * first link is kept. The caller adds the isolated nodes. The edges that joined each node come
+ * first, then the rest by how connected their ends are.
  */
 function connectedSelection(
   nodes: IndexGraphNode[],

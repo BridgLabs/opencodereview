@@ -4,6 +4,10 @@
   other, `require` and `require_relative` links between files, `.rb`, `.rake`, `.gemspec` and `.ru`
   files, and a package for each `Gemfile` or `*.gemspec` with its gem dependencies. Reviews of
   Ruby pull requests now get callers and dependencies of the changed code, as for the other languages.
+- Link a Ruby file to the file that defines a constant it uses, as Rails loads code without
+  `require`.
+- A "Hide tests" option in the file and symbol graphs removes test files and their links, so large
+  repositories fit more of the real code.
 
 ### Fixed
 
@@ -16,7 +20,3 @@
 - When an indexing graph is too large to draw, keep the best connected files and symbols, joined to
   each other. Before, it kept the first ones in path order and left many of them floating without
   edges.
-- Ruby: call a `def` inside a class or module a method, stop a class from taking every call its
-  methods make, stop a symbol from linking to the namespace it sits in, and link a file to the file
-  that defines a constant it uses, as Rails loads code without `require`.
-- A "Hide tests" option in the file and symbol graphs removes test files and their links, so large repositories fit more of the real code.

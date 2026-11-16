@@ -56,6 +56,15 @@ describe("index graph", () => {
     expect(graphSlice({ ...graph, edges: [] }, {}).nodes).toHaveLength(4);
     expect(graphSlice(graph, { focusId: "isolated" }).nodes.map((item) => item.id)).toEqual(["isolated"]);
   });
+  it("shows isolated nodes when asked, also in a graph that is cut down", () => {
+    const linked = Array.from({ length: 200 }, (_, i) => node(`n${String(i).padStart(3, "0")}`));
+    const alone = Array.from({ length: 20 }, (_, i) => node(`z${i}`));
+    const big = { nodes: [...linked, ...alone], edges: linked.slice(1).map((item, i) => edge(linked[i].id, item.id)) };
+    const slice = graphSlice(big, { includeIsolated: true });
+    expect(slice.nodes).toHaveLength(150);
+    expect(slice.nodes.filter((item) => item.id.startsWith("z"))).toHaveLength(20);
+    expect(graphSlice({ nodes: big.nodes, edges: [] }, {}).nodes).toHaveLength(150);
+  });
   it("bounds rendering and preserves a focused node outside the default slice", () => {
     const large = {
       nodes: Array.from({ length: 180 }, (_, i) => node(String(i))),
@@ -110,7 +119,14 @@ describe("index graph", () => {
     ]) {
       expect(isTestFile(path), path).toBe(true);
     }
-    for (const path of ["lib/inspector.rb", "src/latest.ts", "app/models/user.rb", "lib/spectrum/a.rb"]) {
+    for (const path of [
+      "lib/inspector.rb",
+      "src/latest.ts",
+      "app/models/user.rb",
+      "lib/spectrum/a.rb",
+      "packages/spec/src/index.ts",
+      "specs/openapi/types.ts",
+    ]) {
       expect(isTestFile(path), path).toBe(false);
     }
   });
