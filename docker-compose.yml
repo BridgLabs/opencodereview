@@ -171,7 +171,7 @@ services:
     depends_on:
       - server
     ports:
-      - "1421:1421"
+      - "${OCR_WEB_BIND:-127.0.0.1}:1421:1421"
     volumes:
       - ocr-data:/data:ro
 
