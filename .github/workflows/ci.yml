@@ -75,9 +75,9 @@ jobs:
                 docker=true
                 ;;
             esac
-            # The maintainer scripts in docker/ and the web proxy config have their own Python tests.
+            # The maintainer scripts in docker/ and bench/, and the web proxy config, have their own Python tests.
             case "$file" in
-              docker/*.py|docker/web-nginx*.conf)
+              docker/*.py|docker/web-nginx*.conf|bench/*.py|bench/adapters/*.py)
                 scripts=true
                 ;;
             esac
@@ -264,6 +264,9 @@ jobs:
 
       - name: Web proxy behavior regression
         run: python3 -B docker/test-web-proxy.py
+
+      - name: Benchmark adapter tests
+        run: python3 -B bench/test_adapters.py
 
   backend-test:
     name: Backend test (${{ matrix.shard }}/8)
