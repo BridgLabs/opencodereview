@@ -13,6 +13,7 @@ fn fixture() -> (ReviewRequestSnapshot, RequestTimeline) {
                 team_reviewers: set(&["backend", "frontend"]),
             },
             events: set(&["original-request"]),
+            parts_posted: false,
         },
         RequestTimeline {
             open: true,
@@ -22,6 +23,7 @@ fn fixture() -> (ReviewRequestSnapshot, RequestTimeline) {
                 node_id: "ocr-review".into(),
                 login: "reviewer".into(),
                 teams: set(&["backend", "not-requested"]),
+                body: String::new(),
             }],
         },
     )
@@ -31,7 +33,7 @@ fn fixture() -> (ReviewRequestSnapshot, RequestTimeline) {
 fn restores_only_consumed_authenticated_user_and_attributed_requested_teams() {
     let (snapshot, timeline) = fixture();
     let RestoreRequests::Request(plan) =
-        plan_request_restoration(&snapshot, 42, &timeline, &RequestedReviewers::default()).unwrap()
+        plan_request_restoration(&snapshot, "", 42, &timeline, &RequestedReviewers::default()).unwrap()
     else {
         panic!("expected restoration");
     };
@@ -43,7 +45,7 @@ fn restores_only_consumed_authenticated_user_and_attributed_requested_teams() {
 fn does_not_request_reviewers_already_pending() {
     let (snapshot, timeline) = fixture();
     assert!(matches!(
-        plan_request_restoration(&snapshot, 42, &timeline, &snapshot.requested).unwrap(),
+        plan_request_restoration(&snapshot, "", 42, &timeline, &snapshot.requested).unwrap(),
         RestoreRequests::Done
     ));
 }
@@ -54,7 +56,7 @@ fn concurrent_review_request_removal_or_addition_wins_even_by_same_user() {
         let (snapshot, mut timeline) = fixture();
         timeline.events.insert(event.into());
         assert!(matches!(
-            plan_request_restoration(&snapshot, 42, &timeline, &RequestedReviewers::default()).unwrap(),
+            plan_request_restoration(&snapshot, "", 42, &timeline, &RequestedReviewers::default()).unwrap(),
             RestoreRequests::Changed
         ));
     }
@@ -65,18 +67,18 @@ fn missing_history_identity_or_closed_pr_never_restores() {
     let (snapshot, mut timeline) = fixture();
     timeline.events.remove("original-request");
     assert!(matches!(
-        plan_request_restoration(&snapshot, 42, &timeline, &RequestedReviewers::default()).unwrap(),
+        plan_request_restoration(&snapshot, "", 42, &timeline, &RequestedReviewers::default()).unwrap(),
         RestoreRequests::Changed
     ));
     let (snapshot, mut timeline) = fixture();
     timeline.reviews[0].login = "different-user".into();
     assert!(matches!(
-        plan_request_restoration(&snapshot, 42, &timeline, &RequestedReviewers::default()).unwrap(),
+        plan_request_restoration(&snapshot, "", 42, &timeline, &RequestedReviewers::default()).unwrap(),
         RestoreRequests::Changed
     ));
     timeline.open = false;
     assert!(matches!(
-        plan_request_restoration(&snapshot, 42, &timeline, &RequestedReviewers::default()).unwrap(),
+        plan_request_restoration(&snapshot, "", 42, &timeline, &RequestedReviewers::default()).unwrap(),
         RestoreRequests::Done
     ));
 }
@@ -84,7 +86,7 @@ fn missing_history_identity_or_closed_pr_never_restores() {
 #[test]
 fn missing_published_review_is_retryable_without_another_publication() {
     let (snapshot, timeline) = fixture();
-    assert!(plan_request_restoration(&snapshot, 99, &timeline, &RequestedReviewers::default()).is_err());
+    assert!(plan_request_restoration(&snapshot, "", 99, &timeline, &RequestedReviewers::default()).is_err());
 }
 
 #[test]
@@ -93,7 +95,7 @@ fn no_attribution_and_no_user_request_never_adds_a_request() {
     snapshot.requested.reviewers.clear();
     timeline.reviews[0].teams.clear();
     assert!(matches!(
-        plan_request_restoration(&snapshot, 42, &timeline, &RequestedReviewers::default()).unwrap(),
+        plan_request_restoration(&snapshot, "", 42, &timeline, &RequestedReviewers::default()).unwrap(),
         RestoreRequests::Done
     ));
 }
@@ -127,7 +129,7 @@ fn snapshot_requires_stable_history_and_complete_reads_before_publication() {
         history(false),
     ]
     .into_iter();
-    let snapshot = snapshot_review_requests_with("o/r", 1, &mut |_| Ok(replies.next().unwrap())).unwrap();
+    let snapshot = snapshot_review_requests_with("o/r", 1, "", &mut |_| Ok(replies.next().unwrap())).unwrap();
     assert_eq!(snapshot.login, "reviewer");
     assert_eq!(snapshot.requested.reviewers, set(&["reviewer", "other"]));
     let mut replies = vec![
@@ -137,8 +139,8 @@ fn snapshot_requires_stable_history_and_complete_reads_before_publication() {
         history(true),
     ]
     .into_iter();
-    assert!(snapshot_review_requests_with("o/r", 1, &mut |_| Ok(replies.next().unwrap())).is_err());
-    assert!(snapshot_review_requests_with("o/r", 1, &mut |_| Err("offline".into())).is_err());
+    assert!(snapshot_review_requests_with("o/r", 1, "", &mut |_| Ok(replies.next().unwrap())).is_err());
+    assert!(snapshot_review_requests_with("o/r", 1, "", &mut |_| Err("offline".into())).is_err());
 }
 
 #[test]
@@ -151,7 +153,7 @@ fn restore_transport_only_posts_missing_requests_and_timeout_retry_never_posts_r
     ]
     .into_iter();
     let mut calls = vec![];
-    let result = restore_review_requests_with("o/r", 1, 42, &snapshot, &mut |args| {
+    let result = restore_review_requests_with("o/r", 1, 42, "", &snapshot, &mut |args| {
         calls.push(args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>());
         replies.next().unwrap()
     });
@@ -178,7 +180,7 @@ fn restore_transport_only_posts_missing_requests_and_timeout_retry_never_posts_r
         .push(serde_json::json!({"id":"restored-request","__typename":"ReviewRequestedEvent"}));
     let mut replies = vec![requests(&["reviewer"], &["backend", "frontend"]), changed].into_iter();
     let mut read_count = 0;
-    assert!(restore_review_requests_with("o/r", 1, 42, &snapshot, &mut |args| {
+    assert!(restore_review_requests_with("o/r", 1, 42, "", &snapshot, &mut |args| {
         assert!(!args.contains(&"POST"));
         read_count += 1;
         Ok(replies.next().unwrap())
@@ -217,9 +219,87 @@ fn concurrent_activity_never_calls_the_write_endpoint() {
         .unwrap()
         .push(serde_json::json!({"id":"human-removal","__typename":"ReviewRequestRemovedEvent"}));
     let mut replies = vec![requests(&[], &[]), changed].into_iter();
-    assert!(!restore_review_requests_with("o/r", 1, 42, &snapshot, &mut |args| {
+    assert!(!restore_review_requests_with("o/r", 1, 42, "", &snapshot, &mut |args| {
         assert!(!args.contains(&"POST"));
         Ok(replies.next().unwrap())
     })
     .unwrap());
+}
+
+#[test]
+fn earlier_batches_of_the_same_publication_are_not_other_activity() {
+    let marker = "<!-- ocr-review-post:v1 repo=o/r pr=1 run=7 head=abc installation=i -->";
+    let part = |id: i64, node: &str, body: String, teams: &[&str]| AttributedReview {
+        id,
+        node_id: node.into(),
+        login: "reviewer".into(),
+        teams: set(teams),
+        body,
+    };
+    let (snapshot, mut timeline) = fixture();
+    timeline.reviews[0].teams.clear();
+    let part_body = format!(
+        "part 1\n\n{}",
+        crate::github::review_batches::part_marker(marker).unwrap()
+    );
+    timeline.reviews.push(part(40, "part-1", part_body, &["backend"]));
+    timeline.events.insert("part-1".into());
+    let RestoreRequests::Request(plan) =
+        plan_request_restoration(&snapshot, marker, 42, &timeline, &RequestedReviewers::default()).unwrap()
+    else {
+        panic!("expected restoration");
+    };
+    assert_eq!(plan.reviewers, set(&["reviewer"]));
+    assert_eq!(plan.team_reviewers, set(&["backend"]));
+    let other = "<!-- ocr-review-post:v1 repo=o/r pr=1 run=8 head=abc installation=i -->";
+    assert!(matches!(
+        plan_request_restoration(&snapshot, other, 42, &timeline, &RequestedReviewers::default()).unwrap(),
+        RestoreRequests::Changed
+    ));
+}
+
+#[test]
+fn batches_from_an_earlier_attempt_already_in_the_snapshot_still_restore() {
+    let marker = "<!-- ocr-review-post:v1 repo=o/r pr=1 run=7 head=abc installation=i -->";
+    let (mut snapshot, mut timeline) = fixture();
+    let body = format!(
+        "part 1\n\n{}",
+        crate::github::review_batches::part_marker(marker).unwrap()
+    );
+    timeline.reviews.push(AttributedReview {
+        id: 40,
+        node_id: "old-part".into(),
+        login: "reviewer".into(),
+        teams: set(&[]),
+        body,
+    });
+    timeline.events.insert("old-part".into());
+    snapshot.events.insert("old-part".into());
+    assert!(matches!(
+        plan_request_restoration(&snapshot, marker, 42, &timeline, &RequestedReviewers::default()).unwrap(),
+        RestoreRequests::Request(_)
+    ));
+}
+
+#[test]
+fn snapshot_records_batches_of_the_same_publication_already_posted() {
+    let marker = "<!-- ocr-review-post:v1 repo=o/r pr=1 run=7 head=abc installation=i -->";
+    let part = crate::github::review_batches::part_marker(marker).unwrap();
+    let with_part = || {
+        serde_json::json!({"data":{"repository":{"pullRequest":{"state":"OPEN","timelineItems":{"nodes":[{
+            "id":"part-1", "__typename":"PullRequestReview", "databaseId":40, "body": format!("part 1\n\n{part}"),
+            "author":{"login":"reviewer"}, "onBehalfOf":{"pageInfo":{"hasNextPage":false},"nodes":[]}
+        }],"pageInfo":{"hasNextPage":false,"endCursor":"c"}}}}}})
+    };
+    for (marker, expected) in [(marker, true), ("<!-- ocr-review-post:v1 run=8 -->", false)] {
+        let mut replies = vec![
+            serde_json::json!({"login":"reviewer"}),
+            with_part(),
+            requests(&[], &[]),
+            with_part(),
+        ]
+        .into_iter();
+        let snapshot = snapshot_review_requests_with("o/r", 1, marker, &mut |_| Ok(replies.next().unwrap())).unwrap();
+        assert_eq!(snapshot.parts_posted, expected);
+    }
 }

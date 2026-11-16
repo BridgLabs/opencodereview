@@ -146,7 +146,11 @@ pub(crate) fn decide_review_http(
             }
             posted_review_id = publish_review_with_recovery(
                 || {
-                    let snapshot = github::snapshot_review_requests(&full_name, number)?;
+                    let snapshot = github::snapshot_review_requests(
+                        &full_name,
+                        number,
+                        post_marker.as_deref().unwrap_or_default(),
+                    )?;
                     with_db_raw(state, |db| {
                         db.prepare_review_request_restoration(
                             run.id,

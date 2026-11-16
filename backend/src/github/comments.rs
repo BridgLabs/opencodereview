@@ -67,14 +67,30 @@ pub fn prepare_review(payload_json: &str) -> Result<PreparedReview, String> {
 
 /// Execute the publication command only after local payload preparation succeeds.
 pub fn post_review(full_name: &str, number: i64, prepared: PreparedReview) -> Result<Option<i64>, String> {
-    let route = format!("repos/{full_name}/pulls/{number}/reviews");
-    let path_str = prepared.path.to_string_lossy().to_string();
-    let result = run_raw("gh", &["api", "--method", "POST", &route, "--input", &path_str]);
-    let bytes = result.map_err(|error| format!("could not post review (GitHub API): {error}"))?;
-    let review_id = serde_json::from_slice::<serde_json::Value>(&bytes)
-        .ok()
-        .and_then(|value| value.get("id").and_then(|id| id.as_i64()));
-    Ok(review_id)
+    struct Gh<'a> {
+        route: String,
+        path: &'a std::path::Path,
+    }
+    impl super::review_batches::ReviewPoster for Gh<'_> {
+        fn post(&mut self, payload_json: &str) -> Result<Option<i64>, String> {
+            std::fs::write(self.path, payload_json).map_err(|error| error.to_string())?;
+            let path = self.path.to_string_lossy();
+            let bytes = run_raw("gh", &["api", "--method", "POST", &self.route, "--input", &path])
+                .map_err(|error| format!("could not post review (GitHub API): {error}"))?;
+            Ok(serde_json::from_slice::<serde_json::Value>(&bytes)
+                .ok()
+                .and_then(|value| value.get("id").and_then(|id| id.as_i64())))
+        }
+        fn wait(&mut self, duration: std::time::Duration) {
+            std::thread::sleep(duration);
+        }
+    }
+    let payload = std::fs::read_to_string(&prepared.path).map_err(|error| error.to_string())?;
+    let mut gh = Gh {
+        route: format!("repos/{full_name}/pulls/{number}/reviews"),
+        path: &prepared.path,
+    };
+    super::review_batches::post_review_batches(&mut gh, &payload)
 }
 
 pub fn find_review_id_by_marker(full_name: &str, number: i64, marker: &str) -> Result<Option<i64>, String> {

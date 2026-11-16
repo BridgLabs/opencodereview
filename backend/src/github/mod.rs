@@ -21,6 +21,7 @@ mod auth;
 mod comments;
 mod pr;
 mod repo;
+mod review_batches;
 mod review_requests;
 mod status_comments;
 mod transport;
@@ -115,4 +116,5 @@ pub fn avatar_url(login: &str) -> String {
 #[cfg(test)]
 mod tests;
 
+pub(crate) use review_batches::part_marker as review_part_marker;
 pub(crate) use review_requests::{restore_review_requests, snapshot_review_requests, ReviewRequestSnapshot};
