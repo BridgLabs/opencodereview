@@ -208,6 +208,8 @@ pub(crate) fn reconcile_silent_review_result(
     }
 }
 
+const PARTIAL_PUBLICATION: &str = "Only the earlier batches of this review reached GitHub, and they may have used up its review requests. Publish the review again, then check the requested reviewers on GitHub.";
+
 pub(crate) const CLEAN_RESULT_RETRY_INTERVAL_MS: i64 = 10 * 60 * 1000;
 
 /// Automatic retry of failed clean-result publications. Adoption by run marker
@@ -434,6 +436,13 @@ pub(crate) fn start_review_request_restoration(db_handle: Db) {
                         None => github::find_review_id_by_marker(&job.full_name, job.number, &job.marker)?,
                     };
                     let Some(review_id) = review_id else {
+                        // Earlier batches without the last review may have used up the requests.
+                        let part = github::review_part_marker(&job.marker);
+                        if let Some(part) = part {
+                            if github::find_review_id_by_marker(&job.full_name, job.number, &part)?.is_some() {
+                                return Err(PARTIAL_PUBLICATION.into());
+                            }
+                        }
                         return Ok(true);
                     };
                     db_handle

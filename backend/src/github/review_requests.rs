@@ -7,6 +7,10 @@ pub(crate) struct ReviewRequestSnapshot {
     pub login: String,
     pub requested: RequestedReviewers,
     pub events: BTreeSet<String>,
+    /// Earlier batches of this publication were already on GitHub, so they may have used up
+    /// requests this snapshot no longer sees.
+    #[serde(default)]
+    pub parts_posted: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -154,13 +158,18 @@ fn request_timeline(
     Err("Review request history exceeds the supported limit".into())
 }
 
-pub(crate) fn snapshot_review_requests(full_name: &str, number: i64) -> Result<ReviewRequestSnapshot, String> {
-    snapshot_review_requests_with(full_name, number, &mut capture_json)
+pub(crate) fn snapshot_review_requests(
+    full_name: &str,
+    number: i64,
+    marker: &str,
+) -> Result<ReviewRequestSnapshot, String> {
+    snapshot_review_requests_with(full_name, number, marker, &mut capture_json)
 }
 
 fn snapshot_review_requests_with(
     full_name: &str,
     number: i64,
+    marker: &str,
     api: &mut impl FnMut(&[&str]) -> Result<serde_json::Value, String>,
 ) -> Result<ReviewRequestSnapshot, String> {
     let user = api(&["api", "user"])?;
@@ -174,10 +183,17 @@ fn snapshot_review_requests_with(
     if !after.open || before.events != after.events {
         return Err("Review requests changed before publication. Retry the review decision.".into());
     }
+    let parts_posted = review_batches::part_marker(marker).is_some_and(|part_marker| {
+        after
+            .reviews
+            .iter()
+            .any(|review| review.login == login && review.body.contains(&part_marker))
+    });
     Ok(ReviewRequestSnapshot {
         login,
         requested,
         events: after.events,
+        parts_posted,
     })
 }
 
@@ -232,7 +248,8 @@ pub(crate) fn plan_request_restoration(
     }
     let mut other_events = timeline.events.clone();
     other_events.remove(&review.node_id);
-    for part in parts {
+    // Batches left by an earlier failed attempt are already part of the snapshot's history.
+    for part in parts.iter().filter(|part| !snapshot.events.contains(&part.node_id)) {
         other_events.remove(&part.node_id);
     }
     if other_events != snapshot.events {

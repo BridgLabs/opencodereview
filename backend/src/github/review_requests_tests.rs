@@ -13,6 +13,7 @@ fn fixture() -> (ReviewRequestSnapshot, RequestTimeline) {
                 team_reviewers: set(&["backend", "frontend"]),
             },
             events: set(&["original-request"]),
+            parts_posted: false,
         },
         RequestTimeline {
             open: true,
@@ -128,7 +129,7 @@ fn snapshot_requires_stable_history_and_complete_reads_before_publication() {
         history(false),
     ]
     .into_iter();
-    let snapshot = snapshot_review_requests_with("o/r", 1, &mut |_| Ok(replies.next().unwrap())).unwrap();
+    let snapshot = snapshot_review_requests_with("o/r", 1, "", &mut |_| Ok(replies.next().unwrap())).unwrap();
     assert_eq!(snapshot.login, "reviewer");
     assert_eq!(snapshot.requested.reviewers, set(&["reviewer", "other"]));
     let mut replies = vec![
@@ -138,8 +139,8 @@ fn snapshot_requires_stable_history_and_complete_reads_before_publication() {
         history(true),
     ]
     .into_iter();
-    assert!(snapshot_review_requests_with("o/r", 1, &mut |_| Ok(replies.next().unwrap())).is_err());
-    assert!(snapshot_review_requests_with("o/r", 1, &mut |_| Err("offline".into())).is_err());
+    assert!(snapshot_review_requests_with("o/r", 1, "", &mut |_| Ok(replies.next().unwrap())).is_err());
+    assert!(snapshot_review_requests_with("o/r", 1, "", &mut |_| Err("offline".into())).is_err());
 }
 
 #[test]
@@ -255,4 +256,50 @@ fn earlier_batches_of_the_same_publication_are_not_other_activity() {
         plan_request_restoration(&snapshot, other, 42, &timeline, &RequestedReviewers::default()).unwrap(),
         RestoreRequests::Changed
     ));
+}
+
+#[test]
+fn batches_from_an_earlier_attempt_already_in_the_snapshot_still_restore() {
+    let marker = "<!-- ocr-review-post:v1 repo=o/r pr=1 run=7 head=abc installation=i -->";
+    let (mut snapshot, mut timeline) = fixture();
+    let body = format!(
+        "part 1\n\n{}",
+        crate::github::review_batches::part_marker(marker).unwrap()
+    );
+    timeline.reviews.push(AttributedReview {
+        id: 40,
+        node_id: "old-part".into(),
+        login: "reviewer".into(),
+        teams: set(&[]),
+        body,
+    });
+    timeline.events.insert("old-part".into());
+    snapshot.events.insert("old-part".into());
+    assert!(matches!(
+        plan_request_restoration(&snapshot, marker, 42, &timeline, &RequestedReviewers::default()).unwrap(),
+        RestoreRequests::Request(_)
+    ));
+}
+
+#[test]
+fn snapshot_records_batches_of_the_same_publication_already_posted() {
+    let marker = "<!-- ocr-review-post:v1 repo=o/r pr=1 run=7 head=abc installation=i -->";
+    let part = crate::github::review_batches::part_marker(marker).unwrap();
+    let with_part = || {
+        serde_json::json!({"data":{"repository":{"pullRequest":{"state":"OPEN","timelineItems":{"nodes":[{
+            "id":"part-1", "__typename":"PullRequestReview", "databaseId":40, "body": format!("part 1\n\n{part}"),
+            "author":{"login":"reviewer"}, "onBehalfOf":{"pageInfo":{"hasNextPage":false},"nodes":[]}
+        }],"pageInfo":{"hasNextPage":false,"endCursor":"c"}}}}}})
+    };
+    for (marker, expected) in [(marker, true), ("<!-- ocr-review-post:v1 run=8 -->", false)] {
+        let mut replies = vec![
+            serde_json::json!({"login":"reviewer"}),
+            with_part(),
+            requests(&[], &[]),
+            with_part(),
+        ]
+        .into_iter();
+        let snapshot = snapshot_review_requests_with("o/r", 1, marker, &mut |_| Ok(replies.next().unwrap())).unwrap();
+        assert_eq!(snapshot.parts_posted, expected);
+    }
 }
