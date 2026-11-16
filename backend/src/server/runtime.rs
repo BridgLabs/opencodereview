@@ -208,6 +208,8 @@ pub(crate) fn reconcile_silent_review_result(
     }
 }
 
+const PARTIAL_PUBLICATION: &str = "Only the earlier batches of this review reached GitHub, and they may have used up its review requests. Publish the review again, then check the requested reviewers on GitHub.";
+
 pub(crate) const CLEAN_RESULT_RETRY_INTERVAL_MS: i64 = 10 * 60 * 1000;
 
 /// Automatic retry of failed clean-result publications. Adoption by run marker
@@ -433,17 +435,42 @@ pub(crate) fn start_review_request_restoration(db_handle: Db) {
                         Some(id) => Some(id),
                         None => github::find_review_id_by_marker(&job.full_name, job.number, &job.marker)?,
                     };
-                    let Some(review_id) = review_id else {
-                        return Ok(true);
+                    let review_id = match review_id {
+                        Some(review_id) => review_id,
+                        None => {
+                            // Earlier batches without the last review may have used up the requests,
+                            // unless the publication is still posting its batches.
+                            let Some(part) = github::review_part_marker(&job.marker) else {
+                                return Ok(Some(true));
+                            };
+                            if github::find_review_id_by_marker(&job.full_name, job.number, &part)?.is_none() {
+                                return Ok(Some(true));
+                            }
+                            let run = db_handle.open()?.review_run_by_id(job.run_id)?;
+                            if run.is_some_and(|run| run.status == "posting") {
+                                return Ok(None);
+                            }
+                            // The last review may have landed after the first lookup.
+                            github::find_review_id_by_marker(&job.full_name, job.number, &job.marker)?
+                                .ok_or(PARTIAL_PUBLICATION)?
+                        }
                     };
                     db_handle
                         .open()?
                         .accept_review_request_restoration(job.run_id, review_id)?;
-                    github::restore_review_requests(&job.full_name, job.number, review_id, &job.snapshot)
+                    github::restore_review_requests(&job.full_name, job.number, review_id, &job.marker, &job.snapshot)
+                        .map(Some)
                 })();
+                if matches!(restored, Ok(None)) {
+                    let _ = db_handle
+                        .open()
+                        .and_then(|db| db.defer_review_request_restoration(job.run_id));
+                    thread::sleep(Duration::from_secs(15));
+                    continue;
+                }
                 let (status, error) = match restored {
-                    Ok(true) => ("done", None),
-                    Ok(false) => ("changed", Some("Other review activity occurred while OpenCodeReview was publishing. Check whether a human review still needs to be requested on GitHub.".to_string())),
+                    Ok(None) | Ok(Some(true)) => ("done", None),
+                    Ok(Some(false)) => ("changed", Some("Other review activity occurred while OpenCodeReview was publishing. Check whether a human review still needs to be requested on GitHub.".to_string())),
                     Err(error) if job.attempts < 3 => ("pending", Some(error)),
                     Err(error) => ("failed", Some(format!("Review request restoration failed after three attempts. Check the requested reviewers on GitHub. {error}"))),
                 };

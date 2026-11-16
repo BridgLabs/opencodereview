@@ -17,7 +17,31 @@ impl Database {
         snapshot: &crate::github::ReviewRequestSnapshot,
         marker: &str,
     ) -> Result<(), String> {
-        let json = serde_json::to_string(snapshot).map_err(|e| e.to_string())?;
+        let mut snapshot = snapshot.clone();
+        if snapshot.parts_posted {
+            // A retry after earlier batches landed: they used up requests the first snapshot saw.
+            let previous = self
+                .conn
+                .query_row(
+                    "SELECT snapshot_json FROM review_request_restorations WHERE run_id=$1 AND marker=$2",
+                    params![run_id, marker],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+            if let Some(previous) = previous {
+                let previous: crate::github::ReviewRequestSnapshot =
+                    serde_json::from_str(&previous).map_err(|e| e.to_string())?;
+                if previous.login == snapshot.login {
+                    snapshot.requested.reviewers.extend(previous.requested.reviewers);
+                    snapshot
+                        .requested
+                        .team_reviewers
+                        .extend(previous.requested.team_reviewers);
+                }
+            }
+        }
+        let json = serde_json::to_string(&snapshot).map_err(|e| e.to_string())?;
         self.conn
             .execute(
                 "INSERT INTO review_request_restorations(run_id,snapshot_json,marker,next_attempt_at)
@@ -94,6 +118,18 @@ impl Database {
         }))
     }
 
+    /// Checks again later without spending an attempt, while the publication is still posting.
+    pub(crate) fn defer_review_request_restoration(&self, run_id: i64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE review_request_restorations SET status='pending',lease_until=0,attempts=GREATEST(attempts-1,0),
+                    next_attempt_at=$2 WHERE run_id=$1",
+                params![run_id, now_millis() + 60_000],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub(crate) fn finish_review_request_restoration(
         &self,
         run_id: i64,
@@ -166,6 +202,48 @@ mod tests {
         db.finish_review_request_restoration(run, "done", None).unwrap();
         assert!(db.claim_review_request_restoration().unwrap().is_none());
         assert_eq!(db.review_run_by_id(run).unwrap().unwrap().status, "posted");
+    }
+
+    #[test]
+    fn retry_after_posted_batches_keeps_the_requests_the_first_attempt_saw() {
+        let (db, run, snapshot) = fixture();
+        db.prepare_review_request_restoration(run, &snapshot, "marker").unwrap();
+        let mut retry = snapshot.clone();
+        retry.requested.reviewers.clear();
+        retry.requested.team_reviewers.clear();
+        retry.parts_posted = true;
+        db.prepare_review_request_restoration(run, &retry, "marker").unwrap();
+        let stored = |db: &Database| {
+            let json: String = db
+                .conn
+                .query_row(
+                    "SELECT snapshot_json FROM review_request_restorations WHERE run_id=$1",
+                    [run],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            serde_json::from_str::<crate::github::ReviewRequestSnapshot>(&json).unwrap()
+        };
+        assert_eq!(stored(&db).requested, snapshot.requested);
+        retry.parts_posted = false;
+        db.prepare_review_request_restoration(run, &retry, "marker").unwrap();
+        assert!(stored(&db).requested.reviewers.is_empty());
+    }
+
+    #[test]
+    fn deferring_while_posting_spends_no_attempt() {
+        let (db, run, snapshot) = fixture();
+        db.prepare_review_request_restoration(run, &snapshot, "marker").unwrap();
+        db.conn
+            .execute("UPDATE review_request_restorations SET next_attempt_at=0", [])
+            .unwrap();
+        assert_eq!(db.claim_review_request_restoration().unwrap().unwrap().attempts, 1);
+        db.defer_review_request_restoration(run).unwrap();
+        assert!(db.claim_review_request_restoration().unwrap().is_none());
+        db.conn
+            .execute("UPDATE review_request_restorations SET next_attempt_at=0", [])
+            .unwrap();
+        assert_eq!(db.claim_review_request_restoration().unwrap().unwrap().attempts, 1);
     }
 
     #[test]
