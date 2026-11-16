@@ -116,6 +116,7 @@ describe("index graph", () => {
       "pkg/a_test.go",
       "tests/test_a.py",
       "x/__tests__/a.js",
+      "spec/javascripts/cart_spec.js",
     ]) {
       expect(isTestFile(path), path).toBe(true);
     }

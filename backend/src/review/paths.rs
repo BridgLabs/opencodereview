@@ -279,14 +279,12 @@ pub(crate) fn test_relationship_hints(changed: &[String]) -> Vec<String> {
 }
 
 pub(crate) fn path_stem_key(path: &str) -> String {
-    Path::new(path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(path)
-        .replace(".test", "")
-        .replace(".spec", "")
-        .replace("_test", "")
-        .replace("_spec", "")
+    let stem = Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or(path);
+    // Only a trailing marker is removed: `user_specification_spec` keeps `user_specification`.
+    [".test", ".spec", "_test", "_spec"]
+        .iter()
+        .find_map(|suffix| stem.strip_suffix(suffix))
+        .unwrap_or(stem)
         .to_ascii_lowercase()
 }
 

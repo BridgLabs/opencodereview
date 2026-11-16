@@ -869,6 +869,10 @@ fn recognizes_ruby_files_and_tests() {
     for changed in [
         ["app/models/user.rb", "spec/models/user_spec.rb"],
         ["app/models/user.rb", "test/models/user_test.rb"],
+        [
+            "app/models/user_specification.rb",
+            "spec/models/user_specification_spec.rb",
+        ],
     ] {
         let changed = changed.map(String::from);
         assert_eq!(

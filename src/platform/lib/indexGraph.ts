@@ -38,7 +38,7 @@ export function isTestFile(path: string) {
   return (
     /(^|\/)(test|tests|__tests__)\//.test(path) ||
     /(^|\/)specs?\/.*\.rb$/.test(path) ||
-    /(_spec\.rb|_test\.(rb|go|py)|\.(test|spec)\.[jt]sx?|(^|\/)test_[^/]*\.py)$/.test(path)
+    /(_spec\.(rb|[jt]sx?)|_test\.(rb|go|py)|\.(test|spec)\.[jt]sx?|(^|\/)test_[^/]*\.py)$/.test(path)
   );
 }
 
