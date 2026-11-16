@@ -789,6 +789,18 @@ fn resolves_ruby_requires_to_repo_files() {
         resolve_ruby_spec("Rakefile", "tasks/seed.rake", &rake).as_deref(),
         Some("lib/tasks/seed.rake")
     );
+    // A relative `load` of a Ruby file that is not `.rb` resolves as written.
+    assert_eq!(
+        resolve_spec(
+            "lib/deploy.rb",
+            Some("ruby"),
+            "./tasks/seed.rake",
+            &rake,
+            &HashSet::new(),
+            None
+        ),
+        (true, Some("lib/tasks/seed.rake".to_string()))
+    );
     let (resolved, path) = resolve_spec(
         "app/models/order.rb",
         Some("ruby"),

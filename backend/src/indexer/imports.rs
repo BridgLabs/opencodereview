@@ -191,7 +191,7 @@ pub(crate) fn resolve_spec(
         if let Some(path) = resolve_ruby_spec(from_path, spec, files) {
             return (true, Some(path));
         }
-        // A relative Ruby require only targets a .rb file; the generic branch would link it to a .js or .py sibling.
+        // A relative Ruby require or load only targets a Ruby file; the generic branch would link it to a .js or .py sibling.
         if spec.starts_with('.') {
             return (false, None);
         }
