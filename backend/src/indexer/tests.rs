@@ -805,6 +805,19 @@ fn resolves_ruby_requires_to_repo_files() {
     );
     assert!(resolved);
     assert_eq!(path.as_deref(), Some("app/models/formatter.rb"));
+    // With no tracked .rb target, a relative Ruby require must stay unresolved, not link to the .js sibling.
+    let js_only: HashSet<String> = ["app/models/formatter.js".to_string()].into();
+    assert_eq!(
+        resolve_spec(
+            "app/models/order.rb",
+            Some("ruby"),
+            "./formatter",
+            &js_only,
+            &HashSet::new(),
+            None,
+        ),
+        (false, None)
+    );
     // Other languages must still resolve index files before a sibling .rb.
     let (resolved, path) = resolve_spec(
         "app/main.ts",
