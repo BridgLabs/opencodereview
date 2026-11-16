@@ -436,23 +436,36 @@ pub(crate) fn start_review_request_restoration(db_handle: Db) {
                         None => github::find_review_id_by_marker(&job.full_name, job.number, &job.marker)?,
                     };
                     let Some(review_id) = review_id else {
-                        // Earlier batches without the last review may have used up the requests.
+                        // Earlier batches without the last review may have used up the requests,
+                        // unless the publication is still posting its batches.
                         let part = github::review_part_marker(&job.marker);
                         if let Some(part) = part {
                             if github::find_review_id_by_marker(&job.full_name, job.number, &part)?.is_some() {
+                                let run = db_handle.open()?.review_run_by_id(job.run_id)?;
+                                if run.is_some_and(|run| run.status == "posting") {
+                                    return Ok(None);
+                                }
                                 return Err(PARTIAL_PUBLICATION.into());
                             }
                         }
-                        return Ok(true);
+                        return Ok(Some(true));
                     };
                     db_handle
                         .open()?
                         .accept_review_request_restoration(job.run_id, review_id)?;
                     github::restore_review_requests(&job.full_name, job.number, review_id, &job.marker, &job.snapshot)
+                        .map(Some)
                 })();
+                if matches!(restored, Ok(None)) {
+                    let _ = db_handle
+                        .open()
+                        .and_then(|db| db.defer_review_request_restoration(job.run_id));
+                    thread::sleep(Duration::from_secs(15));
+                    continue;
+                }
                 let (status, error) = match restored {
-                    Ok(true) => ("done", None),
-                    Ok(false) => ("changed", Some("Other review activity occurred while OpenCodeReview was publishing. Check whether a human review still needs to be requested on GitHub.".to_string())),
+                    Ok(None) | Ok(Some(true)) => ("done", None),
+                    Ok(Some(false)) => ("changed", Some("Other review activity occurred while OpenCodeReview was publishing. Check whether a human review still needs to be requested on GitHub.".to_string())),
                     Err(error) if job.attempts < 3 => ("pending", Some(error)),
                     Err(error) => ("failed", Some(format!("Review request restoration failed after three attempts. Check the requested reviewers on GitHub. {error}"))),
                 };

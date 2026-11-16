@@ -118,6 +118,18 @@ impl Database {
         }))
     }
 
+    /// Checks again later without spending an attempt, while the publication is still posting.
+    pub(crate) fn defer_review_request_restoration(&self, run_id: i64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE review_request_restorations SET status='pending',lease_until=0,attempts=GREATEST(attempts-1,0),
+                    next_attempt_at=$2 WHERE run_id=$1",
+                params![run_id, now_millis() + 60_000],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     pub(crate) fn finish_review_request_restoration(
         &self,
         run_id: i64,
@@ -216,6 +228,22 @@ mod tests {
         retry.parts_posted = false;
         db.prepare_review_request_restoration(run, &retry, "marker").unwrap();
         assert!(stored(&db).requested.reviewers.is_empty());
+    }
+
+    #[test]
+    fn deferring_while_posting_spends_no_attempt() {
+        let (db, run, snapshot) = fixture();
+        db.prepare_review_request_restoration(run, &snapshot, "marker").unwrap();
+        db.conn
+            .execute("UPDATE review_request_restorations SET next_attempt_at=0", [])
+            .unwrap();
+        assert_eq!(db.claim_review_request_restoration().unwrap().unwrap().attempts, 1);
+        db.defer_review_request_restoration(run).unwrap();
+        assert!(db.claim_review_request_restoration().unwrap().is_none());
+        db.conn
+            .execute("UPDATE review_request_restorations SET next_attempt_at=0", [])
+            .unwrap();
+        assert_eq!(db.claim_review_request_restoration().unwrap().unwrap().attempts, 1);
     }
 
     #[test]
