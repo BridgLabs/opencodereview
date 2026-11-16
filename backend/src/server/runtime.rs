@@ -439,7 +439,7 @@ pub(crate) fn start_review_request_restoration(db_handle: Db) {
                     db_handle
                         .open()?
                         .accept_review_request_restoration(job.run_id, review_id)?;
-                    github::restore_review_requests(&job.full_name, job.number, review_id, &job.snapshot)
+                    github::restore_review_requests(&job.full_name, job.number, review_id, &job.marker, &job.snapshot)
                 })();
                 let (status, error) = match restored {
                     Ok(true) => ("done", None),

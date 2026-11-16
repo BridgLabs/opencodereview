@@ -28,6 +28,7 @@ pub(crate) struct AttributedReview {
     pub node_id: String,
     pub login: String,
     pub teams: BTreeSet<String>,
+    pub body: String,
 }
 
 pub(crate) enum RestoreRequests {
@@ -79,7 +80,7 @@ fn request_timeline(
         timelineItems(first:100,after:$cursor,itemTypes:[PULL_REQUEST_REVIEW,REVIEW_REQUESTED_EVENT,REVIEW_REQUEST_REMOVED_EVENT,REVIEW_DISMISSED_EVENT,CLOSED_EVENT,MERGED_EVENT,REOPENED_EVENT]) {
           pageInfo { hasNextPage endCursor }
           nodes { __typename ... on Node { id }
-            ... on PullRequestReview { databaseId author { login }
+            ... on PullRequestReview { databaseId body author { login }
               onBehalfOf(first:100) { pageInfo { hasNextPage } nodes { slug } }
             }
           }
@@ -133,6 +134,7 @@ fn request_timeline(
                     node_id: id,
                     login: item["author"]["login"].as_str().unwrap_or_default().to_lowercase(),
                     teams,
+                    body: item["body"].as_str().unwrap_or_default().to_string(),
                 });
             }
         }
@@ -179,10 +181,12 @@ fn snapshot_review_requests_with(
     })
 }
 
-/// Only compensate an unchanged history plus this exact review. Concurrent human
-/// activity wins, even when unrelated, because GitHub offers no conditional write.
+/// Only compensate an unchanged history plus this exact review and the earlier batches of its
+/// inline comments, which carry its part marker. Concurrent human activity wins, even when
+/// unrelated, because GitHub offers no conditional write.
 pub(crate) fn plan_request_restoration(
     snapshot: &ReviewRequestSnapshot,
+    marker: &str,
     review_id: i64,
     timeline: &RequestTimeline,
     current: &RequestedReviewers,
@@ -198,6 +202,17 @@ pub(crate) fn plan_request_restoration(
     if review.login != snapshot.login {
         return Ok(RestoreRequests::Changed);
     }
+    let part_marker = review_batches::part_marker(marker);
+    let parts = timeline
+        .reviews
+        .iter()
+        .filter(|part| {
+            part.login == snapshot.login && part_marker.as_deref().is_some_and(|marker| part.body.contains(marker))
+        })
+        .collect::<Vec<_>>();
+    let teams = parts
+        .iter()
+        .fold(review.teams.clone(), |teams, part| &teams | &part.teams);
     let reviewers: BTreeSet<String> = snapshot
         .requested
         .reviewers
@@ -208,7 +223,7 @@ pub(crate) fn plan_request_restoration(
     let team_reviewers: BTreeSet<String> = snapshot
         .requested
         .team_reviewers
-        .intersection(&review.teams)
+        .intersection(&teams)
         .filter(|team| !current.team_reviewers.contains(*team))
         .cloned()
         .collect();
@@ -217,6 +232,9 @@ pub(crate) fn plan_request_restoration(
     }
     let mut other_events = timeline.events.clone();
     other_events.remove(&review.node_id);
+    for part in parts {
+        other_events.remove(&part.node_id);
+    }
     if other_events != snapshot.events {
         return Ok(RestoreRequests::Changed);
     }
@@ -230,22 +248,24 @@ pub(crate) fn restore_review_requests(
     full_name: &str,
     number: i64,
     review_id: i64,
+    marker: &str,
     snapshot: &ReviewRequestSnapshot,
 ) -> Result<bool, String> {
-    restore_review_requests_with(full_name, number, review_id, snapshot, &mut capture_json)
+    restore_review_requests_with(full_name, number, review_id, marker, snapshot, &mut capture_json)
 }
 
 fn restore_review_requests_with(
     full_name: &str,
     number: i64,
     review_id: i64,
+    marker: &str,
     snapshot: &ReviewRequestSnapshot,
     api: &mut impl FnMut(&[&str]) -> Result<serde_json::Value, String>,
 ) -> Result<bool, String> {
     let current = requested_reviewers(full_name, number, api)?;
     // Read history last to catch changes during the requested-reviewers read.
     let timeline = request_timeline(full_name, number, api)?;
-    match plan_request_restoration(snapshot, review_id, &timeline, &current)? {
+    match plan_request_restoration(snapshot, marker, review_id, &timeline, &current)? {
         RestoreRequests::Done => Ok(true),
         RestoreRequests::Changed => Ok(false),
         RestoreRequests::Request(requested) => {

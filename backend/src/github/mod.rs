@@ -21,6 +21,7 @@ mod auth;
 mod comments;
 mod pr;
 mod repo;
+mod review_batches;
 mod review_requests;
 mod status_comments;
 mod transport;
