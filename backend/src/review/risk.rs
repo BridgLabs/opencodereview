@@ -222,6 +222,10 @@ pub(crate) fn is_test_path(path: &str) -> bool {
         || path.contains("/__tests__/")
         || path.contains("/tests/")
         || is_ruby_test_path(path)
+        // Jasmine names such as `cart_spec.js`, as `isTestFile` in the frontend graph.
+        || path
+            .rsplit_once('.')
+            .is_some_and(|(stem, ext)| stem.ends_with("_spec") && matches!(ext, "js" | "jsx" | "ts" | "tsx"))
 }
 
 /// RSpec and Minitest files: `spec/` or `test/` directories and `_spec.rb` or `_test.rb` names.

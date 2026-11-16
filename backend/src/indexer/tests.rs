@@ -859,6 +859,7 @@ fn recognizes_ruby_files_and_tests() {
         "test/models/user_test.rb",
         "engines/x/spec/a.rb",
         "app/models/user_spec.rb",
+        "spec/javascripts/cart_spec.js",
     ] {
         assert!(crate::review::is_test_path(path), "{path}");
     }
@@ -873,6 +874,8 @@ fn recognizes_ruby_files_and_tests() {
             "app/models/user_specification.rb",
             "spec/models/user_specification_spec.rb",
         ],
+        ["app/assets/javascripts/cart.js", "spec/javascripts/cart_spec.js"],
+        ["src/Button.tsx", "src/__snapshots__/Button.test.tsx.snap"],
     ] {
         let changed = changed.map(String::from);
         assert_eq!(

@@ -12,8 +12,9 @@
 
 ### Fixed
 
-- Count `_spec.rb` and `_test.rb` files and `spec/` and `test/` directories as tests. Before, a Ruby
-  pull request that changed specs was reported as "Source changed without nearby test updates".
+- Count `_spec.rb` and `_test.rb` files, `spec/` and `test/` directories, and Jasmine `_spec.js`
+  files as tests. Before, a Ruby pull request that changed specs was reported as "Source changed
+  without nearby test updates".
 
 ### Changed
 
