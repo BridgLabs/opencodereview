@@ -435,20 +435,25 @@ pub(crate) fn start_review_request_restoration(db_handle: Db) {
                         Some(id) => Some(id),
                         None => github::find_review_id_by_marker(&job.full_name, job.number, &job.marker)?,
                     };
-                    let Some(review_id) = review_id else {
-                        // Earlier batches without the last review may have used up the requests,
-                        // unless the publication is still posting its batches.
-                        let part = github::review_part_marker(&job.marker);
-                        if let Some(part) = part {
-                            if github::find_review_id_by_marker(&job.full_name, job.number, &part)?.is_some() {
-                                let run = db_handle.open()?.review_run_by_id(job.run_id)?;
-                                if run.is_some_and(|run| run.status == "posting") {
-                                    return Ok(None);
-                                }
-                                return Err(PARTIAL_PUBLICATION.into());
+                    let review_id = match review_id {
+                        Some(review_id) => review_id,
+                        None => {
+                            // Earlier batches without the last review may have used up the requests,
+                            // unless the publication is still posting its batches.
+                            let Some(part) = github::review_part_marker(&job.marker) else {
+                                return Ok(Some(true));
+                            };
+                            if github::find_review_id_by_marker(&job.full_name, job.number, &part)?.is_none() {
+                                return Ok(Some(true));
                             }
+                            let run = db_handle.open()?.review_run_by_id(job.run_id)?;
+                            if run.is_some_and(|run| run.status == "posting") {
+                                return Ok(None);
+                            }
+                            // The last review may have landed after the first lookup.
+                            github::find_review_id_by_marker(&job.full_name, job.number, &job.marker)?
+                                .ok_or(PARTIAL_PUBLICATION)?
                         }
-                        return Ok(Some(true));
                     };
                     db_handle
                         .open()?
