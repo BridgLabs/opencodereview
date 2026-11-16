@@ -5,7 +5,8 @@
   files, and a package for each `Gemfile` or `*.gemspec` with its gem dependencies. Reviews of
   Ruby pull requests now get callers and dependencies of the changed code, as for the other languages.
 - Link a Ruby file to the file that defines a constant it uses, as Rails loads code without
-  `require`.
+  `require`. A qualified name such as `Aws::S3::Client` links only to a file that also declares
+  its namespace, so a constant from a gem does not link to a local class of the same name.
 - A "Hide tests" option in the file and symbol graphs removes test files and their links, so large
   repositories fit more of the real code.
 

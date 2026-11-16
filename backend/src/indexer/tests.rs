@@ -1046,7 +1046,65 @@ fn ruby_containers_own_only_their_own_lines() {
 fn finds_ruby_constants_outside_strings_and_comments() {
     let src = "# Skipped\nclass Spec < Minitest::Test\n  def a\n    puts \"Hello World #{1}\" # Ignored\n    Mutineer::Config.load('Not Real')\n  end\nend\n=begin\nHidden\n=end\n";
     let refs = ruby_constant_refs(src);
-    assert_eq!(refs, vec!["Spec", "Minitest", "Test", "Mutineer", "Config"]);
+    assert_eq!(refs, vec!["Spec", "Minitest::Test", "Mutineer::Config"]);
+}
+
+#[test]
+fn links_qualified_ruby_constants_only_inside_their_namespace() {
+    let sym = |name: &str, kind: &str, path: &str, signature: Option<&str>| RepoIndexSymbolInput {
+        name: name.to_string(),
+        kind: kind.to_string(),
+        language: "ruby".to_string(),
+        path: path.to_string(),
+        package_path: None,
+        start_line: 1,
+        end_line: 2,
+        signature: signature.map(String::from),
+        is_exported: true,
+    };
+    let symbols = vec![
+        sym("Storage", "module", "lib/storage/client.rb", Some("module Storage")),
+        sym("Client", "class", "lib/storage/client.rb", Some("class Client")),
+        sym("Client", "class", "lib/http/client.rb", Some("class Http::Client")),
+        sym(
+            "BaseController",
+            "class",
+            "app/controllers/api/v1/base_controller.rb",
+            Some("class Api::V1::BaseController < ApplicationController"),
+        ),
+        sym("Report", "class", "lib/report.rb", None),
+    ];
+    let refs = vec![
+        (
+            "app/job.rb".to_string(),
+            [
+                "Aws::S3::Report",
+                "Client",
+                "Storage::Client",
+                "Http::Client",
+                "Api::V1::BaseController",
+            ]
+            .map(String::from)
+            .to_vec(),
+        ),
+        ("app/other.rb".to_string(), vec!["Report".to_string()]),
+    ];
+    let edges = ruby_constant_edges(&symbols, &refs, &[]);
+    let found: Vec<(&str, &str)> = edges
+        .iter()
+        .map(|edge| (edge.from_path.as_str(), edge.to_path.as_deref().unwrap()))
+        .collect();
+    // `Aws::S3::Report` is not the local `Report`, and a bare `Client` has two definitions. A
+    // namespace picks one of them, written as `module Storage` or as `class Http::Client`.
+    assert_eq!(
+        found,
+        vec![
+            ("app/job.rb", "lib/storage/client.rb"),
+            ("app/job.rb", "lib/http/client.rb"),
+            ("app/job.rb", "app/controllers/api/v1/base_controller.rb"),
+            ("app/other.rb", "lib/report.rb"),
+        ]
+    );
 }
 
 #[test]

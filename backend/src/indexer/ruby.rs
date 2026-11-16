@@ -545,8 +545,17 @@ pub(crate) fn ruby_constant_refs(content: &str) -> Vec<String> {
             while stop < bytes.len() && is_ident_byte(bytes[stop]) {
                 stop += 1;
             }
-            if bytes[index].is_ascii_uppercase() && seen.insert(code[index..stop].to_string()) {
-                names.push(code[index..stop].to_string());
+            if bytes[index].is_ascii_uppercase() {
+                // `Aws::S3::Client` stays one reference, so that a link can check the namespace.
+                while bytes[stop..].starts_with(b"::") && bytes.get(stop + 2).is_some_and(u8::is_ascii_uppercase) {
+                    stop += 2;
+                    while stop < bytes.len() && is_ident_byte(bytes[stop]) {
+                        stop += 1;
+                    }
+                }
+                if seen.insert(code[index..stop].to_string()) {
+                    names.push(code[index..stop].to_string());
+                }
             }
             index = stop;
         }
@@ -609,18 +618,30 @@ fn strip_ruby_strings(line: &str) -> String {
 /// File-to-file links for Ruby code that reaches another file by constant name instead of
 /// `require` (Rails and Zeitwerk load files that way). A constant links only when exactly one
 /// other file defines a class or module of that name, so shared namespaces link nothing.
+///
+/// A qualified name is checked one part at a time. The file that defines `Client` of `S3::Client`
+/// must also declare `S3`, as `module S3` or as `class S3::Client`. So `Aws::S3::Client` from a
+/// gem does not link to a local `class Client`.
 pub(crate) fn ruby_constant_edges(
     symbols: &[RepoIndexSymbolInput],
     refs: &[(String, Vec<String>)],
     existing: &[RepoIndexEdgeInput],
 ) -> Vec<RepoIndexEdgeInput> {
     let mut definers: HashMap<&str, HashSet<&str>> = HashMap::new();
+    // For each file, the names it declares as a class or module, also inside a qualified name.
+    let mut declared: HashMap<&str, HashSet<String>> = HashMap::new();
     for symbol in symbols {
         if symbol.language == "ruby" && matches!(symbol.kind.as_str(), "class" | "module") {
             definers
                 .entry(symbol.name.as_str())
                 .or_default()
                 .insert(symbol.path.as_str());
+            let names = declared.entry(symbol.path.as_str()).or_default();
+            names.insert(symbol.name.clone());
+            // The symbol keeps only `Users` of `class Api::V1::Users`; its signature has the rest.
+            if let Some((qualified, _, _)) = symbol.signature.as_deref().and_then(ruby_declaration) {
+                names.extend(qualified.split("::").map(str::to_string));
+            }
         }
     }
     let mut linked: HashSet<(&str, &str)> = existing
@@ -630,21 +651,27 @@ pub(crate) fn ruby_constant_edges(
     let mut edges = Vec::new();
     for (path, names) in refs {
         for name in names {
-            let Some(paths) = definers.get(name.as_str()) else {
-                continue;
-            };
-            let mut paths = paths.iter();
-            let (Some(target), None) = (paths.next(), paths.next()) else {
-                continue;
-            };
-            if *target != path.as_str() && linked.insert((path.as_str(), target)) {
-                edges.push(RepoIndexEdgeInput {
-                    from_path: path.clone(),
-                    to_ref: name.clone(),
-                    kind: "constant".to_string(),
-                    resolved: true,
-                    to_path: Some((*target).to_string()),
+            let mut namespace: Option<&str> = None;
+            for part in name.split("::") {
+                let outer = namespace.replace(part);
+                let Some(paths) = definers.get(part) else {
+                    continue;
+                };
+                let mut paths = paths.iter().filter(|target| {
+                    outer.is_none_or(|outer| declared.get(*target).is_some_and(|names| names.contains(outer)))
                 });
+                let (Some(target), None) = (paths.next(), paths.next()) else {
+                    continue;
+                };
+                if *target != path.as_str() && linked.insert((path.as_str(), target)) {
+                    edges.push(RepoIndexEdgeInput {
+                        from_path: path.clone(),
+                        to_ref: part.to_string(),
+                        kind: "constant".to_string(),
+                        resolved: true,
+                        to_path: Some((*target).to_string()),
+                    });
+                }
             }
         }
     }
