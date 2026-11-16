@@ -1091,6 +1091,8 @@ fn links_qualified_ruby_constants_only_inside_their_namespace() {
             .to_vec(),
         ),
         ("app/other.rb".to_string(), vec!["Report".to_string()]),
+        // The local file declares `Storage`, but not `Aws`.
+        ("app/gem_user.rb".to_string(), vec!["Aws::Storage::Client".to_string()]),
     ];
     let edges = ruby_constant_edges(&symbols, &refs, &[]);
     let found: Vec<(&str, &str)> = edges

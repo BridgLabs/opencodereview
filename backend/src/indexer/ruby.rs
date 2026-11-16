@@ -619,9 +619,9 @@ fn strip_ruby_strings(line: &str) -> String {
 /// `require` (Rails and Zeitwerk load files that way). A constant links only when exactly one
 /// other file defines a class or module of that name, so shared namespaces link nothing.
 ///
-/// A qualified name is checked one part at a time. The file that defines `Client` of `S3::Client`
-/// must also declare `S3`, as `module S3` or as `class S3::Client`. So `Aws::S3::Client` from a
-/// gem does not link to a local `class Client`.
+/// A qualified name is checked one part at a time. The file that defines `Client` of
+/// `Aws::S3::Client` must also declare `Aws` and `S3`, as `module S3` or as `class Aws::S3::Client`.
+/// So a constant from a gem does not link to a local `class Client` or a local `S3::Client`.
 pub(crate) fn ruby_constant_edges(
     symbols: &[RepoIndexSymbolInput],
     refs: &[(String, Vec<String>)],
@@ -651,14 +651,16 @@ pub(crate) fn ruby_constant_edges(
     let mut edges = Vec::new();
     for (path, names) in refs {
         for name in names {
-            let mut namespace: Option<&str> = None;
-            for part in name.split("::") {
-                let outer = namespace.replace(part);
+            let parts: Vec<&str> = name.split("::").collect();
+            for (index, part) in parts.iter().enumerate() {
                 let Some(paths) = definers.get(part) else {
                     continue;
                 };
+                let outer = &parts[..index];
                 let mut paths = paths.iter().filter(|target| {
-                    outer.is_none_or(|outer| declared.get(*target).is_some_and(|names| names.contains(outer)))
+                    declared
+                        .get(*target)
+                        .is_some_and(|names| outer.iter().all(|name| names.contains(*name)))
                 });
                 let (Some(target), None) = (paths.next(), paths.next()) else {
                     continue;
