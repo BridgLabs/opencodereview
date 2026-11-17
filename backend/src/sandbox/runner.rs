@@ -842,7 +842,11 @@ fn policy_input(input: impl Read) -> Result<serde_json::Value, String> {
 pub fn guard_cursor_tool(input: impl Read) -> Result<(), String> {
     const DENIED: &str = "Frozen reviews permit only file tools and constrained snapshot reads";
     let value = policy_input(input)?;
+    // `~` would be the CLI's home, which holds the sign-in: never a workspace path.
     let within = |path: &str| {
+        if path.starts_with('~') {
+            return false;
+        }
         let path = if path.starts_with('/') {
             path.to_string()
         } else {
@@ -862,7 +866,7 @@ pub fn guard_cursor_tool(input: impl Read) -> Result<(), String> {
             .filter(|path| !path.is_null())
             .collect::<Vec<_>>();
         let globs_inside = ["glob", "glob_pattern"].iter().all(|key| match input.get(*key) {
-            Some(serde_json::Value::String(glob)) => !glob.starts_with(['/', '~']) || within(glob),
+            Some(serde_json::Value::String(glob)) => within(glob),
             _ => true,
         });
         globs_inside
