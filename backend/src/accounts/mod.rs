@@ -74,6 +74,20 @@ pub(crate) fn cursor_models(ids: &[i64]) -> Vec<crate::providers::cursor::Listed
     cursor_models_under(&root(), ids, crate::db::now_millis())
 }
 
+/// Whether the Cursor account `id` can run `model`: its recorded list names it. An account
+/// without a readable list is not ruled out; its CLI decides.
+pub(crate) fn cursor_account_offers(id: i64, model: &str) -> bool {
+    cursor_account_offers_under(&root(), id, model)
+}
+
+fn cursor_account_offers_under(root: &std::path::Path, id: i64, model: &str) -> bool {
+    fs::read_to_string(root.join(id.to_string()).join("cursor/models.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|value| value["models"].as_array().cloned())
+        .is_none_or(|models| models.iter().any(|listed| listed["id"] == model))
+}
+
 fn cursor_models_under(root: &std::path::Path, ids: &[i64], now: i64) -> Vec<crate::providers::cursor::ListedModel> {
     let mut models: Vec<crate::providers::cursor::ListedModel> = Vec::new();
     for id in ids {
@@ -383,6 +397,9 @@ mod tests {
         assert!(ids(&[3]).is_empty() && ids(&[]).is_empty());
         // A browser sign-in counts until it expires, as Settings and the runner see it.
         assert_eq!(ids(&[4, 5]), vec!["grok-4.7"]);
+        assert!(super::cursor_account_offers_under(&root, 2, "sonnet-5"));
+        assert!(!super::cursor_account_offers_under(&root, 1, "sonnet-5"));
+        assert!(super::cursor_account_offers_under(&root, 99, "sonnet-5"));
         std::fs::remove_dir_all(&root).unwrap();
     }
 }
