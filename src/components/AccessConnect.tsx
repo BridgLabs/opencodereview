@@ -268,27 +268,49 @@ export function ClaudeSignIn(props: { accountId?: number; onDone: () => void; on
   return <PasteCodeSignIn api={claudeApi} plan="Uses your Claude Pro, Max or Team plan." {...props} />;
 }
 
+type KeySignInProps = { accountId?: number; onDone: () => void; onCancel: () => void };
+
 /** Connects an OpenCode API key, checked with OpenCode before it is kept, to `accountId` or to a
  * new account. */
-export function OpencodeKeySignIn({
+export function OpencodeKeySignIn(props: KeySignInProps) {
+  return (
+    <KeySignIn
+      name="OpenCode"
+      hint="Create an API key in your OpenCode workspace. It runs Go models on the Go plan and Zen models on the workspace credits."
+      save={setupApi.opencodeKeySave}
+      {...props}
+    />
+  );
+}
+
+/** Connects a Cursor user API key, checked with Cursor before it is kept, to `accountId` or to a
+ * new account. */
+export function CursorKeySignIn(props: KeySignInProps) {
+  return (
+    <KeySignIn
+      name="Cursor"
+      hint="Create a user API key in your Cursor dashboard (Integrations). Reviews use your Cursor plan, and a key never needs signing in again."
+      save={setupApi.cursorKeySave}
+      {...props}
+    />
+  );
+}
+
+function KeySignIn({
+  name,
+  hint,
+  save: saveKey,
   accountId,
   onDone,
   onCancel,
-}: {
-  accountId?: number;
-  onDone: () => void;
-  onCancel: () => void;
-}) {
+}: KeySignInProps & { name: string; hint: string; save: (key: string, accountId?: number) => Promise<unknown> }) {
   const [key, setKey] = useState("");
   const save = useMutation({
-    mutationFn: () => setupApi.opencodeKeySave(key.trim(), accountId),
+    mutationFn: () => saveKey(key.trim(), accountId),
     onSuccess: onDone,
   });
   return (
-    <SignInFrame
-      hint="Create an API key in your OpenCode workspace. It runs Go models on the Go plan and Zen models on the workspace credits."
-      problems={save.error && <Problem>{friendlyError(save.error)}</Problem>}
-    >
+    <SignInFrame hint={hint} problems={save.error && <Problem>{friendlyError(save.error)}</Problem>}>
       <form
         className="flex flex-wrap items-center gap-2"
         onSubmit={(event) => {
@@ -297,13 +319,13 @@ export function OpencodeKeySignIn({
         }}
       >
         <input
-          aria-label="OpenCode API key"
+          aria-label={`${name} API key`}
           type="password"
           className={codeInput}
           value={key}
           autoComplete="off"
           spellCheck={false}
-          placeholder="Paste your OpenCode API key"
+          placeholder={`Paste your ${name} API key`}
           onChange={(event) => setKey(event.target.value)}
         />
         <button type="submit" className={brandButton} disabled={!key.trim() || save.isPending}>
@@ -404,6 +426,22 @@ const opencodeApi: DeviceFlowApi = {
   events: () => setupApi.opencodeAuthEvents(),
   cancel: () => setupApi.opencodeAuthCancel(),
 };
+
+const cursorApi: DeviceFlowApi = {
+  key: "cursor-auth-events",
+  name: "Cursor",
+  plan: "Uses your Cursor plan's included usage.",
+  deviceHint: "Open the Cursor sign-in page and sign in.",
+  codeLabel: "Cursor sign-in",
+  start: (id) => setupApi.cursorAuthStart(id),
+  events: () => setupApi.cursorAuthEvents(),
+  cancel: () => setupApi.cursorAuthCancel(),
+};
+
+/** Signs in to Cursor in the browser, saving it to `accountId` or to a new account. */
+export function CursorSignIn(props: { accountId?: number; onDone: () => void; onCancel: () => void }) {
+  return <DeviceFlowSignIn api={cursorApi} mode="browser" {...props} />;
+}
 
 /** Signs in to Codex right away, in the browser or with a one-time code, saving it to `accountId` or to a new account. */
 export function CodexSignIn(props: {

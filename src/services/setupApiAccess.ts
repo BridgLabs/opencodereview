@@ -17,6 +17,11 @@ let githubFlowSecret: string | null = sessionStorage.getItem("ocr.githubFlowSecr
 let claudeFlowSecret: string | null = sessionStorage.getItem("ocr.claudeFlowSecret");
 let codexFlowSecret: string | null = sessionStorage.getItem("ocr.codexFlowSecret");
 let opencodeFlowSecret: string | null = sessionStorage.getItem("ocr.opencodeFlowSecret");
+let cursorFlowSecret: string | null = sessionStorage.getItem("ocr.cursorFlowSecret");
+const cursorHeaders = () => ({
+  "content-type": "application/json",
+  ...(cursorFlowSecret ? { "x-flow-secret": cursorFlowSecret } : {}),
+});
 const opencodeHeaders = () => ({
   "content-type": "application/json",
   ...(opencodeFlowSecret ? { "x-flow-secret": opencodeFlowSecret } : {}),
@@ -160,6 +165,41 @@ export const setupApiAccess = {
   /** Saves an OpenCode API key, once OpenCode accepts it, to `accountId` or to a new account. */
   opencodeKeySave: (key: string, accountId?: number) =>
     http<{ ok: boolean }>("/auth/opencode/key", {
+      method: "POST",
+      body: JSON.stringify({ key, ...(accountId ? { accountId } : {}) }),
+    }),
+  /** Signs in to Cursor in the browser, saving it to `accountId` or to a new account. */
+  cursorAuthStart: async (accountId?: number) => {
+    await http<{ running: boolean }>("/auth/cursor/cancel", {
+      method: "POST",
+      headers: cursorHeaders(),
+      body: JSON.stringify({}),
+    }).catch(() => undefined);
+    cursorFlowSecret = null;
+    sessionStorage.removeItem("ocr.cursorFlowSecret");
+    const result = await http<{ running: boolean; flowSecret?: string }>("/auth/cursor/start", {
+      method: "POST",
+      body: JSON.stringify(accountId ? { accountId } : {}),
+    });
+    if (result.flowSecret) {
+      cursorFlowSecret = result.flowSecret;
+      sessionStorage.setItem("ocr.cursorFlowSecret", result.flowSecret);
+    }
+  },
+  cursorAuthEvents: () =>
+    http<{
+      running: boolean;
+      events: Array<{ kind: string; code?: string; url?: string; success?: boolean; message?: string }>;
+    }>("/auth/cursor/events", { headers: cursorHeaders() }),
+  cursorAuthCancel: () =>
+    http<{ running: boolean }>("/auth/cursor/cancel", {
+      method: "POST",
+      headers: cursorHeaders(),
+      body: JSON.stringify({}),
+    }),
+  /** Saves a Cursor user API key, once Cursor lists models for it, to `accountId` or to a new account. */
+  cursorKeySave: (key: string, accountId?: number) =>
+    http<{ ok: boolean }>("/auth/cursor/key", {
       method: "POST",
       body: JSON.stringify({ key, ...(accountId ? { accountId } : {}) }),
     }),

@@ -5,6 +5,8 @@ import {
   ClaudeSignIn,
   ClaudeTokenSignIn,
   CodexSignIn,
+  CursorKeySignIn,
+  CursorSignIn,
   OpencodeKeySignIn,
   OpencodeSignIn,
 } from "../../components/AccessConnect";
@@ -38,10 +40,25 @@ export const providerName: Record<Provider, string> = {
   claude: "Claude",
   codex: "ChatGPT",
   opencode: "OpenCode",
+  cursor: "Cursor",
 };
 
-/** Claude's asterisk, Codex's knot or OpenCode's brackets. */
+/** Claude's asterisk, Codex's knot, OpenCode's brackets or Cursor's cube. */
 export function ProviderGlyph({ provider }: { provider: Provider }) {
+  if (provider === "cursor")
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        className="size-4 text-fg"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3ZM4 7.5 12 12l8-4.5M12 12v9" />
+      </svg>
+    );
   if (provider === "opencode")
     return (
       <svg
@@ -332,12 +349,15 @@ function addOptions(provider: Provider, start: (code?: boolean) => void) {
         onSelect: () => start(true),
       },
     ];
-  if (provider === "opencode")
+  if (provider === "opencode" || provider === "cursor")
     return [
       main,
       {
         label: "Add an API key",
-        hint: "An API key from your OpenCode workspace",
+        hint:
+          provider === "cursor"
+            ? "A user API key from your Cursor dashboard"
+            : "An API key from your OpenCode workspace",
         icon: <KeyRound />,
         onSelect: () => start(true),
       },
@@ -440,6 +460,12 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
                 onSelect: () => setSignIn({ provider: "opencode" }),
               },
               {
+                label: "Cursor",
+                hint: "Cursor Pro, Pro+, Ultra or Teams plan",
+                icon: <ProviderGlyph provider="cursor" />,
+                onSelect: () => setSignIn({ provider: "cursor" }),
+              },
+              {
                 label: "Claude with a token",
                 hint: "From claude setup-token on another computer",
                 icon: <KeyRound />,
@@ -456,6 +482,12 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
                 hint: "An API key from your OpenCode workspace",
                 icon: <KeyRound />,
                 onSelect: () => setSignIn({ provider: "opencode", code: true }),
+              },
+              {
+                label: "Cursor with a key",
+                hint: "A user API key from your Cursor dashboard",
+                icon: <KeyRound />,
+                onSelect: () => setSignIn({ provider: "cursor", code: true }),
               },
             ]}
           />
@@ -537,11 +569,31 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
             <h3 className="mb-3 text-small font-semibold text-fg">
               {signIn.accountId
                 ? `Sign in again to “${accounts.find((account) => account.id === signIn.accountId)?.label ?? providerName[signIn.provider]}”`
-                : signIn.provider === "opencode" && signIn.code
-                  ? "Add an OpenCode API key"
+                : (signIn.provider === "opencode" || signIn.provider === "cursor") && signIn.code
+                  ? `Add ${signIn.provider === "opencode" ? "an" : "a"} ${providerName[signIn.provider]} API key`
                   : `Add a ${providerName[signIn.provider]} account`}
             </h3>
-            {signIn.provider === "opencode" && !signIn.code ? (
+            {signIn.provider === "cursor" ? (
+              signIn.code ? (
+                <CursorKeySignIn
+                  accountId={signIn.accountId}
+                  onDone={() => {
+                    setSignIn(null);
+                    refresh();
+                  }}
+                  onCancel={() => setSignIn(null)}
+                />
+              ) : (
+                <CursorSignIn
+                  accountId={signIn.accountId}
+                  onDone={() => {
+                    setSignIn(null);
+                    refresh();
+                  }}
+                  onCancel={() => setSignIn(null)}
+                />
+              )
+            ) : signIn.provider === "opencode" && !signIn.code ? (
               <OpencodeSignIn
                 accountId={signIn.accountId}
                 onDone={() => {

@@ -32,6 +32,10 @@ vi.mock("../../services/setupApi", () => ({
     opencodeAuthStart: vi.fn(),
     opencodeAuthEvents: vi.fn(),
     opencodeAuthCancel: vi.fn(),
+    cursorKeySave: vi.fn(),
+    cursorAuthStart: vi.fn(),
+    cursorAuthEvents: vi.fn(),
+    cursorAuthCancel: vi.fn(),
   },
 }));
 
@@ -278,6 +282,64 @@ it("adds an OpenCode API key from the menu", async () => {
       [...container.querySelectorAll("button")].find((button) => button.textContent === "Save key")!.click(),
     );
     expect(setupApi.opencodeKeySave).toHaveBeenCalledWith("sk-opencode-fixture-key", undefined);
+  } finally {
+    await unmount();
+  }
+});
+
+it("signs in to Cursor in the browser from the add menu", async () => {
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(1)]);
+  vi.mocked(setupApi.cursorAuthStart).mockResolvedValue(undefined);
+  vi.mocked(setupApi.cursorAuthEvents).mockResolvedValue({
+    running: true,
+    events: [{ kind: "prompt", url: "https://cursor.com/loginDeepControl?challenge=abc&uuid=1&mode=login" }],
+  });
+  const { container, unmount } = await renderPanel();
+  try {
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Add account"]')!.click());
+    await act(async () =>
+      [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+        .find((entry) => entry.textContent?.startsWith("CursorCursor Pro"))!
+        .click(),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(setupApi.cursorAuthStart).toHaveBeenCalledWith(undefined);
+    await vi.waitFor(() =>
+      expect(
+        [...container.querySelectorAll("a")].find((link) => link.textContent?.includes("Open Cursor sign-in"))?.href,
+      ).toBe("https://cursor.com/loginDeepControl?challenge=abc&uuid=1&mode=login"),
+    );
+  } finally {
+    await unmount();
+  }
+});
+
+it("adds a Cursor API key from the menu", async () => {
+  vi.mocked(setupApi.listAccounts).mockResolvedValue([account(1)]);
+  vi.mocked(setupApi.cursorKeySave).mockResolvedValue({ ok: true });
+  const { container, unmount } = await renderPanel();
+  try {
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Add account"]')!.click());
+    await act(async () =>
+      [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+        .find((entry) => entry.textContent?.startsWith("Cursor with a key"))!
+        .click(),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(container.textContent).toContain("Add a Cursor API key");
+    const key = container.querySelector<HTMLInputElement>('input[aria-label="Cursor API key"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(key, "key_cursor_fixture_value");
+      key.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () =>
+      [...container.querySelectorAll("button")].find((button) => button.textContent === "Save key")!.click(),
+    );
+    expect(setupApi.cursorKeySave).toHaveBeenCalledWith("key_cursor_fixture_value", undefined);
   } finally {
     await unmount();
   }

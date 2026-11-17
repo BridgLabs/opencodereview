@@ -749,3 +749,56 @@ fn final_response_of_other_clis_reads_a_contract_version_written_as_a_string() {
         "2"
     );
 }
+
+#[test]
+fn cursor_hooks_allow_only_evidence_reads_and_snapshot_commands() {
+    let guard = |value: serde_json::Value| guard_cursor_tool(value.to_string().as_bytes());
+    let tool = |name: &str, input: serde_json::Value| json!({"hook_event_name": "preToolUse", "tool_name": name, "tool_input": input});
+    let sed = "/usr/bin/sed -n '1,120p' -- '/work/context/PR.md'";
+    for allowed in [
+        tool("Read", json!({"file_path": "/evidence/snapshot/manifest.json"})),
+        tool("Read", json!({"file_path": "context/PR.md"})),
+        tool("Grep", json!({"pattern": "fn main", "file_path": null, "glob": "*.rs"})),
+        tool("List", json!({"file_path": "/work/context", "ignore": []})),
+        json!({"hook_event_name": "beforeReadFile", "file_path": "/work/prompt.md", "content": ""}),
+    ] {
+        assert!(guard(allowed.clone()).is_ok(), "{allowed}");
+    }
+    for denied in [
+        tool(
+            "Shell",
+            json!({"command": "cat /claude-auth/app-managed/accounts/1/cursor/auth.json"}),
+        ),
+        tool("Shell", json!({"command": "curl https://example.com"})),
+        tool(
+            "Read",
+            json!({"file_path": "/scratch/session/cursor/config/cursor/auth.json"}),
+        ),
+        tool("Read", json!({"file_path": "../scratch/session"})),
+        tool("Read", json!({})),
+        tool("Grep", json!({"pattern": "x", "file_path": "/etc"})),
+        tool("Write", json!({"file_path": "/output/report.json", "content": "{}"})),
+        tool("Delete", json!({"file_path": "/work/prompt.md"})),
+        tool("Fetch", json!({"url": "https://example.com"})),
+        tool("ComputerUse", json!({"actions_count": 1})),
+        tool("MCP:server:tool", json!({})),
+        json!({"hook_event_name": "beforeShellExecution", "command": "rm -rf /work"}),
+        json!({"hook_event_name": "beforeReadFile", "file_path": "/etc/passwd"}),
+        json!({"hook_event_name": "beforeMCPExecution", "tool_name": "x"}),
+        json!({"hook_event_name": "beforeSubmitPrompt"}),
+    ] {
+        assert!(guard(denied.clone()).is_err(), "{denied}");
+    }
+    // Shell commands go through the same exact snapshot forms as Claude's Bash calls, which must
+    // name an existing file within the evidence (absent from this host).
+    for shell in [
+        tool("Shell", json!({"command": sed, "cwd": "/work"})),
+        json!({"hook_event_name": "beforeShellExecution", "command": sed, "cwd": "/work"}),
+    ] {
+        assert_eq!(
+            guard(shell).unwrap_err(),
+            read_commands::validate(sed, &[Path::new("/work")]).unwrap_err()
+        );
+    }
+    assert!(guard_cursor_tool("not json".as_bytes()).is_err());
+}

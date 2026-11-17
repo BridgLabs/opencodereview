@@ -59,7 +59,7 @@ impl Database {
     }
 
     pub fn create_ai_account(&self, provider: &str, label: &str) -> Result<AiAccount, String> {
-        if !matches!(provider, "claude" | "codex" | "opencode") {
+        if !matches!(provider, "claude" | "codex" | "opencode" | "cursor") {
             return Err("Unsupported account provider".into());
         }
         let label = label.trim();
@@ -142,10 +142,19 @@ impl Database {
 
     /// The OpenCode accounts reviews can run on: enabled and not signed out.
     pub(crate) fn opencode_review_accounts(&self) -> Result<Vec<i64>, String> {
+        self.review_accounts("opencode")
+    }
+
+    /// The Cursor accounts reviews can run on: enabled and not signed out.
+    pub(crate) fn cursor_review_accounts(&self) -> Result<Vec<i64>, String> {
+        self.review_accounts("cursor")
+    }
+
+    fn review_accounts(&self, provider: &str) -> Result<Vec<i64>, String> {
         Ok(self
             .list_ai_accounts()?
             .into_iter()
-            .filter(|account| account.provider == "opencode" && account.enabled && account.status != "auth_failed")
+            .filter(|account| account.provider == provider && account.enabled && account.status != "auth_failed")
             .map(|account| account.id)
             .collect())
     }
@@ -212,7 +221,9 @@ impl Database {
     pub fn remove_unsupported_ai_accounts(&self) -> Result<Vec<i64>, String> {
         let mut statement = self
             .conn
-            .prepare("DELETE FROM ai_accounts WHERE provider NOT IN ('claude', 'codex', 'opencode') RETURNING id")
+            .prepare(
+                "DELETE FROM ai_accounts WHERE provider NOT IN ('claude', 'codex', 'opencode', 'cursor') RETURNING id",
+            )
             .map_err(|error| error.to_string())?;
         let removed = statement
             .query_map([], |row| row.get::<_, i64>(0))
@@ -221,7 +232,7 @@ impl Database {
             .map_err(|error| error.to_string())?;
         self.conn
             .execute(
-                "DELETE FROM settings WHERE key LIKE 'review_engine_%' AND key NOT IN ('review_engine_claude', 'review_engine_codex', 'review_engine_opencode')",
+                "DELETE FROM settings WHERE key LIKE 'review_engine_%' AND key NOT IN ('review_engine_claude', 'review_engine_codex', 'review_engine_opencode', 'review_engine_cursor')",
                 [],
             )
             .map_err(|error| error.to_string())?;

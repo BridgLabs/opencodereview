@@ -76,13 +76,28 @@ pub(crate) fn account_usage(state: &SharedState) -> Result<serde_json::Value, St
     ))
 }
 
-/// The release in `--version` output: `2.1.292 (Claude Code)`, `codex-cli 0.163.0`, `0.63.0` or `opencode v2.2.6`.
+/// The release in `--version` output: `2.1.292 (Claude Code)`, `codex-cli 0.163.0`, `0.63.0`,
+/// `opencode v2.2.6` or Cursor's `2026.11.13-eacade1`.
 pub(crate) fn cli_version(output: &str) -> Option<String> {
     output
         .split_whitespace()
         .map(|word| word.strip_prefix('v').unwrap_or(word))
-        .find(|word| word.contains('.') && word.bytes().all(|byte| byte.is_ascii_digit() || byte == b'.'))
+        .find(|word| {
+            let (release, build) = word.split_once('-').unwrap_or((word, "0"));
+            release.contains('.')
+                && release.bytes().all(|byte| byte.is_ascii_digit() || byte == b'.')
+                && !build.is_empty()
+                && build.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
         .map(str::to_string)
+}
+
+/// The command each provider's CLI installs.
+fn cli_command(provider: &str) -> &str {
+    match provider {
+        "cursor" => "cursor-agent",
+        provider => provider,
+    }
 }
 
 /// Each provider's model and effort choices and the ones reviews use now.
@@ -158,7 +173,7 @@ pub(crate) fn ai_providers(state: &SharedState) -> Result<serde_json::Value, Str
                 let args = homes
                     .iter()
                     .map(String::as_str)
-                    .chain([provider, "--version"])
+                    .chain([cli_command(provider), "--version"])
                     .collect::<Vec<_>>();
                 let version = command_output_timeout("env", &args, Duration::from_secs(10))
                     .ok()
@@ -200,6 +215,11 @@ mod tests {
         assert_eq!(cli_version("codex-cli 0.163.0\n").as_deref(), Some("0.163.0"));
         assert_eq!(cli_version("0.63.0\n").as_deref(), Some("0.63.0"));
         assert_eq!(cli_version("opencode v2.2.6\n").as_deref(), Some("2.2.6"));
+        assert_eq!(
+            cli_version("2026.11.13-eacade1\n").as_deref(),
+            Some("2026.11.13-eacade1")
+        );
+        assert_eq!(cli_version("2026.11.13-\n"), None);
         assert_eq!(cli_version("command not found"), None);
     }
 }

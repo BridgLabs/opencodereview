@@ -199,9 +199,19 @@ pub(crate) fn plans_listed(models: &str) -> Vec<&'static str> {
 /// Runs `command` to its end and returns its exit status and output. It is killed when the flow
 /// is cancelled or it takes longer than `limit`, so the thread watching a sign-in always finishes.
 fn bounded_output(
+    command: Command,
+    cancel: &AtomicBool,
+    limit: Duration,
+) -> Result<(std::process::ExitStatus, String), String> {
+    bounded_cli_output(command, cancel, limit, "OpenCode")
+}
+
+/// [`bounded_output`] for the CLI of `provider`, which names it in errors.
+pub(crate) fn bounded_cli_output(
     mut command: Command,
     cancel: &AtomicBool,
     limit: Duration,
+    provider: &str,
 ) -> Result<(std::process::ExitStatus, String), String> {
     // Its own process group (the OpenCode command already asks for one), so stopping it also
     // stops what it started.
@@ -214,7 +224,7 @@ fn bounded_output(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|error| format!("Could not start the OpenCode CLI: {error}"))?;
+        .map_err(|error| format!("Could not start the {provider} CLI: {error}"))?;
     let pid = child.id();
     let stdout = child.stdout.take();
     let reader = thread::spawn(move || {
@@ -229,7 +239,7 @@ fn bounded_output(
         let stopped = match child.try_wait() {
             Ok(Some(status)) => return Ok((status, reader.join().unwrap_or_default())),
             Ok(None) if cancel.load(Ordering::Relaxed) => "Sign-in was cancelled.".to_string(),
-            Ok(None) if started.elapsed() > limit => "OpenCode did not answer in time. Start again.".to_string(),
+            Ok(None) if started.elapsed() > limit => format!("{provider} did not answer in time. Start again."),
             Ok(None) => {
                 thread::sleep(Duration::from_millis(100));
                 continue;

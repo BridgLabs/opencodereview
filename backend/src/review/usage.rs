@@ -158,7 +158,7 @@ pub fn normalize_model(raw: &str) -> String {
 }
 
 /// Accumulates per-model token usage from Claude `result` events, Codex `turn.completed`
-/// events and OpenCode `step_finish` events. Each Claude execution emits exactly one result whose `modelUsage` already totals
+/// events, OpenCode `step_finish` events and Cursor `result` events. Each Claude execution emits exactly one result whose `modelUsage` already totals
 /// every turn, so assistant messages are not summed again.
 pub fn collect_usage(value: &serde_json::Value, per_model: &mut std::collections::HashMap<String, ModelUsageEntry>) {
     let events = match value {
@@ -196,9 +196,27 @@ pub fn collect_usage(value: &serde_json::Value, per_model: &mut std::collections
         entry.cache_read_tokens += tokens["cache"]["read"].as_i64().unwrap_or(0);
         entry.cache_creation_tokens += tokens["cache"]["write"].as_i64().unwrap_or(0);
     }
+    // Cursor's one result totals the execution in camelCase, without `modelUsage`; `inputTokens`
+    // already excludes the cache.
+    let cursor = |event: &serde_json::Value| event["modelUsage"].is_null() && event["usage"]["inputTokens"].is_i64();
+    for usage in events
+        .iter()
+        .filter(|event| event["type"] == "result" && cursor(event))
+        .map(|event| &event["usage"])
+    {
+        let entry = per_model.entry("cursor".into()).or_insert_with(|| ModelUsageEntry {
+            model: "cursor".into(),
+            ..Default::default()
+        });
+        entry.input_tokens += usage["inputTokens"].as_i64().unwrap_or(0);
+        entry.output_tokens +=
+            usage["outputTokens"].as_i64().unwrap_or(0) + usage["reasoningTokens"].as_i64().unwrap_or(0);
+        entry.cache_read_tokens += usage["cacheReadTokens"].as_i64().unwrap_or(0);
+        entry.cache_creation_tokens += usage["cacheWriteTokens"].as_i64().unwrap_or(0);
+    }
     for event in events
         .into_iter()
-        .filter(|event| event["type"] == "result" && event["stats"].is_null())
+        .filter(|event| event["type"] == "result" && event["stats"].is_null() && !cursor(event))
     {
         let mut add = |raw: &str, usage: &serde_json::Value, camel: bool| {
             let model = normalize_model(raw);
