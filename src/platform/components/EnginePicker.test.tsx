@@ -174,9 +174,12 @@ it("switches to another account of the provider, resuming a paused one and skipp
     expect(radio("Bruna").disabled).toBe(true);
     expect(radio("Bruna").textContent).toContain("Limit reached · resets in 1 h");
     expect(radio("Bruna").title).toContain("Usage limit reached");
+    const reads = vi.mocked(setupApi.reviewEngines).mock.calls.length;
     await act(async () => radio("Brito").click());
     expect(setupApi.updateAccount).toHaveBeenCalledWith(2, { enabled: true });
     expect(setupApi.reorderAccounts).toHaveBeenCalledWith([2, 1, 3]);
+    // The resumed account's models are offered without reopening the menu.
+    expect(vi.mocked(setupApi.reviewEngines).mock.calls.length).toBeGreaterThan(reads);
 
     await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Add an account"]')!.click());
     expect(container.textContent).toContain("Add an account");

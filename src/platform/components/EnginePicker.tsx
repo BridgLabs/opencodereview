@@ -54,7 +54,11 @@ export function EnginePicker() {
         ...all.filter((other) => other.id !== account.id).map((other) => other.id),
       ]);
     },
-    onSuccess: (data) => queryClient.setQueryData(ACCOUNTS_QUERY_KEY, data),
+    onSuccess: (data, account) => {
+      queryClient.setQueryData(ACCOUNTS_QUERY_KEY, data);
+      // A paused account turned back on adds its models (OpenCode's plans, Cursor's list).
+      if (!account.enabled) void queryClient.invalidateQueries({ queryKey: ENGINES_QUERY_KEY });
+    },
   });
   const save = useMutation({
     mutationFn: (choice: { provider: string; model: string; effort: string }) => setupApi.saveReviewEngine(choice),
