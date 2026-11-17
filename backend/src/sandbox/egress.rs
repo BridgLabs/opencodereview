@@ -53,21 +53,39 @@ fn tunnel(mut client: TcpStream, allowed: &[String]) -> Result<(), String> {
             return Err("Proxy headers too large".into());
         }
     }
-    let host = destination(
-        std::str::from_utf8(&header).map_err(|_| "Invalid proxy header")?,
-        allowed,
-    )?;
-    let address = (host.as_str(), 443)
-        .to_socket_addrs()
-        .map_err(|_| "Provider DNS unavailable")?
-        .find(|address| public_ip(address.ip()))
-        .ok_or("Provider did not resolve to an allowed public address")?;
-    let remote =
-        TcpStream::connect_timeout(&address, Duration::from_secs(10)).map_err(|_| "Provider connection unavailable")?;
+    // A refusal is answered rather than dropped: a CLI that sees the connection close without a
+    // reply takes it for a network failure and retries it for good (Cursor does, for the MCP
+    // servers of the account), so the review never starts.
+    let remote = match open(&header, allowed) {
+        Ok(remote) => remote,
+        Err((status, error)) => {
+            let _ = client
+                .write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes());
+            return Err(error);
+        }
+    };
     client
         .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
         .map_err(|_| "Proxy client disconnected")?;
     relay(client, remote, Duration::from_secs(60))
+}
+
+/// Connects to the provider `header` asks for, or the status to refuse it with.
+fn open(header: &[u8], allowed: &[String]) -> Result<TcpStream, (&'static str, String)> {
+    let refused = |error: String| ("403 Forbidden", error);
+    let unavailable = |error: &str| ("502 Bad Gateway", error.to_string());
+    let host = destination(
+        std::str::from_utf8(header).map_err(|_| refused("Invalid proxy header".into()))?,
+        allowed,
+    )
+    .map_err(refused)?;
+    let address = (host.as_str(), 443)
+        .to_socket_addrs()
+        .map_err(|_| unavailable("Provider DNS unavailable"))?
+        .find(|address| public_ip(address.ip()))
+        .ok_or_else(|| refused("Provider did not resolve to an allowed public address".into()))?;
+    TcpStream::connect_timeout(&address, Duration::from_secs(10))
+        .map_err(|_| unavailable("Provider connection unavailable"))
 }
 
 fn relay(mut client: TcpStream, mut remote: TcpStream, idle: Duration) -> Result<(), String> {
@@ -124,7 +142,8 @@ fn relay(mut client: TcpStream, mut remote: TcpStream, idle: Duration) -> Result
 
 /// Model providers runners may reach: Anthropic for Claude accounts; ChatGPT, the OpenAI API
 /// and OpenAI's sign-in refresh for Codex accounts; OpenCode's own inference for OpenCode
-/// accounts; and Cursor's agent API and its metrics endpoint for Cursor accounts. Private
+/// accounts; and Cursor's API, the agent endpoint it hands out and its metrics endpoint for
+/// Cursor accounts. Private
 /// networks, and so local models, stay out.
 const PROVIDER_HOSTS: &[&str] = &[
     "api.anthropic.com",
@@ -133,6 +152,7 @@ const PROVIDER_HOSTS: &[&str] = &[
     "auth.openai.com",
     "opencode.ai",
     "api2.cursor.sh",
+    "agentn.global.api5.cursor.sh",
     "api3.cursor.sh",
 ];
 
@@ -193,6 +213,19 @@ mod tests {
             stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
         }
         (client, server)
+    }
+
+    #[test]
+    fn refused_destinations_get_an_answer_instead_of_a_dropped_connection() {
+        let (mut client, server) = pair();
+        let allowed = vec!["api2.cursor.sh".to_string()];
+        client
+            .write_all(b"CONNECT mcp.linear.app:443 HTTP/1.1\r\n\r\n")
+            .unwrap();
+        assert!(tunnel(server, &allowed).is_err());
+        let mut reply = String::new();
+        client.read_to_string(&mut reply).unwrap();
+        assert!(reply.starts_with("HTTP/1.1 403 Forbidden\r\n"), "{reply}");
     }
 
     #[test]
@@ -301,6 +334,7 @@ mod tests {
             "auth.openai.com",
             "opencode.ai",
             "api2.cursor.sh",
+            "agentn.global.api5.cursor.sh",
             "api3.cursor.sh",
         ] {
             assert!(destination(&format!("CONNECT {host}:443 HTTP/1.1\r\n\r\n"), &providers).is_ok());

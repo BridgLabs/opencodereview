@@ -743,6 +743,8 @@ fn cursor_session(account: i64, model: &str) -> Result<(Command, String), String
         .env("CURSOR_DATA_DIR", home.join("data"))
         .env("HTTPS_PROXY", &proxy)
         .env("HTTP_PROXY", &proxy)
+        // The CLI asks a server of its own on localhost about the repository.
+        .env("NO_PROXY", "localhost,127.0.0.1")
         .env("NO_COLOR", "1")
         .envs(crate::providers::cursor::QUIET_ENV.iter().copied())
         .current_dir("/work")

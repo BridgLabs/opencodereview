@@ -9,6 +9,6 @@
 
 ### Security
 
-- Review runners may now reach `api2.cursor.sh` and `api3.cursor.sh`. Every Cursor tool call goes
+- Review runners may now reach `api2.cursor.sh`, `agentn.global.api5.cursor.sh` and `api3.cursor.sh`. Every Cursor tool call goes
   through the same read-only tool guard as Claude's, from system hooks installed read-only in the
   runner image; a guard that fails denies the call.

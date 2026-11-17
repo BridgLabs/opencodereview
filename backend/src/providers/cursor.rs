@@ -45,7 +45,6 @@ pub(crate) fn exec_args(model: &str) -> Vec<OsString> {
         "disabled",
         "--disable-auto-update",
         "--disable-project-configs",
-        "--exclude-workspace-context",
         "--disable-indexing",
         "--workspace",
         "/work",
@@ -384,11 +383,12 @@ mod tests {
             "--trust",
             "--disable-auto-update",
             "--disable-project-configs",
-            "--exclude-workspace-context",
             "--disable-indexing",
         ] {
             assert!(args.contains(&flag), "{flag}");
         }
+        // Cursor refuses it for some plans and models, and then never answers.
+        assert!(!args.contains(&"--exclude-workspace-context"));
         assert!(!args.contains(&"--approve-mcps"));
     }
 

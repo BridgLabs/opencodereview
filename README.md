@@ -122,7 +122,7 @@ browser ──> web (nginx, :1421) ──/api──> server (Rust API, 127.0.0.1
 | `web` | Serves the React UI and proxies `/api` to `server`. |
 | `server` | Rust HTTP API: GitHub polling through the `gh` CLI, indexing, review orchestration, publication and background jobs. |
 | `review-runner` | Runs Claude Code, Codex, OpenCode or the Cursor CLI on a frozen snapshot of the pull request, one review stage per container at a time. 20 replicas by default (`OCR_REVIEW_RUNNERS`); idle ones use almost no memory. Each receives only a private socket and a read-only copy of the sign-in. |
-| `review-egress` | Outbound proxy that allows only `api.anthropic.com`, `chatgpt.com`, `api.openai.com`, `auth.openai.com`, `opencode.ai`, `api2.cursor.sh` and `api3.cursor.sh`, on port 443 and public addresses only. |
+| `review-egress` | Outbound proxy that allows only `api.anthropic.com`, `chatgpt.com`, `api.openai.com`, `auth.openai.com`, `opencode.ai`, `api2.cursor.sh`, `agentn.global.api5.cursor.sh` and `api3.cursor.sh`, on port 443 and public addresses only. |
 
 A review fetches the live base and head of the pull request, selects the scope (full, incremental, base sync or stacked), builds context from the index, freezes the evidence into an archive, runs the AI in a runner (split into chunks for large PRs), validates the report and publishes it. On GitHub, OpenCodeReview posts a collapsed summary comment that it updates on each push, a result comment that replaces the previous one, and the validated findings as a single non-blocking review with inline comments. It never approves a pull request on its own.
 
