@@ -49,8 +49,8 @@ fn covered_ms(spans: &mut [(i64, i64)]) -> i64 {
 }
 
 /// Counts what one execution did from its events: Claude `assistant` and `result` events, Codex
-/// `item.completed` and `turn.completed` events and OpenCode `step_start`, `tool_use` and
-/// `step_finish` events.
+/// `item.completed` and `turn.completed` events, OpenCode `step_start`, `tool_use` and
+/// `step_finish` events and Cursor `tool_call` events.
 pub fn collect_activity(value: &serde_json::Value) -> StageActivity {
     let mut activity = StageActivity::default();
     let mut messages = std::collections::HashSet::new();
@@ -74,6 +74,7 @@ pub fn collect_activity(value: &serde_json::Value) -> StageActivity {
                 activity.model_ms += event["duration_api_ms"].as_i64().unwrap_or(0);
             }
             Some("item.completed") if event["item"]["type"] == "command_execution" => activity.tool_calls += 1,
+            Some("tool_call") if event["subtype"] == "started" => activity.tool_calls += 1,
             Some("turn.completed") => {
                 activity.reasoning_tokens += event["usage"]["reasoning_output_tokens"].as_i64().unwrap_or(0);
             }

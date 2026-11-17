@@ -90,8 +90,9 @@ fn cursor_models_under(root: &std::path::Path, ids: &[i64]) -> Vec<crate::provid
                 serde_json::from_value::<Vec<crate::providers::cursor::ListedModel>>(value["models"].clone()).ok()
             })
             .unwrap_or_default();
-        for model in listed {
+        for mut model in listed {
             if crate::providers::cursor::model_ok(&model.id) && !models.iter().any(|known| known.id == model.id) {
+                model.label = crate::providers::cursor::clean_label(&model.label);
                 models.push(model);
             }
         }

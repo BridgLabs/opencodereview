@@ -219,6 +219,17 @@ pub(crate) fn model_ok(model: &str) -> bool {
         && !model.starts_with(['-', '.'])
 }
 
+/// A model name as shown: Cursor pads some with double spaces and zero-width characters.
+pub(crate) fn clean_label(name: &str) -> String {
+    name.split(|c: char| c.is_whitespace() || c.is_control() || ('\u{200b}'..='\u{200f}').contains(&c))
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(80)
+        .collect()
+}
+
 /// The models of `cursor-agent models` output, the CLI's default first.
 pub(crate) fn listed_models(output: &str) -> Vec<ListedModel> {
     let mut models = Vec::new();
@@ -232,14 +243,7 @@ pub(crate) fn listed_models(output: &str) -> Vec<ListedModel> {
             continue;
         }
         let marked = rest.contains("(default") || rest.contains(", default)");
-        let label = rest
-            .split(" (")
-            .next()
-            .unwrap_or(rest)
-            .trim()
-            .chars()
-            .take(80)
-            .collect::<String>();
+        let label = clean_label(rest.split(" (").next().unwrap_or(rest));
         if marked && default.is_none() {
             default = Some(models.len());
         }
@@ -470,6 +474,8 @@ mod tests {
         assert_eq!(models[0].label, "Auto");
         assert_eq!(models[2].label, "Claude Opus 4.8 Thinking");
         assert!(listed_models("Error: Authentication required.").is_empty());
+        let padded = listed_models("grok-4.7-low-fast - Grok 4.7  Low Fast\u{200b}\u{200b}");
+        assert_eq!(padded[0].label, "Grok 4.7 Low Fast");
         assert!(!model_ok("gpt[effort=high]") && !model_ok("-rf") && model_ok("gpt-5.5"));
         assert_eq!(
             about_email(r#"{"userEmail":"dev@example.com","subscriptionTier":"pro"}"#).as_deref(),
