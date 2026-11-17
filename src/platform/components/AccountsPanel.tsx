@@ -399,6 +399,8 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
     onSuccess: (accounts: AiAccount[]) => {
       queryClient.setQueryData(ACCOUNTS_QUERY_KEY, accounts);
       void queryClient.invalidateQueries({ queryKey: ["setup"] });
+      // Turning an account on or off or removing it changes the models its provider offers.
+      void queryClient.invalidateQueries({ queryKey: ENGINES_QUERY_KEY });
     },
   };
   const update = useMutation({

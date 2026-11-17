@@ -8,6 +8,7 @@ import {
   AccountsPanel,
   accountHealth,
   accountStatusText,
+  ENGINES_QUERY_KEY,
   nextAccountId,
   usageSummary,
   windowName,
@@ -449,6 +450,7 @@ it("starts new reviews on the account picked, resuming it if it was paused", asy
     account(1),
     account(3, { signedIn: false }),
   ]);
+  const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
   const { container, unmount } = await renderPanel();
   try {
     expect(container.querySelector('[role="radiogroup"]')).toBeNull();
@@ -463,7 +465,10 @@ it("starts new reviews on the account picked, resuming it if it was paused", asy
     const first = container.querySelector<HTMLElement>(".account-row")!;
     expect(first.dataset.account).toBe("2");
     expect(first.textContent).toContain("Next review");
+    // Resuming an account can change the models its provider offers.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ENGINES_QUERY_KEY });
   } finally {
+    invalidate.mockRestore();
     await unmount();
   }
 });
