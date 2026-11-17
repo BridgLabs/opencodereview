@@ -80,6 +80,8 @@ docker build -f docker/Dockerfile.bench --build-arg OCR_RUNTIME_IMAGE=opencodere
 python3 docker/bench-smoke.py      # fake CLI, no model call: one finding end to end
 ```
 
+With rootless Podman, build with `podman build` and set `OCR_CONTAINER_ENGINE=podman` for the smoke test and the adapters, as for the Docker scripts. The bind mounts carry the shared SELinux label (`z`), so SELinux can stay enforcing. A credential file given with `OCR_BENCH_CREDENTIAL_FILE` is mounted without a new label: on an SELinux host, use `CLAUDE_CODE_OAUTH_TOKEN` or keep the file where a container may read it.
+
 ReviewBench runs `linux/amd64`. For it, and for a submission, build both images with `--platform linux/amd64`.
 
 ## Running the benchmarks

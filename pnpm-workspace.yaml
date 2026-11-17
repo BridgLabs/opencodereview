@@ -1,0 +1,6 @@
+auditConfig:
+  # picomatch <= 4.0.7 (ReDoS through repeated extglobs) has no fixed release yet. It reaches us
+  # only through knip, a development tool that matches the repository's own globs, never user
+  # input, and never ships in an image. Remove this once a fixed picomatch is published.
+  ignoreGhsas:
+    - GHSA-fc5q-39xc-vjpf

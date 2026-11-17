@@ -25,6 +25,8 @@ PROVIDERS = ("claude", "codex")
 # Runners per pull request. Above 1 they run beside the review in containers of their own, as
 # Compose runs them, and the review's chunks run side by side.
 RUNNERS = int(os.environ.get("OCR_BENCH_RUNNERS", "1"))
+# The container CLI, as for the Docker scripts: `docker` or `podman`.
+ENGINE = os.environ.get("OCR_CONTAINER_ENGINE", "docker")
 _repo_locks = {}
 _repo_locks_guard = threading.Lock()
 
@@ -135,8 +137,8 @@ def review(image, repo, nwo, pr_number, base, head, title, body, out_dir, provid
         "nwo": nwo, "title": title or "", "body": body or "",
     }))
     command = [
-        "docker", "run", "--rm",
-        "-v", f"{repo}:/work/repo", "-v", f"{pr_dir}:/work/pr:ro", "-v", f"{out}:/work/out",
+        ENGINE, "run", "--rm",
+        *mount(repo, "/work/repo"), *mount(pr_dir, "/work/pr", read_only=True), *mount(out, "/work/out"),
         "-e", f"RB_NWO={nwo}", "-e", f"RB_PR_NUMBER={pr_number}",
         "-e", f"RB_BASE={base}", "-e", f"RB_HEAD={head}",
         "-e", "RB_AGENT=opencodereview", "-e", "RB_DIFF=/work/pr/diff.patch",
@@ -168,8 +170,19 @@ def review(image, repo, nwo, pr_number, base, head, title, body, out_dir, provid
     return status, load("findings.json"), load("ocr-findings.json")
 
 
+def mount(source, target, read_only=False):
+    """A bind mount the container can read on an SELinux host, where an unlabelled one is denied.
+
+    `z` gives the files the shared container label, as the Compose file does; Docker and Podman
+    ignore it where SELinux is off. Not the private `Z`: a pull request's clone hardlinks the
+    repository cache, so parallel jobs on one repository share files, and a private label would
+    take them away from each other.
+    """
+    return ["-v", f"{source}:{target}:{'ro,z' if read_only else 'z'}"]
+
+
 def docker(*args):
-    return subprocess.run(["docker", *args], check=True, capture_output=True, text=True).stdout.strip()
+    return subprocess.run([ENGINE, *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
 @contextmanager
@@ -193,7 +206,8 @@ def runner_pool(image, count):
             "--user", "10001:10001", "--memory", "128m", "--tmpfs", "/tmp:size=16m", "--tmpfs", "/data:size=1m,mode=0700",
             *hardening, image, "egress",
         ))
-        docker("network", "connect", "bridge", f"{name}-egress")
+        # The engine's default network is the egress proxy's way out: `bridge` on Docker, `podman` on Podman.
+        docker("network", "connect", "podman" if pathlib.Path(ENGINE).name == "podman" else "bridge", f"{name}-egress")
         tmpfs = ["/tmp:size=64m,mode=1777", "/work:size=16m,mode=0755", "/evidence:size=512m,mode=0755",
                  "/output:size=48m,mode=0777", "/scratch:size=128m,mode=0755", "/data:size=1m,mode=0700"]
         for index in range(1, count + 1):
@@ -210,9 +224,9 @@ def runner_pool(image, count):
         yield ["--network", "none", "-v", f"{name}-ipc:/ipc", "-v", f"{name}-auth:/ocr/auth",
                "-e", f"OCR_BENCH_RUNNER_SOCKETS={sockets}"]
     finally:
-        subprocess.run(["docker", "rm", "-f", *containers], capture_output=True)
-        subprocess.run(["docker", "network", "rm", name], capture_output=True)
-        subprocess.run(["docker", "volume", "rm", f"{name}-ipc", f"{name}-auth"], capture_output=True)
+        subprocess.run([ENGINE, "rm", "-f", *containers], capture_output=True)
+        subprocess.run([ENGINE, "network", "rm", name], capture_output=True)
+        subprocess.run([ENGINE, "volume", "rm", f"{name}-ipc", f"{name}-auth"], capture_output=True)
 
 
 def authorize(run_dir, requested, authorized, provider, label, marker="authorized.json"):
