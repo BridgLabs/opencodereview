@@ -71,15 +71,16 @@ pub(crate) fn store_cursor_models(id: i64, models: &[crate::providers::cursor::L
 /// repeats; empty when none of them has a usable sign-in and a recorded list. The caller passes
 /// the accounts reviews can run on (`Database::cursor_review_accounts`).
 pub(crate) fn cursor_models(ids: &[i64]) -> Vec<crate::providers::cursor::ListedModel> {
-    cursor_models_under(&root(), ids)
+    cursor_models_under(&root(), ids, crate::db::now_millis())
 }
 
-fn cursor_models_under(root: &std::path::Path, ids: &[i64]) -> Vec<crate::providers::cursor::ListedModel> {
+fn cursor_models_under(root: &std::path::Path, ids: &[i64], now: i64) -> Vec<crate::providers::cursor::ListedModel> {
     let mut models: Vec<crate::providers::cursor::ListedModel> = Vec::new();
     for id in ids {
         let directory = root.join(id.to_string()).join("cursor");
+        // The same check as `has_credential`: an expired browser sign-in is signed out.
         let signed_in = fs::read_to_string(directory.join("auth.json"))
-            .is_ok_and(|raw| crate::providers::cursor::validate_auth(&raw).is_ok());
+            .is_ok_and(|raw| crate::providers::cursor::usable(&raw, now));
         if !signed_in {
             continue;
         }
@@ -354,8 +355,25 @@ mod tests {
             r#"{"models":[{"id":"gpt-5.5","label":"GPT-5.5"},{"id":"sonnet-5","label":"Sonnet 5"},{"id":"bad id","label":"x"}]}"#,
         );
         account(3, "{}", r#"{"models":[{"id":"secret-model","label":"x"}]}"#);
+        use base64::Engine;
+        let sign_in = |exp: i64| {
+            let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(r#"{{"exp":{exp}}}"#));
+            serde_json::json!({"login": {"accessToken": format!("eyJhbGciOiJIUzI1NiJ9.{claims}.signature-fixture"), "refreshToken": "refresh-token-fixture"}})
+                .to_string()
+        };
+        let now = 1_800_000_000_000;
+        account(
+            4,
+            &sign_in(now / 1000 + 3600),
+            r#"{"models":[{"id":"grok-4.7","label":"Grok"}]}"#,
+        );
+        account(
+            5,
+            &sign_in(now / 1000 - 60),
+            r#"{"models":[{"id":"expired-model","label":"x"}]}"#,
+        );
         let ids = |ids: &[i64]| {
-            super::cursor_models_under(&root, ids)
+            super::cursor_models_under(&root, ids, now)
                 .into_iter()
                 .map(|model| model.id)
                 .collect::<Vec<_>>()
@@ -363,6 +381,8 @@ mod tests {
         assert_eq!(ids(&[1, 2, 3]), vec!["auto", "gpt-5.5", "sonnet-5"]);
         assert_eq!(ids(&[2]), vec!["gpt-5.5", "sonnet-5"]);
         assert!(ids(&[3]).is_empty() && ids(&[]).is_empty());
+        // A browser sign-in counts until it expires, as Settings and the runner see it.
+        assert_eq!(ids(&[4, 5]), vec!["grok-4.7"]);
         std::fs::remove_dir_all(&root).unwrap();
     }
 }
