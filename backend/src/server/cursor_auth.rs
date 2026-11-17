@@ -104,11 +104,11 @@ fn account_details(
     };
     let mut models = with_key(cursor(home));
     models.arg("models");
-    let (status, listed) = bounded_cli_output(models, cancel, CLI_TIMEOUT, "Cursor")?;
+    let (status, listed, errors) = bounded_cli_output(models, cancel, CLI_TIMEOUT, "Cursor")?;
     let listed = crate::providers::cursor::listed_models(&strip_terminal(&listed));
     if !status.success() || listed.is_empty() {
         return Err(if key.is_some() {
-            "Cursor rejected that key".into()
+            crate::providers::cursor::key_check_failure(&strip_terminal(&errors))
         } else {
             "Signed in to Cursor, but could not read the models of its plan. Start again.".into()
         });
@@ -117,8 +117,8 @@ fn account_details(
     about.args(["about", "--format", "json"]);
     let email = bounded_cli_output(about, cancel, CLI_TIMEOUT, "Cursor")
         .ok()
-        .filter(|(status, _)| status.success())
-        .and_then(|(_, output)| crate::providers::cursor::about_email(&output));
+        .filter(|(status, ..)| status.success())
+        .and_then(|(_, output, _)| crate::providers::cursor::about_email(&output));
     Ok((listed, email))
 }
 

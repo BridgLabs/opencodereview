@@ -203,7 +203,7 @@ fn bounded_output(
     cancel: &AtomicBool,
     limit: Duration,
 ) -> Result<(std::process::ExitStatus, String), String> {
-    bounded_cli_output(command, cancel, limit, "OpenCode")
+    bounded_cli_output(command, cancel, limit, "OpenCode").map(|(status, output, _)| (status, output))
 }
 
 /// [`bounded_output`] for the CLI of `provider`, which names it in errors.
@@ -212,7 +212,7 @@ pub(crate) fn bounded_cli_output(
     cancel: &AtomicBool,
     limit: Duration,
     provider: &str,
-) -> Result<(std::process::ExitStatus, String), String> {
+) -> Result<(std::process::ExitStatus, String, String), String> {
     // Its own process group (the OpenCode command already asks for one), so stopping it also
     // stops what it started.
     #[cfg(unix)]
@@ -222,22 +222,37 @@ pub(crate) fn bounded_cli_output(
     }
     let mut child = command
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("Could not start the {provider} CLI: {error}"))?;
     let pid = child.id();
-    let stdout = child.stdout.take();
-    let reader = thread::spawn(move || {
-        let mut bytes = Vec::new();
-        if let Some(stdout) = stdout {
-            let _ = stdout.take(1 << 20).read_to_end(&mut bytes);
-        }
-        String::from_utf8_lossy(&bytes).into_owned()
-    });
+    let read = |stream: Option<Box<dyn Read + Send>>, limit: u64| {
+        thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(stream) = stream {
+                let _ = stream.take(limit).read_to_end(&mut bytes);
+            }
+            String::from_utf8_lossy(&bytes).into_owned()
+        })
+    };
+    let reader = read(
+        child.stdout.take().map(|out| Box::new(out) as Box<dyn Read + Send>),
+        1 << 20,
+    );
+    let errors = read(
+        child.stderr.take().map(|err| Box::new(err) as Box<dyn Read + Send>),
+        1 << 16,
+    );
     let started = Instant::now();
     loop {
         let stopped = match child.try_wait() {
-            Ok(Some(status)) => return Ok((status, reader.join().unwrap_or_default())),
+            Ok(Some(status)) => {
+                return Ok((
+                    status,
+                    reader.join().unwrap_or_default(),
+                    errors.join().unwrap_or_default(),
+                ))
+            }
             Ok(None) if cancel.load(Ordering::Relaxed) => "Sign-in was cancelled.".to_string(),
             Ok(None) if started.elapsed() > limit => format!("{provider} did not answer in time. Start again."),
             Ok(None) => {

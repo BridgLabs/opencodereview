@@ -219,6 +219,16 @@ pub(crate) fn model_ok(model: &str) -> bool {
         && !model.starts_with(['-', '.'])
 }
 
+/// Why a key's model list could not be read: only the CLI's own refusal means a wrong key; a
+/// network or Cursor failure asks to try again.
+pub(crate) fn key_check_failure(stderr: &str) -> String {
+    if stderr.to_ascii_lowercase().contains("api key is invalid") {
+        "Cursor rejected that key".into()
+    } else {
+        "Could not check the key with Cursor. Try again.".into()
+    }
+}
+
 /// A model name as shown: Cursor pads some with double spaces and zero-width characters.
 pub(crate) fn clean_label(name: &str) -> String {
     name.split(|c: char| c.is_whitespace() || c.is_control() || ('\u{200b}'..='\u{200f}').contains(&c))
@@ -474,6 +484,14 @@ mod tests {
         assert_eq!(models[0].label, "Auto");
         assert_eq!(models[2].label, "Claude Opus 4.8 Thinking");
         assert!(listed_models("Error: Authentication required.").is_empty());
+        assert_eq!(
+            key_check_failure("Warning: The provided API key is invalid.\nThe API key was loaded from the CURSOR_API_KEY environment variable."),
+            "Cursor rejected that key"
+        );
+        assert_eq!(
+            key_check_failure("Failed to reach the Cursor API"),
+            "Could not check the key with Cursor. Try again."
+        );
         let padded = listed_models("grok-4.7-low-fast - Grok 4.7  Low Fast\u{200b}\u{200b}");
         assert_eq!(padded[0].label, "Grok 4.7 Low Fast");
         assert!(!model_ok("gpt[effort=high]") && !model_ok("-rf") && model_ok("gpt-5.5"));
