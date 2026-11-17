@@ -29,7 +29,7 @@ You should receive an acknowledgement within a few days. We will keep you inform
 Areas where reports are especially valuable:
 
 - escaping the review runner sandbox, or a runner reaching hosts other than the AI providers;
-- exposure of GitHub, Claude or ChatGPT credentials (logs, API responses, the browser, review output);
+- exposure of GitHub, Claude, ChatGPT, OpenCode or Cursor credentials (logs, API responses, the browser, review output);
 - prompt injection from pull request content that leads to actions outside the review;
 - API authentication or origin-check bypasses.
 

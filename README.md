@@ -8,7 +8,7 @@
 
 AI code review for GitHub pull requests that runs on your own machine, using the Claude, ChatGPT, OpenCode (Go or Zen) or Cursor plan you already have.
 
-OpenCodeReview watches the repositories you pick, reviews each pull request with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex) or [OpenCode](https://opencode.ai) inside isolated containers, checks every finding against the code, and posts the result on the pull request.
+OpenCodeReview watches the repositories you pick, reviews each pull request with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai) or [Cursor](https://cursor.com/cli) inside isolated containers, checks every finding against the code, and posts the result on the pull request.
 
 ![The OpenCodeReview review queue](site/app-reviews.png)
 
@@ -128,7 +128,7 @@ A review fetches the live base and head of the pull request, selects the scope (
 
 ## Security and privacy
 
-- **Your code goes only to your AI provider.** The pull request evidence is sent to Anthropic, OpenAI or OpenCode with your own sign-in, the same way their CLIs work when you use them directly. OpenCodeReview has no servers and sends no telemetry.
+- **Your code goes only to your AI provider.** The pull request evidence is sent to Anthropic, OpenAI, OpenCode or Cursor with your own sign-in, the same way their CLIs work when you use them directly. OpenCodeReview has no servers and sends no telemetry.
 - **Sign-ins stay local.** GitHub credentials, AI sign-ins and keys are stored in the `ocr-data` Docker volume (AI sign-ins and keys with file mode `0600`). They are never logged or sent to the browser. **Sign out** (GitHub, in Integrations) and **Remove account** (AI accounts, in Providers) delete them.
 - **Runners are sandboxed.** Read-only root filesystem, no Linux capabilities beyond what supervision needs, an unprivileged user for the AI process, no access to the database or repository cache, and provider-only network access.
 - **The UI is reachable from your machine only.** The API is protected by an installation token that the web container injects into the UI, so anyone who can open the UI can use it. Compose therefore publishes port 1421 on `127.0.0.1` only. Use Docker Engine 28.3.3 or newer: older versions can let other hosts reach a port published on `127.0.0.1`, on the same local network or after a firewalld reload. To open the page to other machines on a trusted network, set `OCR_WEB_BIND=0.0.0.0` and change `OCR_WEB_APP_URL` to the address you use. Docker's port rules bypass host firewalls such as ufw, and anyone who can reach the port gets the token, so a reverse proxy cannot protect it while the port is open. For a remote host, keep the default and use an SSH tunnel (`ssh -L 1421:127.0.0.1:1421 <host>`, then open `http://localhost:1421` on your own machine), or run an authenticated reverse proxy on the same host that forwards to `127.0.0.1:1421`.
@@ -160,4 +160,4 @@ Licensed under the [PolyForm Small Business License 1.0.0](LICENSE). Individuals
 
 See [NOTICE](NOTICE) for attribution and third-party notices.
 
-OpenCodeReview is an independent source-available project and is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI or OpenCode. Their product names are used only to describe compatibility.
+OpenCodeReview is an independent source-available project and is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, OpenCode or Cursor. Their product names are used only to describe compatibility.
