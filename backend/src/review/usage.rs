@@ -72,6 +72,10 @@ pub fn collect_activity(value: &serde_json::Value) -> StageActivity {
             }
             Some("result") if event["stats"].is_null() => {
                 activity.model_ms += event["duration_api_ms"].as_i64().unwrap_or(0);
+                // Cursor's result carries the execution's reasoning in camelCase.
+                if event["modelUsage"].is_null() && event["usage"]["inputTokens"].is_i64() {
+                    activity.reasoning_tokens += event["usage"]["reasoningTokens"].as_i64().unwrap_or(0);
+                }
             }
             Some("item.completed") if event["item"]["type"] == "command_execution" => activity.tool_calls += 1,
             Some("tool_call") if event["subtype"] == "started" => activity.tool_calls += 1,
