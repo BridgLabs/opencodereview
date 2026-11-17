@@ -666,7 +666,8 @@ fn next_account(inputs: &ReviewInputs, tried: &[i64]) -> Result<crate::db::AiAcc
             return Ok(account);
         }
         let model = cursor_model.get_or_insert_with(|| engine_for(inputs, "cursor").0);
-        if crate::accounts::cursor_account_offers(account.id, model) {
+        // Without a model of any account (every sign-in expired), the CLI's own error says why.
+        if model.is_empty() || crate::accounts::cursor_account_offers(account.id, model) {
             return Ok(account);
         }
         skipped.push(account.id);
