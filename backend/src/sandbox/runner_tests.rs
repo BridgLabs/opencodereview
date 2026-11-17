@@ -759,6 +759,10 @@ fn cursor_hooks_allow_only_evidence_reads_and_snapshot_commands() {
         tool("Read", json!({"file_path": "/evidence/snapshot/manifest.json"})),
         tool("Read", json!({"file_path": "context/PR.md"})),
         tool("Grep", json!({"pattern": "fn main", "file_path": null, "glob": "*.rs"})),
+        tool(
+            "Grep",
+            json!({"pattern": "x", "path": "context", "glob_pattern": "**/*.rs"}),
+        ),
         tool("List", json!({"file_path": "/work/context", "ignore": []})),
         json!({"hook_event_name": "beforeReadFile", "file_path": "/work/prompt.md", "content": ""}),
     ] {
@@ -777,6 +781,13 @@ fn cursor_hooks_allow_only_evidence_reads_and_snapshot_commands() {
         tool("Read", json!({"file_path": "../scratch/session"})),
         tool("Read", json!({})),
         tool("Grep", json!({"pattern": "x", "file_path": "/etc"})),
+        tool("Grep", json!({"pattern": "x", "path": "/scratch"})),
+        tool(
+            "Grep",
+            json!({"pattern": "x", "file_path": "/work", "target_directory": "/scratch"}),
+        ),
+        tool("Grep", json!({"pattern": "x", "glob_pattern": "/scratch/**"})),
+        tool("Grep", json!({"pattern": "x", "path": 7})),
         tool("Write", json!({"file_path": "/output/report.json", "content": "{}"})),
         tool("Delete", json!({"file_path": "/work/prompt.md"})),
         tool("Fetch", json!({"url": "https://example.com"})),

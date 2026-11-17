@@ -842,16 +842,35 @@ fn policy_input(input: impl Read) -> Result<serde_json::Value, String> {
 pub fn guard_cursor_tool(input: impl Read) -> Result<(), String> {
     const DENIED: &str = "Frozen reviews permit only file tools and constrained snapshot reads";
     let value = policy_input(input)?;
-    let path = |optional: bool| match value["tool_input"].get("file_path").or_else(|| value.get("file_path")) {
-        None | Some(serde_json::Value::Null) => optional,
-        Some(path) => path.as_str().is_some_and(|path| {
-            let path = if path.starts_with('/') {
-                path.to_string()
+    let within = |path: &str| {
+        let path = if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/work/{path}")
+        };
+        lexical(&path).is_some_and(|path| READ_ROOTS.iter().any(|root| path.starts_with(root)))
+    };
+    // Every field that may name a place is checked, not only `file_path`: a search directory under
+    // another name must not escape the evidence. Relative glob patterns stay within the workspace.
+    let path = |optional: bool| {
+        let input = &value["tool_input"];
+        let named = ["file_path", "path", "target_directory", "directory"]
+            .iter()
+            .map(|key| input.get(*key))
+            .chain([value.get("file_path")])
+            .flatten()
+            .filter(|path| !path.is_null())
+            .collect::<Vec<_>>();
+        let globs_inside = ["glob", "glob_pattern"].iter().all(|key| match input.get(*key) {
+            Some(serde_json::Value::String(glob)) => !glob.starts_with(['/', '~']) || within(glob),
+            _ => true,
+        });
+        globs_inside
+            && if named.is_empty() {
+                optional
             } else {
-                format!("/work/{path}")
-            };
-            lexical(&path).is_some_and(|path| READ_ROOTS.iter().any(|root| path.starts_with(root)))
-        }),
+                named.iter().all(|path| path.as_str().is_some_and(within))
+            }
     };
     let shell = |command: &serde_json::Value| {
         read_commands::validate(
