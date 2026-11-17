@@ -56,7 +56,7 @@ jobs:
           dependencies=false
           while IFS= read -r file; do
             case "$file" in
-              src/*|assets/*|site/*|scripts/*|index.html|package.json|pnpm-lock.yaml|knip.json|biome.json|tsconfig*.json|vite.config.*)
+              src/*|assets/*|site/*|scripts/*|index.html|package.json|pnpm-lock.yaml|knip.json|biome.json|tsconfig*.json|vite.config.*|pnpm-workspace.yaml)
                 frontend=true
                 ;;
             esac
@@ -82,7 +82,7 @@ jobs:
                 ;;
             esac
             case "$file" in
-              Cargo.toml|Cargo.lock|backend/Cargo.toml|deny.toml|package.json|pnpm-lock.yaml)
+              Cargo.toml|Cargo.lock|backend/Cargo.toml|deny.toml|package.json|pnpm-lock.yaml|pnpm-workspace.yaml)
                 dependencies=true
                 ;;
             esac
