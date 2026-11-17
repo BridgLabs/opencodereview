@@ -170,8 +170,18 @@ pub(crate) fn ai_providers(state: &SharedState) -> Result<serde_json::Value, Str
                     "XDG_STATE_HOME",
                 ]
                 .map(|name| format!("{name}={home}"));
+                // Cursor runs with the environment of its other calls, so it never reaches for a keychain.
+                let quiet = if provider == "cursor" {
+                    crate::providers::cursor::QUIET_ENV
+                        .iter()
+                        .map(|(name, value)| format!("{name}={value}"))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 let args = homes
                     .iter()
+                    .chain(&quiet)
                     .map(String::as_str)
                     .chain([cli_command(provider), "--version"])
                     .collect::<Vec<_>>();
