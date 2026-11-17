@@ -689,7 +689,6 @@ fn opencode_session(account: i64, model: &str, effort: &str) -> Result<(Command,
 /// command and the account it started from.
 #[cfg(unix)]
 fn cursor_session(account: i64, model: &str) -> Result<(Command, String), String> {
-    let (model, _) = crate::providers::engines::resolve_offline("cursor", model, "")?;
     let hooks = read_output(Path::new(crate::providers::cursor::HOOKS_PATH), 64 * 1024)
         .ok()
         .flatten()
@@ -715,6 +714,8 @@ fn cursor_session(account: i64, model: &str) -> Result<(Command, String), String
     .flatten()
     .filter(|raw| crate::providers::cursor::usable(raw, crate::db::now_millis()))
     .ok_or_else(|| crate::providers::claude::Failure::Auth.encode())?;
+    // After the sign-in: with every sign-in expired no model is known, and the auth error says why.
+    let (model, _) = crate::providers::engines::resolve_offline("cursor", model, "")?;
     let home = Path::new(CURSOR_HOME);
     private_dir(Path::new(SESSION), 0o755)?;
     for name in ["", "config", "config/cursor", "data", "cache"] {
