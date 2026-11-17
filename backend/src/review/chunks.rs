@@ -1263,11 +1263,11 @@ pub(crate) fn ran_on_pinned_provider(inputs: &ReviewInputs, usage: &RunUsage) ->
     let Some(pinned) = inputs.engines.as_ref().and_then(|pinned| pinned.provider.as_deref()) else {
         return true;
     };
-    // Codex and OpenCode transcripts name the provider; Claude's name its model.
+    // Codex, OpenCode and Cursor transcripts name the provider; Claude's name its model.
     usage.by_model.iter().all(|entry| {
         pinned
             == match entry.model.as_str() {
-                provider @ ("codex" | "opencode") => provider,
+                provider @ ("codex" | "opencode" | "cursor") => provider,
                 _ => "claude",
             }
     })

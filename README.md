@@ -6,15 +6,15 @@
 
 [![License](https://img.shields.io/badge/license-PolyForm_Small_Business_1.0.0-blue.svg)](LICENSE)
 
-AI code review for GitHub pull requests that runs on your own machine, using the Claude, ChatGPT or OpenCode (Go or Zen) plan you already have.
+AI code review for GitHub pull requests that runs on your own machine, using the Claude, ChatGPT, OpenCode (Go or Zen) or Cursor plan you already have.
 
-OpenCodeReview watches the repositories you pick, reviews each pull request with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex) or [OpenCode](https://opencode.ai) inside isolated containers, checks every finding against the code, and posts the result on the pull request.
+OpenCodeReview watches the repositories you pick, reviews each pull request with [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai) or [Cursor](https://cursor.com/cli) inside isolated containers, checks every finding against the code, and posts the result on the pull request.
 
 ![The OpenCodeReview review queue](site/app-reviews.png)
 
 ## Features
 
-- **Your own AI.** Reviews run on the Claude Code CLI (Claude Opus 5.5 at medium effort by default), the Codex CLI, signed in with your Claude or ChatGPT account, or the OpenCode CLI signed in to your OpenCode workspace, on its Go plan or Zen credits. OpenCode's models are listed from its public Go and Zen model lists on opencode.ai, so new ones show up without an OpenCodeReview update. The top bar picks each provider's model and effort. There is no OpenCodeReview account.
+- **Your own AI.** Reviews run on the Claude Code CLI (Claude Opus 5.5 at medium effort by default), the Codex CLI, signed in with your Claude or ChatGPT account, the OpenCode CLI signed in to your OpenCode workspace, on its Go plan or Zen credits, or the Cursor CLI signed in to your Cursor plan. OpenCode's models are listed from its public Go and Zen model lists on opencode.ai, and Cursor's are the ones your Cursor plan lists when you sign in, so new ones show up without an OpenCodeReview update. The top bar picks each provider's model and effort. There is no OpenCodeReview account.
 - **Several accounts with failover.** Connect more than one account, of any provider, and pick the one new reviews start on. When an account hits its usage limit, the review continues on the next account of the same provider, then the other providers, and the limited account comes back after its window resets. Settings shows how much of each Claude and ChatGPT plan is left.
 - **Codebase indexing.** Each selected repository is indexed locally: file metadata, a package and import graph, and lightweight symbols. Reviews get the callers, dependencies and tests of the changed code, plus your convention files (`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `REVIEW.md` and others).
 - **Usage.** See the tokens reviews used by day, pull request, repository, model and account, with findings, time and cache reuse. A pull request opens into each of its runs.
@@ -33,7 +33,7 @@ git clone https://github.com/BridgLabs/opencodereview && cd opencodereview && do
 Open [http://localhost:1421](http://localhost:1421) and follow onboarding:
 
 1. **GitHub**: sign in with the GitHub device flow.
-2. **Your plan**: connect at least one account. Claude uses `claude setup-token` (you paste back the code it shows); ChatGPT uses the `codex login` browser flow or a device code; OpenCode signs in to the OpenCode console with a device code (you approve the code it shows), or takes an API key from your OpenCode workspace, which OpenCodeReview checks with OpenCode before saving it.
+2. **Your plan**: connect at least one account. Claude uses `claude setup-token` (you paste back the code it shows); ChatGPT uses the `codex login` browser flow or a device code; OpenCode signs in to the OpenCode console with a device code (you approve the code it shows), or takes an API key from your OpenCode workspace, which OpenCodeReview checks with OpenCode before saving it; Cursor signs in through the browser (you open the page it shows and sign in), or takes a user API key from your Cursor dashboard. A browser sign-in lasts until Cursor expires it, then the account asks you to sign in again; a key does not expire.
 3. **Repositories**: choose the repositories to monitor. They are cloned and indexed in the background.
 4. **First review**: pick an open pull request. After that, new pull requests in monitored repositories are reviewed automatically.
 
@@ -52,7 +52,8 @@ Set `OCR_VERSION` (for example `OCR_VERSION=0.1.0`) to stay on one release; the 
 - At least one of:
   - a Claude subscription that works with Claude Code (Pro, Max, Team or Enterprise);
   - a ChatGPT plan that includes Codex;
-  - an OpenCode workspace with a Go plan (Go models) or Zen credits (Zen models). Go can bill past the plan through Extra Usage; OpenCodeReview can't stop that, so turn Extra Usage off in your Go workspace if you want reviews to stay within the plan.
+  - an OpenCode workspace with a Go plan (Go models) or Zen credits (Zen models). Go can bill past the plan through Extra Usage; OpenCodeReview can't stop that, so turn Extra Usage off in your Go workspace if you want reviews to stay within the plan;
+  - a Cursor plan (Pro, Pro+, Ultra or Teams). Cursor can bill usage past the plan's included amount when on-demand usage is on; turn it off or set a spend limit in your Cursor dashboard if you want reviews to stay within the plan.
 
 Local models through Ollama or similar are not supported: the review egress proxy refuses private networks by design.
 
@@ -120,14 +121,14 @@ browser ──> web (nginx, :1421) ──/api──> server (Rust API, 127.0.0.1
 | --- | --- |
 | `web` | Serves the React UI and proxies `/api` to `server`. |
 | `server` | Rust HTTP API: GitHub polling through the `gh` CLI, indexing, review orchestration, publication and background jobs. |
-| `review-runner` | Runs Claude Code, Codex or OpenCode on a frozen snapshot of the pull request, one review stage per container at a time. 20 replicas by default (`OCR_REVIEW_RUNNERS`); idle ones use almost no memory. Each receives only a private socket and a read-only copy of the sign-in. |
-| `review-egress` | Outbound proxy that allows only `api.anthropic.com`, `chatgpt.com`, `api.openai.com`, `auth.openai.com` and `opencode.ai`, on port 443 and public addresses only. |
+| `review-runner` | Runs Claude Code, Codex, OpenCode or the Cursor CLI on a frozen snapshot of the pull request, one review stage per container at a time. 20 replicas by default (`OCR_REVIEW_RUNNERS`); idle ones use almost no memory. Each receives only a private socket and a read-only copy of the sign-in. |
+| `review-egress` | Outbound proxy that allows only `api.anthropic.com`, `chatgpt.com`, `api.openai.com`, `auth.openai.com`, `opencode.ai`, `api2.cursor.sh`, `agentn.global.api5.cursor.sh` and `api3.cursor.sh`, on port 443 and public addresses only. |
 
 A review fetches the live base and head of the pull request, selects the scope (full, incremental, base sync or stacked), builds context from the index, freezes the evidence into an archive, runs the AI in a runner (split into chunks for large PRs), validates the report and publishes it. On GitHub, OpenCodeReview posts a collapsed summary comment that it updates on each push, a result comment that replaces the previous one, and the validated findings as a single non-blocking review with inline comments. It never approves a pull request on its own.
 
 ## Security and privacy
 
-- **Your code goes only to your AI provider.** The pull request evidence is sent to Anthropic, OpenAI or OpenCode with your own sign-in, the same way their CLIs work when you use them directly. OpenCodeReview has no servers and sends no telemetry.
+- **Your code goes only to your AI provider.** The pull request evidence is sent to Anthropic, OpenAI, OpenCode or Cursor with your own sign-in, the same way their CLIs work when you use them directly. OpenCodeReview has no servers and sends no telemetry.
 - **Sign-ins stay local.** GitHub credentials, AI sign-ins and keys are stored in the `ocr-data` Docker volume (AI sign-ins and keys with file mode `0600`). They are never logged or sent to the browser. **Sign out** (GitHub, in Integrations) and **Remove account** (AI accounts, in Providers) delete them.
 - **Runners are sandboxed.** Read-only root filesystem, no Linux capabilities beyond what supervision needs, an unprivileged user for the AI process, no access to the database or repository cache, and provider-only network access.
 - **The UI is reachable from your machine only.** The API is protected by an installation token that the web container injects into the UI, so anyone who can open the UI can use it. Compose therefore publishes port 1421 on `127.0.0.1` only. Use Docker Engine 28.3.3 or newer: older versions can let other hosts reach a port published on `127.0.0.1`, on the same local network or after a firewalld reload. To open the page to other machines on a trusted network, set `OCR_WEB_BIND=0.0.0.0` and change `OCR_WEB_APP_URL` to the address you use. Docker's port rules bypass host firewalls such as ufw, and anyone who can reach the port gets the token, so a reverse proxy cannot protect it while the port is open. For a remote host, keep the default and use an SSH tunnel (`ssh -L 1421:127.0.0.1:1421 <host>`, then open `http://localhost:1421` on your own machine), or run an authenticated reverse proxy on the same host that forwards to `127.0.0.1:1421`.
@@ -159,4 +160,4 @@ Licensed under the [PolyForm Small Business License 1.0.0](LICENSE). Individuals
 
 See [NOTICE](NOTICE) for attribution and third-party notices.
 
-OpenCodeReview is an independent source-available project and is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI or OpenCode. Their product names are used only to describe compatibility.
+OpenCodeReview is an independent source-available project and is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, OpenCode or Cursor. Their product names are used only to describe compatibility.

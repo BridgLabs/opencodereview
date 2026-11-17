@@ -46,7 +46,12 @@ const fn model(
     }
 }
 
-pub(crate) const PROVIDERS: &[(&str, &str)] = &[("claude", "Claude"), ("codex", "ChatGPT"), ("opencode", "OpenCode")];
+pub(crate) const PROVIDERS: &[(&str, &str)] = &[
+    ("claude", "Claude"),
+    ("codex", "ChatGPT"),
+    ("opencode", "OpenCode"),
+    ("cursor", "Cursor"),
+];
 
 /// A model `provider` reviews with, from the lists above or, for OpenCode, from opencode.ai.
 pub(crate) type Model = crate::providers::opencode_catalogue::Model;
@@ -63,8 +68,10 @@ fn listed(models: &[EngineModel]) -> Vec<Model> {
         .collect()
 }
 
-/// The OpenCode plans of the accounts reviews can run on (`Database::opencode_plans`), or None
-/// without one. Only OpenCode's list depends on it.
+/// What a provider's model list depends on, or None without an account it applies to: for
+/// OpenCode, the plans of the accounts reviews can run on (`Database::opencode_plans`); for
+/// Cursor, the ids of those accounts (`Database::cursor_review_accounts`), whose subscriptions
+/// list the models. The other providers' lists depend on nothing.
 pub(crate) type Plans = Option<Vec<String>>;
 
 /// `provider`'s models, the default first. OpenCode's come from opencode.ai and are empty while
@@ -74,8 +81,28 @@ pub(crate) fn models(provider: &str, plans: &Plans) -> Vec<Model> {
         "claude" => listed(CLAUDE),
         "codex" => listed(CODEX),
         "opencode" => opencode_models(plans, true),
+        "cursor" => cursor_models(plans),
         _ => vec![],
     }
+}
+
+/// The models the Cursor accounts in `accounts` offer, as `cursor-agent models` listed them when
+/// each signed in. Cursor models take no separate effort: variants are models of their own.
+fn cursor_models(accounts: &Plans) -> Vec<Model> {
+    let ids = accounts
+        .iter()
+        .flatten()
+        .filter_map(|id| id.parse::<i64>().ok())
+        .collect::<Vec<_>>();
+    crate::accounts::cursor_models(&ids)
+        .into_iter()
+        .map(|model| Model {
+            id: model.id,
+            label: model.label,
+            efforts: vec![],
+            default_effort: String::new(),
+        })
+        .collect()
 }
 
 /// OpenCode's models that `plans` pay for: Go models need a workspace with Go, Zen models one with
@@ -145,6 +172,10 @@ fn check(entry: &Model, effort: &str) -> Result<(String, String), String> {
 /// model's default. Without an OpenCode account, or while OpenCode's list can't be read, an
 /// OpenCode choice is checked only for its shape, as runners do.
 pub(crate) fn resolve(provider: &str, model: &str, effort: &str, plans: &Plans) -> Result<(String, String), String> {
+    // Without a Cursor account's list, a Cursor choice is checked for its shape, as runners do.
+    if provider == "cursor" && models(provider, plans).is_empty() {
+        return cursor_shape(model, effort);
+    }
     if provider == "opencode" {
         if plans.is_none() {
             return checked_shape(model, effort);
@@ -158,6 +189,14 @@ pub(crate) fn resolve(provider: &str, model: &str, effort: &str, plans: &Plans) 
         .find(|entry| entry.id == model)
         .ok_or_else(|| format!("{model} is not a model OpenCodeReview runs on {provider}"))?;
     check(&entry, effort)
+}
+
+fn cursor_shape(model: &str, effort: &str) -> Result<(String, String), String> {
+    if crate::providers::cursor::model_ok(model) && effort.is_empty() {
+        Ok((model.to_string(), String::new()))
+    } else {
+        Err(format!("{model} is not a Cursor model"))
+    }
 }
 
 fn checked_shape(model: &str, effort: &str) -> Result<(String, String), String> {
@@ -177,6 +216,8 @@ fn checked_shape(model: &str, effort: &str) -> Result<(String, String), String> 
 pub(crate) fn resolve_offline(provider: &str, model: &str, effort: &str) -> Result<(String, String), String> {
     if provider == "opencode" {
         checked_shape(model, effort)
+    } else if provider == "cursor" {
+        cursor_shape(model, effort)
     } else {
         resolve(provider, model, effort, &None)
     }
@@ -217,6 +258,9 @@ pub(crate) fn label(provider: &str, model: &str, effort: &str) -> String {
         .map_or(provider, |(_, name)| *name);
     let known = if provider == "opencode" {
         crate::providers::opencode_catalogue::cached()
+    } else if provider == "cursor" {
+        let accounts = crate::accounts::stored_ids().iter().map(i64::to_string).collect();
+        models(provider, &Some(accounts))
     } else {
         models(provider, &None)
     };
@@ -271,6 +315,15 @@ mod tests {
             );
         }
         assert!(resolve_offline("opencode", "opencode/x#y", "").is_err());
+        // Without a Cursor account's list, only a plain slug without an effort is a Cursor model.
+        assert_eq!(
+            resolve("cursor", "auto", "", &None).unwrap(),
+            ("auto".to_string(), String::new())
+        );
+        assert!(resolve("cursor", "auto", "high", &None).is_err());
+        assert!(resolve_offline("cursor", "gpt[effort=high]", "").is_err());
+        assert!(resolve_offline("cursor", "opencode/glm-5.3", "").is_err());
+        assert_eq!(default_engine("cursor", &None), (String::new(), String::new()));
         assert_eq!(default_engine_offline("claude", &None), default_engine("claude", &None));
     }
 

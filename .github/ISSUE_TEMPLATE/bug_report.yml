@@ -53,7 +53,9 @@ body:
       options:
         - Claude
         - ChatGPT (Codex)
-        - Both
+        - OpenCode
+        - Cursor
+        - Several
         - Not related
     validations:
       required: true

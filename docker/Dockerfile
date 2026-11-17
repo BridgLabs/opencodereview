@@ -86,6 +86,26 @@ RUN case "$TARGETARCH" in \
   && test "$(HOME=/tmp/opencode-home XDG_DATA_HOME=/tmp/opencode-home XDG_CONFIG_HOME=/tmp/opencode-home XDG_CACHE_HOME=/tmp/opencode-home XDG_STATE_HOME=/tmp/opencode-home /opt/opencode/bin/opencode --version)" = "opencode v$OPENCODE_CLI_VERSION" \
   && rm -rf /tmp/opencode-home
 LABEL ai.opencode.cli.version="${OPENCODE_CLI_VERSION}"
+# Cursor's CLI ships its own Node.js and ripgrep; it never updates itself (`--disable-auto-update`,
+# `"channel": "static"`).
+ARG CURSOR_CLI_VERSION=2026.11.13-eacade1
+ARG CURSOR_CLI_SHA256_AMD64=c02e4321f20d691ee03af94d29948dc3a81c6c34e7328da7bb1afade4c75812f
+ARG CURSOR_CLI_SHA256_ARM64=e4ba0611045a24d1cf78f021d34c19461680fc7234c19c1f981f1cc169f70cdc
+RUN case "$TARGETARCH" in \
+      amd64) platform=x64; checksum="$CURSOR_CLI_SHA256_AMD64" ;; \
+      arm64) platform=arm64; checksum="$CURSOR_CLI_SHA256_ARM64" ;; \
+      *) echo "Unsupported Cursor CLI architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+  && curl -fsSL --retry 3 "https://downloads.cursor.com/lab/${CURSOR_CLI_VERSION}/linux/${platform}/agent-cli-package.tar.gz" -o /tmp/cursor.tar.gz \
+  && printf '%s  /tmp/cursor.tar.gz\n' "$checksum" | sha256sum -c - \
+  && mkdir -p /opt/cursor/bin \
+  && tar -xzf /tmp/cursor.tar.gz -C /opt/cursor/bin --strip-components=1 \
+  && rm /tmp/cursor.tar.gz \
+  && chown -R root:root /opt/cursor \
+  && ln -s /opt/cursor/bin/cursor-agent /usr/local/bin/cursor-agent \
+  && test "$(HOME=/tmp/cursor-home AGENT_CLI_CREDENTIAL_STORE=file /opt/cursor/bin/cursor-agent --version)" = "$CURSOR_CLI_VERSION" \
+  && rm -rf /tmp/cursor-home
+LABEL ai.cursor.cli.version="${CURSOR_CLI_VERSION}"
 ENV DISABLE_AUTOUPDATER=1
 WORKDIR /app
 COPY --from=server /app/assets ./assets

@@ -1,8 +1,8 @@
 """Checks the newest release of each AI CLI before it is pinned in docker/Dockerfile.
 
-  resolve          Print the Docker build arguments for the newest Claude Code, Codex and OpenCode
-                   releases (linux/amd64) and write a version table to the step summary. Needs
-                   GH_TOKEN to list the GitHub releases.
+  resolve          Print the Docker build arguments for the newest Claude Code, Codex, OpenCode and
+                   Cursor releases (linux/amd64) and write a version table to the step summary.
+                   Needs GH_TOKEN to list the GitHub releases.
   flags IMAGE      Check that each CLI in IMAGE still accepts every flag its provider passes.
 
 No step reads credentials or calls a model.
@@ -84,6 +84,19 @@ def latest_github(repository, prefix, pages=5):
     return newest_stable(releases, prefix)
 
 
+def latest_cursor():
+    # Cursor's install script names its current release; each tarball has its checksum beside it.
+    script = fetch("https://cursor.com/install")
+    match = re.search(r"downloads\.cursor\.com/lab/(\d{4}\.\d{2}\.\d{2}-[0-9a-f]{7,40})/", script)
+    if not match:
+        sys.exit("Cursor's install script names no release")
+    version = match.group(1)
+    checksum = fetch(f"https://downloads.cursor.com/lab/{version}/linux/x64/agent-cli-package.tar.gz.sha256").split()[0]
+    if not re.fullmatch(r"[0-9a-f]{64}", checksum):
+        sys.exit(f"Cursor {version} has no linux-x64 checksum")
+    return version, checksum
+
+
 def pinned():
     dockerfile = (ROOT / "docker/Dockerfile").read_text()
     return dict(re.findall(r"^ARG (\w+_CLI_VERSION)=(\S+)$", dockerfile, re.M))
@@ -93,6 +106,7 @@ def resolve():
     claude = fetch(f"{CLAUDE_RELEASES}/latest").strip()
     codex = latest_github("openai/codex", "rust-v")
     opencode = latest_github("anomalyco/opencode", "v")
+    cursor, cursor_checksum = latest_cursor()
     manifest = json.loads(fetch(f"{CLAUDE_RELEASES}/{claude}/manifest.json"))
     args = {
         "CLAUDE_CLI_VERSION": claude,
@@ -102,10 +116,12 @@ def resolve():
         "CODEX_CODE_MODE_HOST_SHA256_AMD64": sha256(f"https://github.com/openai/codex/releases/download/rust-v{codex}/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz"),
         "OPENCODE_CLI_VERSION": opencode,
         "OPENCODE_CLI_SHA256_AMD64": sha256(f"https://github.com/anomalyco/opencode/releases/download/v{opencode}/opencode-linux-x64.tar.gz"),
+        "CURSOR_CLI_VERSION": cursor,
+        "CURSOR_CLI_SHA256_AMD64": cursor_checksum,
     }
     current = pinned()
     rows = ["| CLI | Pinned | Newest |", "| --- | --- | --- |"]
-    for name in ["CLAUDE", "CODEX", "OPENCODE"]:
+    for name in ["CLAUDE", "CODEX", "OPENCODE", "CURSOR"]:
         key = name + "_CLI_VERSION"
         mark = "" if current.get(key) == args[key] else " (new)"
         rows.append(f"| {name.title()} | {current.get(key, '?')} | {args[key]}{mark} |")
@@ -137,6 +153,9 @@ def flags(image):
         "claude": ["claude", "--help"],
         "codex": ["codex", "exec", "--help"],
         "opencode": ["opencode", "run", "--help"],
+        # Cursor hides the flags that keep it to the review (`--disable-auto-update`, ...) from its
+        # help, so its bundle is searched instead.
+        "cursor": ["sh", "-c", "cat /opt/cursor/bin/*.js | grep -o -- '--[a-z][a-z-]*' | sort -u"],
     }
     failures = []
     for name, command in help_commands.items():

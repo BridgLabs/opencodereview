@@ -14,6 +14,10 @@ vi.mock("../../services/setupApi", () => ({
     reorderAccounts: vi.fn(),
     updateAccount: vi.fn(),
     accountUsage: vi.fn(),
+    cursorAuthStart: vi.fn(() => new Promise(() => {})),
+    cursorAuthEvents: vi.fn(() => new Promise(() => {})),
+    cursorAuthCancel: vi.fn(async () => ({ ok: true })),
+    cursorKeySave: vi.fn(),
   },
 }));
 
@@ -170,9 +174,12 @@ it("switches to another account of the provider, resuming a paused one and skipp
     expect(radio("Bruna").disabled).toBe(true);
     expect(radio("Bruna").textContent).toContain("Limit reached · resets in 1 h");
     expect(radio("Bruna").title).toContain("Usage limit reached");
+    const reads = vi.mocked(setupApi.reviewEngines).mock.calls.length;
     await act(async () => radio("Brito").click());
     expect(setupApi.updateAccount).toHaveBeenCalledWith(2, { enabled: true });
     expect(setupApi.reorderAccounts).toHaveBeenCalledWith([2, 1, 3]);
+    // The resumed account's models are offered without reopening the menu.
+    expect(vi.mocked(setupApi.reviewEngines).mock.calls.length).toBeGreaterThan(reads);
 
     await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Add an account"]')!.click());
     expect(container.textContent).toContain("Add an account");
@@ -312,6 +319,72 @@ it("keeps a saved choice when the read started by opening the menu answers after
     await act(async () => answerOpen(engines));
     await settle();
     expect(trigger().textContent).toContain("Sonnet 5.5");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+it("reads the model list again after an account is added from the menu", async () => {
+  const cursor: ReviewEngine = {
+    provider: "cursor",
+    name: "Cursor",
+    model: "auto",
+    effort: "",
+    label: "Cursor · Auto",
+    models: [
+      { id: "auto", label: "Auto", efforts: [], defaultEffort: "" },
+      { id: "grok-4.7-high", label: "Grok 4.7 High", efforts: [], defaultEffort: "" },
+    ],
+  };
+  let signedIn = false;
+  vi.mocked(setupApi.listAccounts).mockImplementation(async () =>
+    signedIn ? [account(1, "claude", "Work"), account(2, "cursor", "Cursor")] : [account(1, "claude", "Work")],
+  );
+  vi.mocked(setupApi.accountUsage).mockResolvedValue([]);
+  vi.mocked(setupApi.reviewEngines).mockImplementation(async () =>
+    signedIn ? [...engines, cursor] : [...engines, { ...cursor, models: [] }],
+  );
+  vi.mocked(setupApi.cursorKeySave).mockImplementation(async () => {
+    signedIn = true;
+    return { ok: true };
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const settle = () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  const click = async (find: () => HTMLElement | undefined) => {
+    await act(async () => find()!.click());
+    await settle();
+  };
+  const button = (match: (text: string) => boolean) => () =>
+    [...container.querySelectorAll<HTMLButtonElement>("button")].find((item) => match(item.textContent ?? ""));
+  try {
+    await act(async () =>
+      root.render(
+        <QueryClientProvider client={client}>
+          <EnginePicker />
+        </QueryClientProvider>,
+      ),
+    );
+    await settle();
+    await click(() => container.querySelector<HTMLButtonElement>("button[aria-haspopup]")!);
+    await click(() => container.querySelector<HTMLButtonElement>('button[aria-label="Add an account"]')!);
+    await click(button((text) => text.startsWith("Cursor")));
+    await click(button((text) => text === "Use an API key instead"));
+    const key = container.querySelector<HTMLInputElement>('input[aria-label="Cursor API key"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(key, "key_cursor_fixture_value");
+      key.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click(button((text) => text === "Save key"));
+    await settle();
+    expect(container.textContent).toContain("Grok 4.7 High");
+    expect(container.textContent).not.toContain("couldn't be loaded");
   } finally {
     await act(async () => root.unmount());
     container.remove();

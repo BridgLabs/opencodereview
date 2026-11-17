@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [{ "command": "/usr/local/bin/ocr-sandbox tool-guard cursor", "timeout": 10, "failClosed": true }],
+    "beforeShellExecution": [{ "command": "/usr/local/bin/ocr-sandbox tool-guard cursor", "timeout": 10, "failClosed": true }],
+    "beforeReadFile": [{ "command": "/usr/local/bin/ocr-sandbox tool-guard cursor", "timeout": 10, "failClosed": true }],
+    "beforeMCPExecution": [{ "command": "/usr/local/bin/ocr-sandbox tool-guard cursor", "timeout": 10, "failClosed": true }]
+  }
+}

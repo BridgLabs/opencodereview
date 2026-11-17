@@ -1,6 +1,6 @@
 //! Credentials of the AI accounts listed in `ai_accounts`. Each account owns one directory,
 //! `$OCR_DATA_DIR/accounts/<id>/`, holding its provider's credential file:
-//! `claude/oauth-token`, `codex/auth.json` or `opencode/auth.json`.
+//! `claude/oauth-token`, `codex/auth.json`, `opencode/auth.json` or `cursor/auth.json`.
 pub(crate) mod sandbox_sync;
 pub(crate) mod usage;
 
@@ -41,6 +41,78 @@ pub(crate) fn codex_auth_path(id: i64) -> PathBuf {
 
 pub(crate) fn opencode_auth_path(id: i64) -> PathBuf {
     root().join(id.to_string()).join("opencode/auth.json")
+}
+
+pub(crate) fn cursor_auth_path(id: i64) -> PathBuf {
+    root().join(id.to_string()).join("cursor/auth.json")
+}
+
+/// The models a Cursor account's subscription offers (`cursor-agent models` at sign-in), kept
+/// beside its sign-in for the server only: runners never receive it.
+pub(crate) fn cursor_models_path(id: i64) -> PathBuf {
+    root().join(id.to_string()).join("cursor/models.json")
+}
+
+/// Saves a Cursor account: its browser sign-in or user API key.
+pub(crate) fn store_cursor_auth(id: i64, raw: &str) -> Result<(), String> {
+    crate::providers::cursor::validate_auth(raw)?;
+    store(&cursor_auth_path(id), id, raw.as_bytes())
+}
+
+pub(crate) fn store_cursor_models(id: i64, models: &[crate::providers::cursor::ListedModel]) -> Result<(), String> {
+    store(
+        &cursor_models_path(id),
+        id,
+        serde_json::json!({ "models": models }).to_string().as_bytes(),
+    )
+}
+
+/// The models the Cursor accounts `ids` offer together, each account's default first, without
+/// repeats; empty when none of them has a usable sign-in and a recorded list. The caller passes
+/// the accounts reviews can run on (`Database::cursor_review_accounts`).
+pub(crate) fn cursor_models(ids: &[i64]) -> Vec<crate::providers::cursor::ListedModel> {
+    cursor_models_under(&root(), ids, crate::db::now_millis())
+}
+
+/// Whether the Cursor account `id` can run `model`: its recorded list names it. An account
+/// without a readable list is not ruled out; its CLI decides.
+pub(crate) fn cursor_account_offers(id: i64, model: &str) -> bool {
+    cursor_account_offers_under(&root(), id, model)
+}
+
+fn cursor_account_offers_under(root: &std::path::Path, id: i64, model: &str) -> bool {
+    fs::read_to_string(root.join(id.to_string()).join("cursor/models.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|value| value["models"].as_array().cloned())
+        .is_none_or(|models| models.iter().any(|listed| listed["id"] == model))
+}
+
+fn cursor_models_under(root: &std::path::Path, ids: &[i64], now: i64) -> Vec<crate::providers::cursor::ListedModel> {
+    let mut models: Vec<crate::providers::cursor::ListedModel> = Vec::new();
+    for id in ids {
+        let directory = root.join(id.to_string()).join("cursor");
+        // The same check as `has_credential`: an expired browser sign-in is signed out.
+        let signed_in = fs::read_to_string(directory.join("auth.json"))
+            .is_ok_and(|raw| crate::providers::cursor::usable(&raw, now));
+        if !signed_in {
+            continue;
+        }
+        let listed = fs::read_to_string(directory.join("models.json"))
+            .ok()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .and_then(|value| {
+                serde_json::from_value::<Vec<crate::providers::cursor::ListedModel>>(value["models"].clone()).ok()
+            })
+            .unwrap_or_default();
+        for mut model in listed {
+            if crate::providers::cursor::model_ok(&model.id) && !models.iter().any(|known| known.id == model.id) {
+                model.label = crate::providers::cursor::clean_label(&model.label);
+                models.push(model);
+            }
+        }
+    }
+    models
 }
 
 pub(crate) fn store_claude_token(id: i64, token: &str) -> Result<(), String> {
@@ -158,6 +230,9 @@ pub(crate) fn has_credential(provider: &str, id: i64) -> bool {
             .is_ok_and(|raw| crate::providers::codex::validate_auth(&raw).is_ok()),
         "opencode" => fs::read_to_string(opencode_auth_path(id))
             .is_ok_and(|raw| crate::providers::opencode::validate_auth(&raw).is_ok()),
+        // A browser sign-in is never renewed, so an expired one is no credential.
+        "cursor" => fs::read_to_string(cursor_auth_path(id))
+            .is_ok_and(|raw| crate::providers::cursor::usable(&raw, crate::db::now_millis())),
         _ => false,
     }
 }
@@ -222,7 +297,7 @@ mod tests {
     fn only_removed_providers_lose_their_sign_ins() {
         let root = std::env::temp_dir().join(format!("ocr-unsupported-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        for path in ["1/claude", "2/codex", "3/gemini", "4/opencode"] {
+        for path in ["1/claude", "2/codex", "3/gemini", "4/opencode", "5/cursor"] {
             std::fs::create_dir_all(root.join(path)).unwrap();
             std::fs::write(root.join(path).join("secret"), "x").unwrap();
         }
@@ -231,6 +306,7 @@ mod tests {
         assert!(root.join("2/codex/secret").exists());
         assert!(!root.join("3").exists());
         assert!(root.join("4/opencode/secret").exists());
+        assert!(root.join("5/cursor/secret").exists());
         // Nothing left to remove, and a missing root is not an error.
         assert!(!super::remove_unsupported_sign_ins(&root).unwrap());
         std::fs::remove_dir_all(&root).unwrap();
@@ -268,6 +344,62 @@ mod tests {
         let mut legacy = super::plans_under(&root, &[4]).unwrap();
         legacy.sort();
         assert_eq!(legacy, vec!["go".to_string(), "zen".to_string()]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn cursor_models_join_the_given_accounts_with_a_usable_sign_in() {
+        let root = std::env::temp_dir().join(format!("ocr-cursor-models-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let key = r#"{"key":"key_0123456789abcdef0123"}"#;
+        let account = |id: i64, auth: &str, models: &str| {
+            let directory = root.join(id.to_string()).join("cursor");
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(directory.join("auth.json"), auth).unwrap();
+            std::fs::write(directory.join("models.json"), models).unwrap();
+        };
+        account(
+            1,
+            key,
+            r#"{"models":[{"id":"auto","label":"Auto"},{"id":"gpt-5.5","label":"GPT-5.5"}]}"#,
+        );
+        account(
+            2,
+            key,
+            r#"{"models":[{"id":"gpt-5.5","label":"GPT-5.5"},{"id":"sonnet-5","label":"Sonnet 5"},{"id":"bad id","label":"x"}]}"#,
+        );
+        account(3, "{}", r#"{"models":[{"id":"secret-model","label":"x"}]}"#);
+        use base64::Engine;
+        let sign_in = |exp: i64| {
+            let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(r#"{{"exp":{exp}}}"#));
+            serde_json::json!({"login": {"accessToken": format!("eyJhbGciOiJIUzI1NiJ9.{claims}.signature-fixture"), "refreshToken": "refresh-token-fixture"}})
+                .to_string()
+        };
+        let now = 1_800_000_000_000;
+        account(
+            4,
+            &sign_in(now / 1000 + 3600),
+            r#"{"models":[{"id":"grok-4.7","label":"Grok"}]}"#,
+        );
+        account(
+            5,
+            &sign_in(now / 1000 - 60),
+            r#"{"models":[{"id":"expired-model","label":"x"}]}"#,
+        );
+        let ids = |ids: &[i64]| {
+            super::cursor_models_under(&root, ids, now)
+                .into_iter()
+                .map(|model| model.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&[1, 2, 3]), vec!["auto", "gpt-5.5", "sonnet-5"]);
+        assert_eq!(ids(&[2]), vec!["gpt-5.5", "sonnet-5"]);
+        assert!(ids(&[3]).is_empty() && ids(&[]).is_empty());
+        // A browser sign-in counts until it expires, as Settings and the runner see it.
+        assert_eq!(ids(&[4, 5]), vec!["grok-4.7"]);
+        assert!(super::cursor_account_offers_under(&root, 2, "sonnet-5"));
+        assert!(!super::cursor_account_offers_under(&root, 1, "sonnet-5"));
+        assert!(super::cursor_account_offers_under(&root, 99, "sonnet-5"));
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

@@ -8,8 +8,8 @@ mod egress;
 pub(crate) mod runner;
 
 pub use egress::serve as serve_egress;
-pub use runner::guard_tool;
 pub use runner::serve as serve_runner;
+pub use runner::{guard_cursor_tool, guard_tool};
 
 pub const MAX_STAGE_BYTES: usize = 8 * 1024 * 1024;
 
@@ -39,6 +39,7 @@ fn executor_fingerprint() -> String {
         include_bytes!("../review/integration/mod.rs").as_slice(),
         include_bytes!("../providers/claude.rs").as_slice(),
         include_bytes!("../providers/codex.rs").as_slice(),
+        include_bytes!("../providers/cursor.rs").as_slice(),
         include_bytes!("../providers/opencode.rs").as_slice(),
         include_bytes!("../providers/engines.rs").as_slice(),
         include_bytes!("../providers/opencode_catalogue.rs").as_slice(),

@@ -49,8 +49,8 @@ fn covered_ms(spans: &mut [(i64, i64)]) -> i64 {
 }
 
 /// Counts what one execution did from its events: Claude `assistant` and `result` events, Codex
-/// `item.completed` and `turn.completed` events and OpenCode `step_start`, `tool_use` and
-/// `step_finish` events.
+/// `item.completed` and `turn.completed` events, OpenCode `step_start`, `tool_use` and
+/// `step_finish` events and Cursor `tool_call` events.
 pub fn collect_activity(value: &serde_json::Value) -> StageActivity {
     let mut activity = StageActivity::default();
     let mut messages = std::collections::HashSet::new();
@@ -72,8 +72,13 @@ pub fn collect_activity(value: &serde_json::Value) -> StageActivity {
             }
             Some("result") if event["stats"].is_null() => {
                 activity.model_ms += event["duration_api_ms"].as_i64().unwrap_or(0);
+                // Cursor's result carries the execution's reasoning in camelCase.
+                if event["modelUsage"].is_null() && event["usage"]["inputTokens"].is_i64() {
+                    activity.reasoning_tokens += event["usage"]["reasoningTokens"].as_i64().unwrap_or(0);
+                }
             }
             Some("item.completed") if event["item"]["type"] == "command_execution" => activity.tool_calls += 1,
+            Some("tool_call") if event["subtype"] == "started" => activity.tool_calls += 1,
             Some("turn.completed") => {
                 activity.reasoning_tokens += event["usage"]["reasoning_output_tokens"].as_i64().unwrap_or(0);
             }
@@ -158,7 +163,7 @@ pub fn normalize_model(raw: &str) -> String {
 }
 
 /// Accumulates per-model token usage from Claude `result` events, Codex `turn.completed`
-/// events and OpenCode `step_finish` events. Each Claude execution emits exactly one result whose `modelUsage` already totals
+/// events, OpenCode `step_finish` events and Cursor `result` events. Each Claude execution emits exactly one result whose `modelUsage` already totals
 /// every turn, so assistant messages are not summed again.
 pub fn collect_usage(value: &serde_json::Value, per_model: &mut std::collections::HashMap<String, ModelUsageEntry>) {
     let events = match value {
@@ -196,9 +201,27 @@ pub fn collect_usage(value: &serde_json::Value, per_model: &mut std::collections
         entry.cache_read_tokens += tokens["cache"]["read"].as_i64().unwrap_or(0);
         entry.cache_creation_tokens += tokens["cache"]["write"].as_i64().unwrap_or(0);
     }
+    // Cursor's one result totals the execution in camelCase, without `modelUsage`; `inputTokens`
+    // already excludes the cache.
+    let cursor = |event: &serde_json::Value| event["modelUsage"].is_null() && event["usage"]["inputTokens"].is_i64();
+    for usage in events
+        .iter()
+        .filter(|event| event["type"] == "result" && cursor(event))
+        .map(|event| &event["usage"])
+    {
+        let entry = per_model.entry("cursor".into()).or_insert_with(|| ModelUsageEntry {
+            model: "cursor".into(),
+            ..Default::default()
+        });
+        entry.input_tokens += usage["inputTokens"].as_i64().unwrap_or(0);
+        entry.output_tokens +=
+            usage["outputTokens"].as_i64().unwrap_or(0) + usage["reasoningTokens"].as_i64().unwrap_or(0);
+        entry.cache_read_tokens += usage["cacheReadTokens"].as_i64().unwrap_or(0);
+        entry.cache_creation_tokens += usage["cacheWriteTokens"].as_i64().unwrap_or(0);
+    }
     for event in events
         .into_iter()
-        .filter(|event| event["type"] == "result" && event["stats"].is_null())
+        .filter(|event| event["type"] == "result" && event["stats"].is_null() && !cursor(event))
     {
         let mut add = |raw: &str, usage: &serde_json::Value, camel: bool| {
             let model = normalize_model(raw);

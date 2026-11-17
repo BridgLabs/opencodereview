@@ -49,3 +49,13 @@ fn opencode_plans_count_only_accounts_reviews_can_run_on() {
         .unwrap();
     assert_eq!(db.opencode_review_accounts().unwrap(), vec![zen.id]);
 }
+
+#[test]
+fn cursor_accounts_are_stored_and_offered_to_reviews() {
+    let db = Db::for_test().open().unwrap();
+    assert_eq!(db.engine_plans("cursor").unwrap(), None);
+    let cursor = db.create_ai_account("cursor", "Cursor").unwrap();
+    assert_eq!(cursor.provider, "cursor");
+    assert_eq!(db.cursor_review_accounts().unwrap(), vec![cursor.id]);
+    assert_eq!(db.engine_plans("cursor").unwrap(), Some(vec![cursor.id.to_string()]));
+}
