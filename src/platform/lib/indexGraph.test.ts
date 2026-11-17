@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { IndexGraph } from "../../types";
-import { graphSlice, layoutGraph, normalizeGraph, resizeGraphViewport, searchNodes } from "./indexGraph";
+import {
+  graphSlice,
+  isTestFile,
+  layoutGraph,
+  normalizeGraph,
+  resizeGraphViewport,
+  searchNodes,
+  withoutTests,
+} from "./indexGraph";
 
 const node = (id: string, path = id) => ({ id, name: id, path, kind: "lib" });
 const edge = (source: string, target: string, dev = false) => ({ source, target, dev });
@@ -48,6 +56,15 @@ describe("index graph", () => {
     expect(graphSlice({ ...graph, edges: [] }, {}).nodes).toHaveLength(4);
     expect(graphSlice(graph, { focusId: "isolated" }).nodes.map((item) => item.id)).toEqual(["isolated"]);
   });
+  it("shows isolated nodes when asked, also in a graph that is cut down", () => {
+    const linked = Array.from({ length: 200 }, (_, i) => node(`n${String(i).padStart(3, "0")}`));
+    const alone = Array.from({ length: 20 }, (_, i) => node(`z${i}`));
+    const big = { nodes: [...linked, ...alone], edges: linked.slice(1).map((item, i) => edge(linked[i].id, item.id)) };
+    const slice = graphSlice(big, { includeIsolated: true });
+    expect(slice.nodes).toHaveLength(150);
+    expect(slice.nodes.filter((item) => item.id.startsWith("z"))).toHaveLength(20);
+    expect(graphSlice({ nodes: big.nodes, edges: [] }, {}).nodes).toHaveLength(150);
+  });
   it("bounds rendering and preserves a focused node outside the default slice", () => {
     const large = {
       nodes: Array.from({ length: 180 }, (_, i) => node(String(i))),
@@ -74,5 +91,64 @@ describe("index graph", () => {
   it("handles empty data and missing focus IDs", () => {
     expect(graphSlice({ nodes: [], edges: [] }, {}).nodes).toEqual([]);
     expect(graphSlice(graph, { focusId: "deleted" }).nodes).toEqual(graphSlice(graph, {}).nodes);
+  });
+  it("drops a node that would start another cluster with no room to join it", () => {
+    const graph = {
+      nodes: [node("a"), node("hub"), node("b"), node("c")],
+      edges: [edge("hub", "a"), edge("b", "c")],
+    };
+    const slice = graphSlice(graph, { nodeLimit: 3 });
+    expect(slice.nodes.map((item) => item.id)).toEqual(["a", "hub"]);
+    expect(slice.edges).toEqual([edge("hub", "a")]);
+  });
+  it("keeps the best connected nodes when a graph is cut down, sorted by path", () => {
+    const hub = {
+      nodes: [node("a"), node("b"), node("c"), node("hub")],
+      edges: [edge("hub", "a"), edge("hub", "b"), edge("hub", "c"), edge("a", "b")],
+    };
+    expect(graphSlice(hub, { nodeLimit: 2 }).nodes.map((item) => item.id)).toEqual(["a", "hub"]);
+  });
+  it("recognizes test files across languages", () => {
+    for (const path of [
+      "spec/a_spec.rb",
+      "test/models/user_test.rb",
+      "src/a.test.ts",
+      "pkg/a_test.go",
+      "tests/test_a.py",
+      "x/__tests__/a.js",
+      "spec/javascripts/cart_spec.js",
+    ]) {
+      expect(isTestFile(path), path).toBe(true);
+    }
+    for (const path of [
+      "lib/inspector.rb",
+      "src/latest.ts",
+      "app/models/user.rb",
+      "lib/spectrum/a.rb",
+      "packages/spec/src/index.ts",
+      "specs/openapi/types.ts",
+    ]) {
+      expect(isTestFile(path), path).toBe(false);
+    }
+  });
+  it("drops test files and the edges that touch them", () => {
+    const graph = {
+      nodes: [node("lib", "lib/a.rb"), node("other", "lib/b.rb"), node("spec", "spec/a_spec.rb")],
+      edges: [edge("lib", "other"), edge("spec", "lib")],
+    };
+    expect(withoutTests(graph)).toEqual({
+      nodes: [node("lib", "lib/a.rb"), node("other", "lib/b.rb")],
+      edges: [edge("lib", "other")],
+    });
+  });
+  it("never leaves a visible node without a visible edge when it cuts a large graph", () => {
+    const nodes = Array.from({ length: 60 }, (_, i) => node(`n${String(i).padStart(2, "0")}`));
+    const edges = nodes
+      .slice(1)
+      .map((item, i) => edge(i % 7 === 0 ? "n00" : `n${String((i % 20) + 1).padStart(2, "0")}`, item.id));
+    const slice = graphSlice({ nodes, edges }, { nodeLimit: 25, edgeLimit: 40 });
+    expect(slice.nodes).toHaveLength(25);
+    const touched = new Set(slice.edges.flatMap((item) => [item.source, item.target]));
+    expect(slice.nodes.every((item) => touched.has(item.id))).toBe(true);
   });
 });

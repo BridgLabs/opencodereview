@@ -3,17 +3,19 @@ use super::*;
 pub(crate) fn is_package_manifest(path: &str) -> bool {
     matches!(
         path,
-        "package.json" | "go.mod" | "Cargo.toml" | "pyproject.toml" | "setup.py" | "requirements.txt"
-    ) || [
-        "/package.json",
-        "/go.mod",
-        "/Cargo.toml",
-        "/pyproject.toml",
-        "/setup.py",
-        "/requirements.txt",
-    ]
-    .iter()
-    .any(|suffix| path.ends_with(suffix))
+        "package.json" | "go.mod" | "Cargo.toml" | "pyproject.toml" | "setup.py" | "requirements.txt" | "Gemfile"
+    ) || path.ends_with(".gemspec")
+        || [
+            "/package.json",
+            "/go.mod",
+            "/Cargo.toml",
+            "/pyproject.toml",
+            "/setup.py",
+            "/requirements.txt",
+            "/Gemfile",
+        ]
+        .iter()
+        .any(|suffix| path.ends_with(suffix))
 }
 
 pub(crate) fn parse_manifest(path: &str, content: &[u8]) -> Option<ParsedManifest> {
@@ -31,6 +33,20 @@ pub(crate) fn parse_manifest(path: &str, content: &[u8]) -> Option<ParsedManifes
     }
     if path == "requirements.txt" || path.ends_with("/requirements.txt") {
         return parse_requirements_txt(path, content);
+    }
+    if path == "Gemfile" || path.ends_with("/Gemfile") {
+        let dir = manifest_dir(path);
+        return Some(parse_gemfile(
+            content,
+            if dir.is_empty() {
+                "ruby".to_string()
+            } else {
+                dir.replace('/', "-")
+            },
+        ));
+    }
+    if path.ends_with(".gemspec") {
+        return parse_gemspec(content);
     }
     let value: serde_json::Value = serde_json::from_slice(content).ok()?;
     let name = value.get("name").and_then(|name| name.as_str())?.to_string();
@@ -137,6 +153,12 @@ pub(crate) fn parse_requirements_txt(path: &str, content: &[u8]) -> Option<Parse
     })
 }
 
+/// Manifests that list dependencies but declare no package name; a manifest that does replaces
+/// the name made up for them.
+pub(crate) fn declares_no_name(path: &str) -> bool {
+    path.ends_with("requirements.txt") || path == "Gemfile" || path.ends_with("/Gemfile")
+}
+
 pub(crate) fn manifest_dir(path: &str) -> String {
     for suffix in [
         "/package.json",
@@ -145,10 +167,18 @@ pub(crate) fn manifest_dir(path: &str) -> String {
         "/pyproject.toml",
         "/setup.py",
         "/requirements.txt",
+        "/Gemfile",
     ] {
         if let Some(dir) = path.strip_suffix(suffix) {
             return dir.to_string();
         }
+    }
+    // A gemspec is named after its gem, so its directory is everything before the file name.
+    if path.ends_with(".gemspec") {
+        return path
+            .rsplit_once('/')
+            .map(|(dir, _)| dir.to_string())
+            .unwrap_or_default();
     }
     String::new()
 }
@@ -325,6 +355,9 @@ pub(crate) fn detect_manager(files: &HashSet<String>) -> String {
     }
     if files.contains("go.mod") {
         return "go".to_string();
+    }
+    if files.contains("Gemfile") || files.contains("Gemfile.lock") {
+        return "bundler".to_string();
     }
     "unknown".to_string()
 }
