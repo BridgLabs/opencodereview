@@ -68,7 +68,7 @@ pub(crate) fn strip_jsonc(input: &str) -> String {
 pub(crate) fn is_code_language(language: &str) -> bool {
     matches!(
         language,
-        "typescript" | "typescriptreact" | "javascript" | "javascriptreact" | "rust" | "python" | "go"
+        "typescript" | "typescriptreact" | "javascript" | "javascriptreact" | "rust" | "python" | "go" | "ruby"
     )
 }
 
@@ -82,7 +82,7 @@ pub(crate) fn language_for_path(path: &str) -> Option<&'static str> {
         "rs" => Some("rust"),
         "py" => Some("python"),
         "go" => Some("go"),
-        "rb" => Some("ruby"),
+        "rb" | "rake" | "gemspec" | "ru" => Some("ruby"),
         "css" | "less" | "scss" => Some("styles"),
         "md" | "mdx" => Some("markdown"),
         "json" => Some("json"),
@@ -116,6 +116,9 @@ pub(crate) fn is_fts_eligible_path(path: &str) -> bool {
                 | "py"
                 | "go"
                 | "rb"
+                | "rake"
+                | "gemspec"
+                | "ru"
                 | "css"
                 | "scss"
                 | "md"

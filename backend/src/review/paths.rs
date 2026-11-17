@@ -279,14 +279,19 @@ pub(crate) fn test_relationship_hints(changed: &[String]) -> Vec<String> {
 }
 
 pub(crate) fn path_stem_key(path: &str) -> String {
-    Path::new(path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(path)
-        .replace(".test", "")
-        .replace(".spec", "")
-        .replace("_test", "")
-        .to_ascii_lowercase()
+    let stem = Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or(path);
+    // A marker counts only at the end of the stem or before an extension: `user_specification_spec`
+    // keeps `user_specification`, and `Button.test.tsx` of a snapshot file gives `Button.tsx`.
+    let marker = [".test", ".spec", "_test", "_spec"].iter().find_map(|marker| {
+        stem.match_indices(marker)
+            .map(|(at, _)| (at, at + marker.len()))
+            .find(|(_, end)| stem[*end..].is_empty() || stem[*end..].starts_with('.'))
+    });
+    let key = match marker {
+        Some((at, end)) => format!("{}{}", &stem[..at], &stem[end..]),
+        None => stem.to_string(),
+    };
+    key.to_ascii_lowercase()
 }
 
 pub(crate) fn package_key(path: &str) -> String {
