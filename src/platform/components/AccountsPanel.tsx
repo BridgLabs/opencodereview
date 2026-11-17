@@ -17,6 +17,7 @@ import type { AccountUsage, AiAccount, UsageWindow } from "../../types";
 import { formatError } from "../lib/utils";
 
 export const ACCOUNTS_QUERY_KEY = ["accounts"] as const;
+export const ENGINES_QUERY_KEY = ["review-engines"] as const;
 const USAGE_QUERY_KEY = ["accounts", "usage"] as const;
 export const usageQuery = {
   queryKey: USAGE_QUERY_KEY,
@@ -391,6 +392,8 @@ export function AccountsPanel({ provider }: { provider?: Provider } = {}) {
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY });
     void queryClient.invalidateQueries({ queryKey: ["setup"] });
+    // A new sign-in can change the models offered (OpenCode's plans, Cursor's list).
+    void queryClient.invalidateQueries({ queryKey: ENGINES_QUERY_KEY });
   };
   const settle = {
     onSuccess: (accounts: AiAccount[]) => {
