@@ -1,5 +1,8 @@
 use super::*;
 
+/// The outcome of a run whose head moved before it finished; its job discards the coverage.
+pub(crate) const SUPERSEDED_BEFORE_COMPLETION: &str = "Superseded by new commits before completion";
+
 impl Database {
     pub(crate) fn review_coverage_snapshot(
         &self,
@@ -131,6 +134,31 @@ impl Database {
             "UPDATE review_coverage SET status = 'valid', validated_at = $1 WHERE run_id = $2 AND status = 'pending'",
             params![now_millis(), run_id],
         ).map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
+    /// Coverage still pending for a run that finished, whatever became of its post or result. A run
+    /// superseded before it completed keeps its body, but its job discards the coverage. Older versions finalized coverage only
+    /// after the automatic post, so a restart while posting left it pending for good, even once
+    /// recovery finished the post, and the next incremental review refused to run.
+    pub(crate) fn finalize_finished_runs_coverage(&self) -> Result<(), String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT c.run_id FROM review_coverage c JOIN review_runs rr ON rr.id = c.run_id
+                 WHERE c.status = 'pending' AND rr.review_body IS NOT NULL
+                   AND rr.status NOT IN ('failed', 'cancelled', 'pending', 'running', 'skipped')
+                   AND (rr.status <> 'superseded' OR rr.outcome IS DISTINCT FROM $1)",
+            )
+            .map_err(|error| error.to_string())?;
+        let runs = stmt
+            .query_map(params![SUPERSEDED_BEFORE_COMPLETION], |row| row.get::<_, i64>(0))
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        for run_id in runs {
+            self.finalize_review_coverage(run_id)?;
+        }
         Ok(())
     }
 

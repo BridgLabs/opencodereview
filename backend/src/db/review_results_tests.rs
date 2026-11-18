@@ -133,3 +133,69 @@ fn failed_clean_results_due_requires_the_current_run_at_current_head() {
         assert!(db.failed_clean_results_due(10).unwrap().is_empty());
     }
 }
+
+#[test]
+fn a_restart_while_posting_leaves_the_finished_runs_coverage_valid() {
+    let db = Db::for_test().open().unwrap();
+    db.ensure_temp_repo_for_index(1, "acme/repo").unwrap();
+    let mut runs = Vec::new();
+    for number in 1..=7_i64 {
+        db.conn
+            .execute(
+                "INSERT INTO pull_requests (repo_id,number,title,author,head_sha,last_synced_at,created_at,updated_at) VALUES (1,$1,'PR','author','head',1,1,1)",
+                params![number],
+            )
+            .unwrap();
+        let pr_id = db.conn.last_insert_rowid();
+        let run_id = db.start_review_skeleton_with(pr_id, None).unwrap();
+        db.begin_review_coverage(&ReviewCoverageInput {
+            repo_id: 1,
+            pr_id,
+            run_id,
+            base_ref: "main",
+            base_sha: "base",
+            merge_base_sha: "base",
+            head_sha: "head",
+            changed_files: &["file.rs".into()],
+            covered_patch_ids: &["patch".into()],
+            diff_hash: "hash",
+            diff_text: "diff",
+            source_json: None,
+        })
+        .unwrap();
+        db.set_review_run_running(run_id, "[]").unwrap();
+        if number == 7 {
+            // The head moves before the run finishes.
+            db.conn
+                .execute("UPDATE pull_requests SET head_sha='moved' WHERE id=$1", params![pr_id])
+                .unwrap();
+        }
+        if number != 5 {
+            let finished = db.finish_review_run_only(run_id, "Reviewed", None, "[]").unwrap();
+            assert_eq!(finished, number != 7);
+        }
+        runs.push((pr_id, run_id));
+    }
+    // Still posting when the server stopped, posted by a recovery that left coverage pending, a
+    // clean result whose publication failed, one superseded after it was posted, a run still
+    // reviewing, one that failed, and one superseded before it completed.
+    let statuses = ["posting", "posted", "result_failed", "superseded", "running", "failed"];
+    for ((_, run_id), status) in runs.iter().zip(statuses) {
+        db.conn
+            .execute(
+                "UPDATE review_runs SET status=$1, owner_instance=NULL WHERE id=$2",
+                params![status, run_id],
+            )
+            .unwrap();
+    }
+    db.finalize_finished_runs_coverage().unwrap();
+    let valid = runs
+        .iter()
+        .map(|(_, run_id)| db.review_coverage_exists(*run_id).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(valid, [true, true, true, true, false, false, false]);
+    assert_eq!(
+        db.review_coverage_snapshot(runs[1].0, "head").unwrap().unwrap().run_id,
+        runs[1].1
+    );
+}
