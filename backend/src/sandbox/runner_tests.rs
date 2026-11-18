@@ -481,6 +481,13 @@ fn final_response_escapes_stray_quotes_inside_strings() {
             {"quote":"t(\"key\", { count }) + f(\"a\", [1])"}
         ]})
     );
+    // A stray quote in a response the model also ended with one closer too many.
+    let extra = r#"{"report":{"title":"Loop "x" y"}}}"#;
+    let (report, _) = final_response(Some(&final_transcript(json!(extra)))).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&report).unwrap(),
+        json!({"title":"Loop \"x\" y"})
+    );
     for missing_comma in [
         r#"{"report":{"action":"fix it" "severity":"high"}}"#,
         r#"{"report":{"action":"fix it""severity" : "high"}}"#,
