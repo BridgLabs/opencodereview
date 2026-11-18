@@ -1167,18 +1167,20 @@ fn escape_stray_backslashes(text: &str) -> String {
 /// quote of its text: that quote is escaped and the text read again. Nothing else changes, so
 /// quotes still have to match the frozen source exactly.
 fn escape_stray_quotes(text: &str) -> Option<String> {
-    // Closers the model wrote beyond its openers, as in an object ended with `}}`; escaping
-    // quotes never changes this count.
-    let count = |set: [char; 2]| text.chars().filter(|c| set.contains(c)).count();
-    let extra_closers = count(['}', ']']).saturating_sub(count(['{', '[']));
     let mut text = text.to_string();
     for _ in 0..64 {
         text = escape_stray_backslashes(&text);
         let mut values = serde_json::Deserializer::from_str(&text).into_iter::<serde::de::IgnoredAny>();
         let error = match values.next()? {
-            // Structure left after the object, beyond the closers the text already had too many
-            // of, means a repair folded it into a string.
-            Ok(_) if leftover_structure(&text[values.byte_offset()..]) > extra_closers => return None,
+            // Structure left after the object means a repair folded it into a string. A closer the
+            // model also wrote too many of looks the same, so that response keeps its error.
+            Ok(_)
+                if text[values.byte_offset()..]
+                    .trim_start()
+                    .starts_with(['}', ']', ',', '"']) =>
+            {
+                return None
+            }
             Ok(_) => return Some(text),
             Err(error) => error,
         };
@@ -1219,19 +1221,6 @@ fn escape_stray_quotes(text: &str) -> Option<String> {
         text.insert(quote.len() - 1, '\\');
     }
     None
-}
-
-/// How much structure follows a JSON value: its leading closers, or more than any closer allows
-/// when a comma or a string comes next.
-fn leftover_structure(rest: &str) -> usize {
-    let rest = rest.trim_start();
-    if rest.starts_with([',', '"']) {
-        return usize::MAX;
-    }
-    rest.chars()
-        .take_while(|c| c.is_whitespace() || matches!(c, '}' | ']'))
-        .filter(|c| matches!(c, '}' | ']'))
-        .count()
 }
 
 /// Drops closing brackets that close nothing open, as in a finding the model ended with `}}`.
