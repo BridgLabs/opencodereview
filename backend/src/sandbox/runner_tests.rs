@@ -463,6 +463,12 @@ fn final_response_escapes_stray_quotes_inside_strings() {
         serde_json::from_str::<serde_json::Value>(&report).unwrap(),
         json!({"title":"say \"hi\"","quote":"x\\d \"y\""})
     );
+    let empty_key = r#"{"report":{"quote":"m = {"": 0}"}}"#;
+    let (report, _) = final_response(Some(&final_transcript(json!(empty_key)))).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&report).unwrap(),
+        json!({"quote":"m = {\"\": 0}"})
+    );
     for missing_comma in [
         r#"{"report":{"action":"fix it" "severity":"high"}}"#,
         r#"{"report":{"action":"fix it""severity" : "high"}}"#,

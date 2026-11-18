@@ -1193,7 +1193,7 @@ fn escape_stray_quotes(text: &str) -> Option<String> {
         let key = after
             .strip_prefix('"')
             .and_then(|key| key.split_once('"'))
-            .is_some_and(|(_, rest)| rest.trim_start().starts_with(':'));
+            .is_some_and(|(name, rest)| !name.is_empty() && rest.trim_start().starts_with(':'));
         if !before.ends_with('"') || key {
             return None;
         }
