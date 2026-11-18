@@ -470,14 +470,15 @@ fn final_response_escapes_stray_quotes_inside_strings() {
         json!({"quote":"m = {\"\": 0}"})
     );
     // Quoted code whose text goes on with `,`, `}` or `]` right after a stray quote.
-    let code = r#"{"report":{"findings":[{"quote":"fakeAi(() => ({ ok: false, code: "credential_leak_blocked", usage: {} }))","line":831},{"quote":"!["ai_blocked_after_leak"].includes(x)","line":840},{"quote":"f({"a"}) + g(["b"], 1)"}]}}"#;
+    let code = r#"{"report":{"findings":[{"quote":"fakeAi(() => ({ ok: false, code: "credential_leak_blocked", usage: {} }))","line":831},{"quote":"!["ai_blocked_after_leak"].includes(x)","line":840},{"quote":"f({"a"}) + g(["b"], 1)"},{"quote":"t("key", { count }) + f("a", [1])"}]}}"#;
     let (report, _) = final_response(Some(&final_transcript(json!(code)))).unwrap();
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&report).unwrap(),
         json!({"findings":[
             {"quote":"fakeAi(() => ({ ok: false, code: \"credential_leak_blocked\", usage: {} }))","line":831},
             {"quote":"![\"ai_blocked_after_leak\"].includes(x)","line":840},
-            {"quote":"f({\"a\"}) + g([\"b\"], 1)"}
+            {"quote":"f({\"a\"}) + g([\"b\"], 1)"},
+            {"quote":"t(\"key\", { count }) + f(\"a\", [1])"}
         ]})
     );
     for missing_comma in [

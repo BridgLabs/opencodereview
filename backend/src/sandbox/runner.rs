@@ -1196,9 +1196,9 @@ fn escape_stray_quotes(text: &str) -> Option<String> {
         let after = text[before.len()..].trim_start();
         // Text that went on with `,`, `}` or `]` after the quote, as in quoted code like
         // `code: "x", usage: {}`, reads as structure for one more character. A value starting
-        // there instead is a missing comma between two values.
+        // right after `}` or `]` instead is a missing comma between two values.
         let quote = match before.strip_suffix([',', '}', ']']) {
-            Some(_) if after.starts_with(['{', '[', '"']) => return None,
+            Some(_) if !before.ends_with(',') && after.starts_with(['{', '[', '"']) => return None,
             Some(rest) => rest.trim_end(),
             None => before,
         };
