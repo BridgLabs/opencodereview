@@ -463,6 +463,13 @@ fn final_response_escapes_stray_quotes_inside_strings() {
         serde_json::from_str::<serde_json::Value>(&report).unwrap(),
         json!({"title":"say \"hi\"","quote":"x\\d \"y\""})
     );
+    for missing_comma in [
+        r#"{"report":{"action":"fix it" "severity":"high"}}"#,
+        r#"{"report":{"action":"fix it""severity" : "high"}}"#,
+    ] {
+        let error = final_response(Some(&final_transcript(json!(missing_comma)))).unwrap_err();
+        assert!(error.contains("expected `,` or `}`"), "{error}");
+    }
 }
 
 #[test]

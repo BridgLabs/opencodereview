@@ -1187,7 +1187,14 @@ fn escape_stray_quotes(text: &str) -> Option<String> {
             .map(str::len)
             .sum::<usize>();
         let before = text.get(..line + error.column().checked_sub(1)?)?.trim_end();
-        if !before.ends_with('"') {
+        // A key right after the string is a missing comma, not a quote of the text: escaping it
+        // would fold the next field into this string.
+        let after = text[before.len()..].trim_start();
+        let key = after
+            .strip_prefix('"')
+            .and_then(|key| key.split_once('"'))
+            .is_some_and(|(_, rest)| rest.trim_start().starts_with(':'));
+        if !before.ends_with('"') || key {
             return None;
         }
         text.insert(before.len() - 1, '\\');
