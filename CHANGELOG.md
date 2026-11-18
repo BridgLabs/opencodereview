@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-18
+
+### Fixed
+
+- Read a review whose final JSON has an unescaped `"` inside a string, as in a title or quoted code
+  like `code: "done", usage: {}`, instead of failing it with "Review final response is not valid
+  structured JSON". The quote is escaped and the report validated as usual, so quotes still have to
+  match the frozen source exactly. A missing comma before a key still fails.
+- Keep a review's coverage when the server restarts while the review is being posted. Before, the
+  review was still posted after the restart, but the next review of that pull request failed with
+  "completed coverage for the previous review is unavailable" until you chose Re-run full. Reviews
+  left that way are healed on the next start.
+
 ## [0.4.0] - 2026-11-17
 
 ### Added
@@ -215,7 +228,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Source-available project files: PolyForm Small Business 1.0.0 license, NOTICE, contributing guide, code of
   conduct, security policy, issue and pull request templates.
 
-[Unreleased]: https://github.com/BridgLabs/opencodereview/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/BridgLabs/opencodereview/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/BridgLabs/opencodereview/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/BridgLabs/opencodereview/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/BridgLabs/opencodereview/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/BridgLabs/opencodereview/compare/v0.1.1...v0.2.0
