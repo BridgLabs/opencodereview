@@ -483,9 +483,12 @@ fn final_response_escapes_stray_quotes_inside_strings() {
     for missing_comma in [
         r#"{"report":{"action":"fix it" "severity":"high"}}"#,
         r#"{"report":{"action":"fix it""severity" : "high"}}"#,
+        r#"{"report":{"findings":[{"a":"b"} {"c":"d"}]}}"#,
+        r#"{"report":{"findings":[{"a":"b"}, {"c":"d"} {"e":"f"}]}}"#,
+        r#"{"report":{"tags":[["a"] "b"]}}"#,
     ] {
         let error = final_response(Some(&final_transcript(json!(missing_comma)))).unwrap_err();
-        assert!(error.contains("expected `,` or `}`"), "{error}");
+        assert!(error.contains("expected `,` or "), "{error}");
     }
 }
 

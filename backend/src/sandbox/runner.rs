@@ -1193,20 +1193,22 @@ fn escape_stray_quotes(text: &str) -> Option<String> {
             .map(str::len)
             .sum::<usize>();
         let before = text.get(..line + error.column().checked_sub(1)?)?.trim_end();
+        let after = text[before.len()..].trim_start();
         // Text that went on with `,`, `}` or `]` after the quote, as in quoted code like
-        // `code: "x", usage: {}`, reads as structure for one more character.
+        // `code: "x", usage: {}`, reads as structure for one more character. A value starting
+        // there instead is a missing comma between two values.
         let quote = match before.strip_suffix([',', '}', ']']) {
+            Some(_) if after.starts_with(['{', '[', '"']) => return None,
             Some(rest) => rest.trim_end(),
             None => before,
         };
         // A key right after the string is a missing comma, not a quote of the text: escaping it
         // would fold the next field into this string.
-        let after = text[before.len()..].trim_start();
         let key = after
             .strip_prefix('"')
             .and_then(|key| key.split_once('"'))
             .is_some_and(|(name, rest)| !name.is_empty() && rest.trim_start().starts_with(':'));
-        if !quote.ends_with('"') || quote.len() == before.len() && key {
+        if !quote.ends_with('"') || key {
             return None;
         }
         text.insert(quote.len() - 1, '\\');
