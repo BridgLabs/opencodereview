@@ -41,12 +41,12 @@ RUN case "$TARGETARCH" in \
   && ln -s /opt/claude/bin/claude /usr/local/bin/claude \
   && test "$(DISABLE_AUTOUPDATER=1 /opt/claude/bin/claude --version | cut -d ' ' -f1)" = "$CLAUDE_CLI_VERSION"
 LABEL ai.claude.cli.version="${CLAUDE_CLI_VERSION}"
-ARG CODEX_CLI_VERSION=0.163.0
-ARG CODEX_CLI_SHA256_AMD64=beb339e8ecd9ba057a6bb2dc81ad8ca474812edfbf0fc5056ca818797648dde4
-ARG CODEX_CLI_SHA256_ARM64=a7261e65f4a96d8f4ca65a069c6cf2dc2c33defc341e48078acefda9461fffe4
+ARG CODEX_CLI_VERSION=0.170.0
+ARG CODEX_CLI_SHA256_AMD64=d054916ccd28a53820376b8d2f7c875184ca8f40fcd44bbabeb8ee240ce247f5
+ARG CODEX_CLI_SHA256_ARM64=0da6b061f6b5223901a5a73e841bd1466596e2ef620d68823360febed2ff7ebc
 # Codex runs its shell tool through this host for current models; without it every command fails.
-ARG CODEX_CODE_MODE_HOST_SHA256_AMD64=314263128ba6592e7e807c265deeaf928a692b72dcbfeb5e0b20c9423b703529
-ARG CODEX_CODE_MODE_HOST_SHA256_ARM64=284356aefb197f00b76b912efdfdbae8ccf3ea1f89b976dde064b7ccb43214ef
+ARG CODEX_CODE_MODE_HOST_SHA256_AMD64=18ab29d970586890085c3eba1d55068fd66262154855e51a54f3708522fa4dc5
+ARG CODEX_CODE_MODE_HOST_SHA256_ARM64=8ae871c5d494aa5842fff37adbbac9ca586b0c8af40d80d90feb8d1e10f86a59
 RUN case "$TARGETARCH" in \
       amd64) target=x86_64-unknown-linux-musl; checksum="$CODEX_CLI_SHA256_AMD64"; host_checksum="$CODEX_CODE_MODE_HOST_SHA256_AMD64" ;; \
       arm64) target=aarch64-unknown-linux-musl; checksum="$CODEX_CLI_SHA256_ARM64"; host_checksum="$CODEX_CODE_MODE_HOST_SHA256_ARM64" ;; \
