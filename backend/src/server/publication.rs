@@ -847,9 +847,12 @@ pub(crate) fn run_review_job(
                 }
                 .unwrap_or(false);
                 if finished {
+                    // Before posting: the coverage belongs to the finished run, and a restart while
+                    // posting must not leave it pending for the next incremental review.
+                    let _ = db.finalize_review_coverage(run_id);
+                    coverage_finalized = true;
                     let has_findings = review_has_findings(output.comments_json.as_deref(), Some(&output.body));
                     handle_completed_review(&db, &inputs, output.no_new_changes, has_findings);
-                    coverage_finalized = true;
                 } else {
                     log_auto_post(
                         &inputs,
@@ -882,9 +885,7 @@ pub(crate) fn run_review_job(
                 let _ = db.fail_review_run(run_id, error);
             }
         }
-        if coverage_finalized {
-            let _ = db.finalize_review_coverage(run_id);
-        } else {
+        if !coverage_finalized {
             let _ = db.discard_review_coverage(run_id);
         }
     }

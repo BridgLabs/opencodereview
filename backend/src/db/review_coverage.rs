@@ -134,6 +134,16 @@ impl Database {
         Ok(())
     }
 
+    /// Runs left posting by a stopped server finished before they posted. Older versions
+    /// finalized coverage only after the post, so a restart while posting left it pending and the
+    /// next incremental review refused to run.
+    pub(crate) fn finalize_interrupted_post_coverage(&self) -> Result<(), String> {
+        for post in self.interrupted_review_posts()? {
+            self.finalize_review_coverage(post.run_id)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn discard_review_coverage(&self, run_id: i64) -> Result<(), String> {
         self.conn
             .execute(

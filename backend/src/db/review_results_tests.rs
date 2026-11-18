@@ -133,3 +133,46 @@ fn failed_clean_results_due_requires_the_current_run_at_current_head() {
         assert!(db.failed_clean_results_due(10).unwrap().is_empty());
     }
 }
+
+#[test]
+fn a_restart_while_posting_leaves_the_finished_runs_coverage_valid() {
+    let db = Db::for_test().open().unwrap();
+    db.ensure_temp_repo_for_index(1, "acme/repo").unwrap();
+    db.conn.execute("INSERT INTO pull_requests (repo_id,number,title,author,head_sha,last_synced_at,created_at,updated_at) VALUES (1,1,'PR','author','head',1,1,1)", []).unwrap();
+    let pr_id = db.conn.last_insert_rowid();
+    let run_id = db.start_review_skeleton_with(pr_id, None).unwrap();
+    db.begin_review_coverage(&ReviewCoverageInput {
+        repo_id: 1,
+        pr_id,
+        run_id,
+        base_ref: "main",
+        base_sha: "base",
+        merge_base_sha: "base",
+        head_sha: "head",
+        changed_files: &["file.rs".into()],
+        covered_patch_ids: &["patch".into()],
+        diff_hash: "hash",
+        diff_text: "diff",
+        source_json: None,
+    })
+    .unwrap();
+    db.set_review_run_running(run_id, "[]").unwrap();
+    assert!(db.finish_review_run_only(run_id, "Reviewed", None, "[]").unwrap());
+    db.finalize_interrupted_post_coverage().unwrap();
+    assert!(
+        !db.review_coverage_exists(run_id).unwrap(),
+        "only runs left posting are healed"
+    );
+    db.conn
+        .execute(
+            "UPDATE review_runs SET status='posting', owner_instance=NULL WHERE id=$1",
+            params![run_id],
+        )
+        .unwrap();
+    db.finalize_interrupted_post_coverage().unwrap();
+    assert!(db.review_coverage_exists(run_id).unwrap());
+    assert_eq!(
+        db.review_coverage_snapshot(pr_id, "head").unwrap().unwrap().run_id,
+        run_id
+    );
+}
