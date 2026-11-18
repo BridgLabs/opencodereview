@@ -134,7 +134,7 @@ impl Database {
         Ok(())
     }
 
-    /// Coverage still pending for a run that finished. Older versions finalized coverage only
+    /// Coverage still pending for a run that finished, whatever became of its post or result. Older versions finalized coverage only
     /// after the automatic post, so a restart while posting left it pending for good, even once
     /// recovery finished the post, and the next incremental review refused to run.
     pub(crate) fn finalize_finished_runs_coverage(&self) -> Result<(), String> {
@@ -142,7 +142,8 @@ impl Database {
             .conn
             .prepare(
                 "SELECT c.run_id FROM review_coverage c JOIN review_runs rr ON rr.id = c.run_id
-                 WHERE c.status = 'pending' AND rr.status IN ('preview', 'posting', 'posted', 'approved')",
+                 WHERE c.status = 'pending' AND rr.review_body IS NOT NULL
+                   AND rr.status NOT IN ('failed', 'cancelled', 'pending', 'running', 'superseded', 'skipped')",
             )
             .map_err(|error| error.to_string())?;
         let runs = stmt
