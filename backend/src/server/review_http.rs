@@ -162,9 +162,9 @@ pub(crate) fn decide_review_http(
                     with_db_raw(state, |db| {
                         validate_live_review_scope(db, run.id, &full_name, number, &run.head_sha, &repo_path)
                     })?;
-                    Ok(prepared)
+                    Ok((prepared, snapshot.login))
                 },
-                |prepared| github::post_review(&full_name, number, prepared),
+                |(prepared, login)| github::post_review(&full_name, number, prepared, &login),
                 || github::find_review_id_by_marker(&full_name, number, post_marker.as_deref().unwrap_or_default()),
                 || with_db_raw(state, |db| db.reset_review_posting(run.id)),
             )?;

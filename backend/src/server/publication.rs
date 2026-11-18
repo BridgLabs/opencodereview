@@ -1029,9 +1029,9 @@ pub(crate) fn auto_post_review(
                 db.prepare_review_request_restoration(run.id, &snapshot, post_marker.as_deref().unwrap_or_default())?;
                 let prepared = github::prepare_review(&payload)?;
                 validate_live_review_scope(db, run.id, full_name, number, &run.head_sha, repo_path)?;
-                Ok(prepared)
+                Ok((prepared, snapshot.login))
             },
-            |prepared| github::post_review(full_name, number, prepared),
+            |(prepared, login)| github::post_review(full_name, number, prepared, &login),
             || github::find_review_id_by_marker(full_name, number, post_marker.as_deref().unwrap_or_default()),
             || db.reset_review_posting(run.id),
         )?;
