@@ -1162,6 +1162,39 @@ fn escape_stray_backslashes(text: &str) -> String {
     output
 }
 
+/// Escapes double quotes the model left unescaped inside a string, as in a title that quotes
+/// `"done"`. A string that ends right before a character JSON can't follow it with ended at a
+/// quote of its text: that quote is escaped and the text read again. Nothing else changes, so
+/// quotes still have to match the frozen source exactly.
+fn escape_stray_quotes(text: &str) -> Option<String> {
+    let mut text = text.to_string();
+    for _ in 0..64 {
+        text = escape_stray_backslashes(&text);
+        let error = match serde_json::Deserializer::from_str(&text)
+            .into_iter::<serde::de::IgnoredAny>()
+            .next()?
+        {
+            Ok(_) => return Some(text),
+            Err(error) => error,
+        };
+        let message = error.to_string();
+        if !message.starts_with("expected `,` or `}`") && !message.starts_with("expected `,` or `]`") {
+            return None;
+        }
+        let line = text
+            .split_inclusive('\n')
+            .take(error.line() - 1)
+            .map(str::len)
+            .sum::<usize>();
+        let before = text.get(..line + error.column().checked_sub(1)?)?.trim_end();
+        if !before.ends_with('"') {
+            return None;
+        }
+        text.insert(before.len() - 1, '\\');
+    }
+    None
+}
+
 /// Drops closing brackets that close nothing open, as in a finding the model ended with `}}`.
 /// Only structure changes: every string keeps its exact bytes.
 fn drop_unmatched_closers(text: &str) -> String {
@@ -1257,6 +1290,7 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
         let escaped = escape_stray_backslashes(&text[start..]);
         parse(&escaped)
             .or_else(|_| parse(&drop_unmatched_closers(&escaped)))
+            .or_else(|_| escape_stray_quotes(&escaped).map_or(Err(String::new()), |quoted| parse(&quoted)))
             .map_err(|_| error)
     })?;
     // Other CLIs sometimes stop right after the object; the object itself was read whole.

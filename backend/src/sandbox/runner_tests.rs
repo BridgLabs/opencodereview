@@ -442,13 +442,26 @@ fn final_response_escapes_stray_backslashes_in_quoted_code() {
         .unwrap()
         .to_string();
     assert_eq!(quote, "value.match(/\\d+\\s/) and \"done\" \\ \n");
-    let error = final_response(Some(&final_transcript(json!(
-        r#"{"report":{"title":"unclosed "quote" here"}}"#
-    ))))
-    .unwrap_err();
+    let error = final_response(Some(&final_transcript(json!(r#"{"report":{"title":"a" 1}}"#)))).unwrap_err();
     assert!(
         error.starts_with("Review final response is not valid structured JSON (") && error.contains("column"),
         "{error}"
+    );
+}
+
+#[test]
+fn final_response_escapes_stray_quotes_inside_strings() {
+    let raw = r#"{"report":{"title":"Loop "infinito" ainda possível","findings":[{"quote":"if (status === "done") {","tags":["a "b" c", "d"]}]}}"#;
+    let (report, _) = final_response(Some(&final_transcript(json!(raw)))).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&report).unwrap(),
+        json!({"title":"Loop \"infinito\" ainda possível","findings":[{"quote":"if (status === \"done\") {","tags":["a \"b\" c","d"]}]})
+    );
+    let pretty = "Report:\n{\n  \"report\": {\n    \"title\": \"say \"hi\"\",\n    \"quote\": \"x\\d \"y\"\"\n  }\n}";
+    let (report, _) = final_response(Some(&final_transcript(json!(pretty)))).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&report).unwrap(),
+        json!({"title":"say \"hi\"","quote":"x\\d \"y\""})
     );
 }
 
