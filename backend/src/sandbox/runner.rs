@@ -1178,7 +1178,13 @@ fn escape_stray_quotes(text: &str) -> Option<String> {
             Err(error) => error,
         };
         let message = error.to_string();
-        if !message.starts_with("expected `,` or `}`") && !message.starts_with("expected `,` or `]`") {
+        let structural = [
+            "expected `,` or `}`",
+            "expected `,` or `]`",
+            "key must be a string",
+            "expected value",
+        ];
+        if !structural.iter().any(|prefix| message.starts_with(prefix)) {
             return None;
         }
         let line = text
@@ -1187,6 +1193,12 @@ fn escape_stray_quotes(text: &str) -> Option<String> {
             .map(str::len)
             .sum::<usize>();
         let before = text.get(..line + error.column().checked_sub(1)?)?.trim_end();
+        // Text that went on with `,`, `}` or `]` after the quote, as in quoted code like
+        // `code: "x", usage: {}`, reads as structure for one more character.
+        let quote = match before.strip_suffix([',', '}', ']']) {
+            Some(rest) => rest.trim_end(),
+            None => before,
+        };
         // A key right after the string is a missing comma, not a quote of the text: escaping it
         // would fold the next field into this string.
         let after = text[before.len()..].trim_start();
@@ -1194,10 +1206,10 @@ fn escape_stray_quotes(text: &str) -> Option<String> {
             .strip_prefix('"')
             .and_then(|key| key.split_once('"'))
             .is_some_and(|(name, rest)| !name.is_empty() && rest.trim_start().starts_with(':'));
-        if !before.ends_with('"') || key {
+        if !quote.ends_with('"') || quote.len() == before.len() && key {
             return None;
         }
-        text.insert(before.len() - 1, '\\');
+        text.insert(quote.len() - 1, '\\');
     }
     None
 }
