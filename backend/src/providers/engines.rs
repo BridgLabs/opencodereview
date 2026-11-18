@@ -23,6 +23,9 @@ const CLAUDE: &[EngineModel] = &[
 /// Codex's `debug models` catalogue for ChatGPT plans; `default` leaves the choice to Codex.
 const CODEX: &[EngineModel] = &[
     model("default", "Codex default", CODEX_EFFORTS_XHIGH, "medium"),
+    model("gpt-6.2-sol", "GPT-6.2 Sol", CODEX_EFFORTS, "low"),
+    model("gpt-6.2-astra", "GPT-6.2 Astra", CODEX_EFFORTS, "low"),
+    model("gpt-6.1-terra", "GPT-6.1 Terra", CODEX_EFFORTS, "low"),
     model("gpt-6-astra", "GPT-6 Astra", CODEX_EFFORTS, "low"),
     model("gpt-6.1-sol", "GPT-6.1 Sol", CODEX_EFFORTS, "low"),
     model("gpt-6-sol", "GPT-6 Sol", CODEX_EFFORTS, "medium"),
@@ -289,6 +292,20 @@ mod tests {
         for provider in ["claude", "codex"] {
             let (model, effort) = default_engine(provider, &None);
             assert_eq!(resolve(provider, &model, &effort, &None).unwrap(), (model, effort));
+        }
+    }
+
+    #[test]
+    fn codex_lists_the_gpt_6_2_models_and_gpt_6_1_terra() {
+        for model in ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-terra"] {
+            assert_eq!(
+                resolve("codex", model, "ultra", &None).unwrap(),
+                (model.to_string(), "ultra".to_string())
+            );
+            assert_eq!(
+                resolve("codex", model, "", &None).unwrap(),
+                (model.to_string(), "low".to_string())
+            );
         }
     }
 
