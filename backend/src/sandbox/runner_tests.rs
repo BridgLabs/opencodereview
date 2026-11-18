@@ -442,14 +442,63 @@ fn final_response_escapes_stray_backslashes_in_quoted_code() {
         .unwrap()
         .to_string();
     assert_eq!(quote, "value.match(/\\d+\\s/) and \"done\" \\ \n");
-    let error = final_response(Some(&final_transcript(json!(
-        r#"{"report":{"title":"unclosed "quote" here"}}"#
-    ))))
-    .unwrap_err();
+    let error = final_response(Some(&final_transcript(json!(r#"{"report":{"title":"a" 1}}"#)))).unwrap_err();
     assert!(
         error.starts_with("Review final response is not valid structured JSON (") && error.contains("column"),
         "{error}"
     );
+}
+
+#[test]
+fn final_response_escapes_stray_quotes_inside_strings() {
+    let raw = r#"{"report":{"title":"Loop "infinito" ainda possível","findings":[{"quote":"if (status === "done") {","tags":["a "b" c", "d"]}]}}"#;
+    let (report, _) = final_response(Some(&final_transcript(json!(raw)))).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&report).unwrap(),
+        json!({"title":"Loop \"infinito\" ainda possível","findings":[{"quote":"if (status === \"done\") {","tags":["a \"b\" c","d"]}]})
+    );
+    let pretty = "Report:\n{\n  \"report\": {\n    \"title\": \"say \"hi\"\",\n    \"quote\": \"x\\d \"y\"\"\n  }\n}";
+    let (report, _) = final_response(Some(&final_transcript(json!(pretty)))).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&report).unwrap(),
+        json!({"title":"say \"hi\"","quote":"x\\d \"y\""})
+    );
+    let empty_key = r#"{"report":{"quote":"m = {"": 0}"}}"#;
+    let (report, _) = final_response(Some(&final_transcript(json!(empty_key)))).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&report).unwrap(),
+        json!({"quote":"m = {\"\": 0}"})
+    );
+    // Quoted code whose text goes on with `,`, `}` or `]` right after a stray quote.
+    let code = r#"{"report":{"findings":[{"quote":"fakeAi(() => ({ ok: false, code: "credential_leak_blocked", usage: {} }))","line":831},{"quote":"!["ai_blocked_after_leak"].includes(x)","line":840},{"quote":"f({"a"}) + g(["b"], 1)"},{"quote":"t("key", { count }) + f("a", [1])"}]}}"#;
+    let (report, _) = final_response(Some(&final_transcript(json!(code)))).unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&report).unwrap(),
+        json!({"findings":[
+            {"quote":"fakeAi(() => ({ ok: false, code: \"credential_leak_blocked\", usage: {} }))","line":831},
+            {"quote":"![\"ai_blocked_after_leak\"].includes(x)","line":840},
+            {"quote":"f({\"a\"}) + g([\"b\"], 1)"},
+            {"quote":"t(\"key\", { count }) + f(\"a\", [1])"}
+        ]})
+    );
+    for missing_comma in [
+        r#"{"report":{"action":"fix it" "severity":"high"}}"#,
+        r#"{"report":{"action":"fix it""severity" : "high"}}"#,
+        r#"{"report":{"findings":[{"a":"b"} {"c":"d"}]}}"#,
+        r#"{"report":{"findings":[{"a":"b"}, {"c":"d"} {"e":"f"}]}}"#,
+        r#"{"report":{"tags":[["a"] "b"]}}"#,
+        r#"{"report":{"title":"a", {"x":"y"}}}"#,
+        r#"{"report":{"title":"a", ["x", "y"]}}"#,
+        // Folded or one closer too many: the leftover closer can't tell them apart.
+        r#"{"report":{"quote":"}","title":"a", {"x":"y"}}}"#,
+        r#"{"report":{"title":"Loop "x" y"}}}"#,
+    ] {
+        let error = final_response(Some(&final_transcript(json!(missing_comma)))).unwrap_err();
+        assert!(
+            error.contains("expected `,` or ") || error.contains("key must be a string"),
+            "{error}"
+        );
+    }
 }
 
 #[test]

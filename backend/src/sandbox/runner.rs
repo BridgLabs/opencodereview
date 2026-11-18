@@ -1162,6 +1162,67 @@ fn escape_stray_backslashes(text: &str) -> String {
     output
 }
 
+/// Escapes double quotes the model left unescaped inside a string, as in a title that quotes
+/// `"done"`. A string that ends right before a character JSON can't follow it with ended at a
+/// quote of its text: that quote is escaped and the text read again. Nothing else changes, so
+/// quotes still have to match the frozen source exactly.
+fn escape_stray_quotes(text: &str) -> Option<String> {
+    let mut text = text.to_string();
+    for _ in 0..64 {
+        text = escape_stray_backslashes(&text);
+        let mut values = serde_json::Deserializer::from_str(&text).into_iter::<serde::de::IgnoredAny>();
+        let error = match values.next()? {
+            // Structure left after the object means a repair folded it into a string. A closer the
+            // model also wrote too many of looks the same, so that response keeps its error.
+            Ok(_)
+                if text[values.byte_offset()..]
+                    .trim_start()
+                    .starts_with(['}', ']', ',', '"']) =>
+            {
+                return None
+            }
+            Ok(_) => return Some(text),
+            Err(error) => error,
+        };
+        let message = error.to_string();
+        let structural = [
+            "expected `,` or `}`",
+            "expected `,` or `]`",
+            "key must be a string",
+            "expected value",
+        ];
+        if !structural.iter().any(|prefix| message.starts_with(prefix)) {
+            return None;
+        }
+        let line = text
+            .split_inclusive('\n')
+            .take(error.line() - 1)
+            .map(str::len)
+            .sum::<usize>();
+        let before = text.get(..line + error.column().checked_sub(1)?)?.trim_end();
+        let after = text[before.len()..].trim_start();
+        // Text that went on with `,`, `}` or `]` after the quote, as in quoted code like
+        // `code: "x", usage: {}`, reads as structure for one more character. A value starting
+        // right after `}` or `]` instead is a missing comma between two values.
+        let quote = match before.strip_suffix([',', '}', ']']) {
+            Some(_) if !before.ends_with(',') && after.starts_with(['{', '[', '"']) => return None,
+            Some(rest) => rest.trim_end(),
+            None => before,
+        };
+        // A key right after the string is a missing comma, not a quote of the text: escaping it
+        // would fold the next field into this string.
+        let key = after
+            .strip_prefix('"')
+            .and_then(|key| key.split_once('"'))
+            .is_some_and(|(name, rest)| !name.is_empty() && rest.trim_start().starts_with(':'));
+        if !quote.ends_with('"') || key {
+            return None;
+        }
+        text.insert(quote.len() - 1, '\\');
+    }
+    None
+}
+
 /// Drops closing brackets that close nothing open, as in a finding the model ended with `}}`.
 /// Only structure changes: every string keeps its exact bytes.
 fn drop_unmatched_closers(text: &str) -> String {
@@ -1257,6 +1318,7 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
         let escaped = escape_stray_backslashes(&text[start..]);
         parse(&escaped)
             .or_else(|_| parse(&drop_unmatched_closers(&escaped)))
+            .or_else(|_| escape_stray_quotes(&escaped).map_or(Err(String::new()), |quoted| parse(&quoted)))
             .map_err(|_| error)
     })?;
     // Other CLIs sometimes stop right after the object; the object itself was read whole.
