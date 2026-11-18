@@ -487,9 +487,14 @@ fn final_response_escapes_stray_quotes_inside_strings() {
         r#"{"report":{"findings":[{"a":"b"} {"c":"d"}]}}"#,
         r#"{"report":{"findings":[{"a":"b"}, {"c":"d"} {"e":"f"}]}}"#,
         r#"{"report":{"tags":[["a"] "b"]}}"#,
+        r#"{"report":{"title":"a", {"x":"y"}}}"#,
+        r#"{"report":{"title":"a", ["x", "y"]}}"#,
     ] {
         let error = final_response(Some(&final_transcript(json!(missing_comma)))).unwrap_err();
-        assert!(error.contains("expected `,` or "), "{error}");
+        assert!(
+            error.contains("expected `,` or ") || error.contains("key must be a string"),
+            "{error}"
+        );
     }
 }
 

@@ -1170,10 +1170,16 @@ fn escape_stray_quotes(text: &str) -> Option<String> {
     let mut text = text.to_string();
     for _ in 0..64 {
         text = escape_stray_backslashes(&text);
-        let error = match serde_json::Deserializer::from_str(&text)
-            .into_iter::<serde::de::IgnoredAny>()
-            .next()?
-        {
+        let mut values = serde_json::Deserializer::from_str(&text).into_iter::<serde::de::IgnoredAny>();
+        let error = match values.next()? {
+            // Brackets left after the object mean a repair folded structure into a string.
+            Ok(_)
+                if text[values.byte_offset()..]
+                    .trim_start()
+                    .starts_with(['}', ']', ',', '"']) =>
+            {
+                return None
+            }
             Ok(_) => return Some(text),
             Err(error) => error,
         };
