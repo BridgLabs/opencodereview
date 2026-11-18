@@ -279,7 +279,7 @@ pub(crate) fn spawn_failed_clean_result_retry(db_handle: Db, repos_dir: PathBuf)
 }
 
 pub(crate) fn reconcile_interrupted_review_posts(db: &Database, repos_dir: &Path) {
-    let _ = db.finalize_interrupted_post_coverage();
+    let _ = db.finalize_finished_runs_coverage();
     let Ok(installation_id) = db.installation_id() else {
         return;
     };

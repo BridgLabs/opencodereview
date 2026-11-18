@@ -134,12 +134,24 @@ impl Database {
         Ok(())
     }
 
-    /// Runs left posting by a stopped server finished before they posted. Older versions
-    /// finalized coverage only after the post, so a restart while posting left it pending and the
-    /// next incremental review refused to run.
-    pub(crate) fn finalize_interrupted_post_coverage(&self) -> Result<(), String> {
-        for post in self.interrupted_review_posts()? {
-            self.finalize_review_coverage(post.run_id)?;
+    /// Coverage still pending for a run that finished. Older versions finalized coverage only
+    /// after the automatic post, so a restart while posting left it pending for good, even once
+    /// recovery finished the post, and the next incremental review refused to run.
+    pub(crate) fn finalize_finished_runs_coverage(&self) -> Result<(), String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT c.run_id FROM review_coverage c JOIN review_runs rr ON rr.id = c.run_id
+                 WHERE c.status = 'pending' AND rr.status IN ('preview', 'posting', 'posted', 'approved')",
+            )
+            .map_err(|error| error.to_string())?;
+        let runs = stmt
+            .query_map(params![], |row| row.get::<_, i64>(0))
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        for run_id in runs {
+            self.finalize_review_coverage(run_id)?;
         }
         Ok(())
     }
