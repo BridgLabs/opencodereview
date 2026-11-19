@@ -180,7 +180,6 @@ pub(crate) fn start_review_job_with_intent(
             let (unresolved_review_head, unresolved_review_body) = unresolved_review
                 .map(|(head, body)| (Some(head), Some(body)))
                 .unwrap_or((None, None));
-            // A read that fails leaves the findings unlisted: no thread is resolved without them.
             let published = github::published_finding_threads(&full_name, number)
                 .map(|threads| {
                     threads

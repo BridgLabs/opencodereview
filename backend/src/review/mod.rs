@@ -202,8 +202,6 @@ pub struct ReviewInputs {
     /// The provider and engines chosen when the review started, which every stage keeps even if
     /// the choice in the app changes meanwhile. None reads the current choice at each stage.
     pub engines: Option<std::sync::Arc<PinnedEngines>>,
-    /// The findings published on earlier pushes whose threads are still open, and what this
-    /// review concluded about them. Shared by every clone of the inputs.
     pub resolutions: std::sync::Arc<resolutions::Resolutions>,
 }
 

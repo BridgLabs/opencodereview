@@ -491,8 +491,6 @@ impl Database {
         Ok(changed > 0)
     }
 
-    /// Adds a line to a run's log, which the run page shows, for a problem that does not fail the
-    /// run.
     pub fn note_review_run_warning(&self, run_id: i64, line: &str) -> Result<(), String> {
         self.conn
             .execute(

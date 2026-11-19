@@ -1,10 +1,4 @@
 //! Published findings whose review thread a later review may resolve.
-//!
-//! A review lists the OpenCodeReview findings still open on GitHub in `PENDING_REVIEW.md`. A
-//! stage's report may give each one it inspected a disposition (`report.resolutions`). Only a
-//! `fixed` disposition with evidence quoted from the current head, validated like any other
-//! evidence, ever leads to a resolved thread, and any other verdict on the same finding keeps it
-//! open.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -14,15 +8,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::github::PublishedThread;
 
-/// File beside a stage's `comments.json` with what its report said about published findings.
 pub(crate) const STAGE_FILE: &str = "resolutions.json";
 
-/// Findings listed to a review; the rest stay open until a later review lists them.
 const MAX_LISTED: usize = 40;
 const MAX_SUMMARY_CHARS: usize = 600;
 
-/// A finding OpenCodeReview posted whose thread is still open, identified by the id GitHub gave
-/// its first comment and the fingerprint stored in that comment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PublishedFinding {
     pub comment_id: i64,
@@ -60,7 +50,6 @@ fn is_title_line(line: &str) -> bool {
     line.trim_start_matches(['*', '_', ' ']).starts_with("[Finding]")
 }
 
-/// The one-line title of a rendered finding comment.
 fn finding_title(body: &str) -> String {
     body.lines()
         .find(|line| is_title_line(line))
@@ -73,10 +62,8 @@ fn finding_title(body: &str) -> String {
         .unwrap_or_default()
 }
 
-/// What one stage's report said about the published findings.
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct StageResolutions {
-    /// Findings with a validated `fixed` disposition.
     pub fixed: Vec<i64>,
     /// Findings the stage inspected without proving a fix: still present, inconclusive, or a fix
     /// claim whose evidence did not validate.
@@ -89,8 +76,6 @@ struct Verdict {
     blocked: bool,
 }
 
-/// The published findings of one review and what its stages concluded about them. Shared by every
-/// clone of the review's inputs.
 #[derive(Default)]
 pub struct Resolutions {
     findings: Vec<PublishedFinding>,
@@ -109,14 +94,12 @@ impl Resolutions {
         &self.findings
     }
 
-    /// Whether any stage proved a finding fixed, so a review that did not need not read GitHub.
     pub(crate) fn any_fixed(&self) -> bool {
         self.verdicts
             .lock()
             .is_ok_and(|verdicts| verdicts.values().any(|verdict| verdict.fixed && !verdict.blocked))
     }
 
-    /// The `PENDING_REVIEW.md` section that lists the findings, or nothing when there are none.
     pub(crate) fn section(&self) -> Option<String> {
         if self.findings.is_empty() {
             return None;
@@ -143,7 +126,6 @@ impl Resolutions {
         Some(text)
     }
 
-    /// Keeps what a stage that validated concluded, read from the file it left beside its comments.
     pub(crate) fn record_stage(&self, comments: &Path) {
         let Some(stage) = std::fs::read(comments.with_file_name(STAGE_FILE))
             .ok()
@@ -246,10 +228,8 @@ mod tests {
     #[test]
     fn only_a_proven_undisputed_fix_on_an_open_listed_thread_resolves() {
         let threads = [thread(1, false), thread(2, true), thread(3, false)];
-        // 1: fixed. 2: fixed but already resolved. 3: never listed to this review.
         let plan = resolutions(&[1, 2, 3], &[]).threads_to_resolve(&threads, None);
         assert_eq!(plan.iter().map(|t| t.comment_id).collect::<Vec<_>>(), [1]);
-        // A stage that disputes the fix, or a finding nobody proved fixed, stays open.
         assert!(resolutions(&[1], &[1]).threads_to_resolve(&threads, None).is_empty());
         assert!(resolutions(&[], &[1]).threads_to_resolve(&threads, None).is_empty());
     }

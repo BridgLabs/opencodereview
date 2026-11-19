@@ -177,12 +177,10 @@ struct GeneralQuestion {
     counter_evidence: Vec<Reference>,
 }
 
-/// What a stage's report says about one published finding.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Resolution {
     finding_id: serde_json::Value,
-    /// `fixed`, `still_present` or `inconclusive`; only `fixed` can lead to a resolved thread.
     disposition: String,
     evidence: Vec<Reference>,
 }
@@ -280,7 +278,6 @@ fn verify_reference(reference: &Reference, context: &Path) -> Result<(), String>
 pub(crate) struct EvidenceResolver<'a> {
     context: &'a Path,
     archive: Option<&'a crate::review_archive::Archive>,
-    /// The published findings listed to the review, which a report may give a disposition.
     published: &'a [crate::review::resolutions::PublishedFinding],
 }
 
@@ -1683,8 +1680,6 @@ pub fn reasoning_skill(skill: &str) -> String {
 /// replace it (see `providers::opencode::adapt_prompt`), so it is kept as one exact sentence.
 pub(crate) const PROGRESSIVE_READING: &str = "Read assigned source progressively in bounded line ranges and search for relevant callers, guards and tests. Do not load the entire snapshot tree or full diff wholesale. Prepared files are evidence available on disk, not a prompt that must all be loaded at once.";
 
-/// Asks for a disposition on the published findings that `PENDING_REVIEW.md` lists; added to a
-/// prompt only when a review has such findings.
 pub(crate) const RESOLUTIONS_PROMPT: &str = "\n\nPENDING_REVIEW.md lists published findings that are still open on GitHub, each with a numeric id. Optional report.resolutions is an array with one entry for each of them that you inspected in an assigned file: {\"findingId\":<id>,\"disposition\":\"fixed\"|\"still_present\"|\"inconclusive\",\"evidence\":[reference]}, with reference as in findings. Use fixed only after reading the current head code of that finding's file and seeing the reported problem gone; then evidence must quote that head code from the finding's file, with its revision. A finding missing from your report is not evidence of a fix. Use still_present when the problem remains and inconclusive when you cannot tell. Omit findings you did not inspect.";
 
 pub fn prompt(context: &Path, files: &[String], output: &Path) -> String {

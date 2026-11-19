@@ -1,19 +1,11 @@
-//! Review threads that OpenCodeReview opened, and resolving them through GitHub's GraphQL API.
-
 use super::*;
 
-/// The most review thread pages read for one pull request (100 threads each).
 const MAX_THREAD_PAGES: usize = 20;
 
-/// A review thread whose first comment is a finding OpenCodeReview published with the
-/// authenticated account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PublishedThread {
-    /// GraphQL node id, the handle `resolveReviewThread` takes.
     pub thread_id: String,
-    /// REST id of the thread's first comment, recorded by GitHub when the review was posted.
     pub comment_id: i64,
-    /// The `<!-- ocr:fingerprint=... -->` identity stored in the comment.
     pub fingerprint: String,
     pub path: String,
     pub line: i64,
@@ -22,8 +14,6 @@ pub(crate) struct PublishedThread {
 }
 
 impl PublishedThread {
-    /// Only a finding (never a question) whose first comment carries the OpenCodeReview
-    /// fingerprint marker and was written by `login`. A human thread is never eligible.
     fn from_node(node: &serde_json::Value, login: &str) -> Option<Self> {
         let comment = node.pointer("/comments/nodes/0")?;
         let body = comment["body"].as_str()?;
