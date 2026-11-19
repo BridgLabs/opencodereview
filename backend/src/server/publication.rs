@@ -847,6 +847,7 @@ pub(crate) fn run_review_job(
                 }
                 .unwrap_or(false);
                 if finished {
+                    thread_resolution::resolve_fixed_threads(&db, &inputs, output);
                     let has_findings = review_has_findings(output.comments_json.as_deref(), Some(&output.body));
                     handle_completed_review(&db, &inputs, output.no_new_changes, has_findings);
                     coverage_finalized = true;

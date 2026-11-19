@@ -21,6 +21,7 @@ pub(crate) mod published_text;
 mod recovery;
 #[cfg(test)]
 mod recovery_tests;
+pub(crate) mod resolutions;
 mod risk;
 mod usage;
 mod validation;
@@ -201,6 +202,9 @@ pub struct ReviewInputs {
     /// The provider and engines chosen when the review started, which every stage keeps even if
     /// the choice in the app changes meanwhile. None reads the current choice at each stage.
     pub engines: Option<std::sync::Arc<PinnedEngines>>,
+    /// The findings published on earlier pushes whose threads are still open, and what this
+    /// review concluded about them. Shared by every clone of the inputs.
+    pub resolutions: std::sync::Arc<resolutions::Resolutions>,
 }
 
 /// The engine choice a review started with: the provider whose accounts go first, and each

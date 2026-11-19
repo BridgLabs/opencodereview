@@ -180,6 +180,19 @@ pub(crate) fn start_review_job_with_intent(
             let (unresolved_review_head, unresolved_review_body) = unresolved_review
                 .map(|(head, body)| (Some(head), Some(body)))
                 .unwrap_or((None, None));
+            // A read that fails leaves the findings unlisted: no thread is resolved without them.
+            let published = github::published_finding_threads(&full_name, number)
+                .map(|threads| {
+                    threads
+                        .iter()
+                        .filter(|thread| !thread.resolved)
+                        .map(review::resolutions::PublishedFinding::from_thread)
+                        .collect()
+                })
+                .unwrap_or_else(|error| {
+                    eprintln!("thread-resolution {full_name}#{number} run {run_id}: threads unavailable: {error}");
+                    Vec::new()
+                });
             let inputs = review::ReviewInputs {
                 frozen: None,
                 run_id,
@@ -210,6 +223,7 @@ pub(crate) fn start_review_job_with_intent(
                 archive_dir: state.config.archive_dir(),
                 budget: None,
                 engines: Some(Arc::new(engines)),
+                resolutions: Arc::new(review::resolutions::Resolutions::new(published)),
             };
             Ok(inputs)
         })();

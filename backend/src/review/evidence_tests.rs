@@ -1181,3 +1181,60 @@ fn a_report_whatever_its_severity_reads_and_the_finding_keeps_it() {
     }
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn resolutions_resolve_only_a_fix_quoted_from_the_findings_own_inspected_file() {
+    use crate::review::resolutions::{PublishedFinding, StageResolutions, STAGE_FILE};
+    let root = std::env::temp_dir().join(format!("ocr-resolutions-{}", crate::sandbox::secret().unwrap()));
+    fs::create_dir_all(root.join("changed/src")).unwrap();
+    fs::write(root.join("changed/src/a.rs"), "let index = checked(i);\n").unwrap();
+    fs::write(root.join("changed/src/b.rs"), "fn other() {}\n").unwrap();
+    let published = |id: i64, path: &str| PublishedFinding {
+        comment_id: id,
+        fingerprint: format!("fnv64:{id}"),
+        path: path.into(),
+        line: 1,
+        title: "Unchecked index".into(),
+        summary: String::new(),
+    };
+    let findings = [
+        published(1, "src/a.rs"),
+        published(2, "src/a.rs"),
+        published(3, "src/a.rs"),
+        published(4, "src/a.rs"),
+        published(5, "src/a.rs"),
+        published(6, "src/not_reviewed.rs"),
+    ];
+    let files = vec!["src/a.rs".to_string(), "src/b.rs".to_string()];
+    let head_code = json!({"path":"src/a.rs","line":1,"quote":"let index = checked(i);"});
+    let other_file = json!({"path":"src/b.rs","line":1,"quote":"fn other() {}"});
+    let report = json!({"reviewedFiles":files,"missingEvidence":[],"findings":[],"resolutions":[
+        {"findingId":1,"disposition":"fixed","evidence":[head_code]},
+        {"findingId":"5","disposition":"fixed","evidence":[head_code]},
+        {"findingId":2,"disposition":"fixed","evidence":[{"path":"src/a.rs","line":1,"quote":"invented guard"}]},
+        {"findingId":3,"disposition":"still_present","evidence":[head_code]},
+        {"findingId":4,"disposition":"fixed","evidence":[other_file]},
+        {"findingId":6,"disposition":"fixed","evidence":[head_code]},
+        {"findingId":99,"disposition":"fixed","evidence":[head_code]},
+        {"findingId":1,"disposition":"fixed"}
+    ]});
+    let report_path = root.join("report.json");
+    fs::write(&report_path, report.to_string()).unwrap();
+    let summary = root.join("summary.md");
+    let comments = root.join("comments.json");
+    let diff = "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-let index = i;\n+let index = checked(i);\n";
+    EvidenceResolver {
+        context: &root,
+        archive: None,
+        published: &findings,
+    }
+    .materialize(&report_path, &files, "head", diff, &summary, &comments)
+    .unwrap();
+    let stage: StageResolutions = serde_json::from_slice(&fs::read(root.join(STAGE_FILE)).unwrap()).unwrap();
+    // 1 and 5: fixed, the id also given as text. 2: its quote is not in the file. 3: still there.
+    // 4: the quote is from another file. 6: its file is not reviewed in this stage, so it is
+    // skipped. 99 is unknown, and the last entry is malformed: both are ignored.
+    assert_eq!(stage.fixed, [1, 5]);
+    assert_eq!(stage.blocked, [2, 3, 4]);
+    fs::remove_dir_all(root).unwrap();
+}

@@ -36,6 +36,7 @@ mod review_http;
 mod review_jobs;
 mod status_comments;
 mod summary;
+mod thread_resolution;
 mod usage_http;
 mod workspace;
 

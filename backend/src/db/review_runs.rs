@@ -491,6 +491,18 @@ impl Database {
         Ok(changed > 0)
     }
 
+    /// Adds a line to a run's log, which the run page shows, for a problem that does not fail the
+    /// run.
+    pub fn note_review_run_warning(&self, run_id: i64, line: &str) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE review_runs SET tail = COALESCE(tail, '') || chr(10) || $2::TEXT, updated_at = $3 WHERE id = $1",
+                params![run_id, line, now_millis()],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+
     pub fn finish_review_run_only(
         &self,
         run_id: i64,
