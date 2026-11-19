@@ -66,9 +66,10 @@ pub fn prepare_review(payload_json: &str) -> Result<PreparedReview, String> {
 }
 
 /// Execute the publication command only after local payload preparation succeeds.
-pub fn post_review(full_name: &str, number: i64, prepared: PreparedReview) -> Result<Option<i64>, String> {
+pub fn post_review(full_name: &str, number: i64, prepared: PreparedReview, login: &str) -> Result<Option<i64>, String> {
     struct Gh<'a> {
         route: String,
+        login: &'a str,
         path: &'a std::path::Path,
     }
     impl super::review_batches::ReviewPoster for Gh<'_> {
@@ -81,6 +82,10 @@ pub fn post_review(full_name: &str, number: i64, prepared: PreparedReview) -> Re
                 .ok()
                 .and_then(|value| value.get("id").and_then(|id| id.as_i64())))
         }
+        fn find_posted(&mut self, needles: &[&str]) -> Result<Option<i64>, String> {
+            let bytes = capture_review_pages(&self.route)?;
+            find_review_id_in_pages(&bytes, self.login, needles)
+        }
         fn wait(&mut self, duration: std::time::Duration) {
             std::thread::sleep(duration);
         }
@@ -88,30 +93,126 @@ pub fn post_review(full_name: &str, number: i64, prepared: PreparedReview) -> Re
     let payload = std::fs::read_to_string(&prepared.path).map_err(|error| error.to_string())?;
     let mut gh = Gh {
         route: format!("repos/{full_name}/pulls/{number}/reviews"),
+        login,
         path: &prepared.path,
     };
     super::review_batches::post_review_batches(&mut gh, &payload)
 }
 
 pub fn find_review_id_by_marker(full_name: &str, number: i64, marker: &str) -> Result<Option<i64>, String> {
-    let route = format!("repos/{full_name}/pulls/{number}/reviews?per_page=100");
-    let bytes = transport::gh_capture(&["api", "--paginate", "--slurp", &route])?;
-    let pages = serde_json::from_slice::<serde_json::Value>(&bytes)
-        .map_err(|error| error.to_string())?
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+    let bytes = capture_review_pages(&format!("repos/{full_name}/pulls/{number}/reviews"))?;
+    let pages = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|error| error.to_string())?;
     Ok(pages
+        .as_array()
         .into_iter()
-        .flat_map(|page| page.as_array().cloned().unwrap_or_default())
+        .flatten()
+        .flat_map(|page| page.as_array().into_iter().flatten())
         .find_map(|review| {
-            review
-                .get("body")
-                .and_then(|body| body.as_str())
-                .is_some_and(|body| body.contains(marker))
-                .then(|| review.get("id").and_then(|id| id.as_i64()))
-                .flatten()
+            review["body"]
+                .as_str()
+                .filter(|body| body.contains(marker))
+                .and_then(|_| review["id"].as_i64())
         }))
+}
+
+fn capture_review_pages(route: &str) -> Result<Vec<u8>, String> {
+    transport::gh_capture(&["api", "--paginate", "--slurp", &format!("{route}?per_page=100")])
+}
+
+/// The first review submitted by `login` whose body holds every needle.
+fn find_review_id_in_pages(bytes: &[u8], login: &str, needles: &[&str]) -> Result<Option<i64>, String> {
+    #[derive(Deserialize)]
+    struct User {
+        login: String,
+    }
+    #[derive(Deserialize)]
+    struct Review {
+        id: i64,
+        #[serde(deserialize_with = "Deserialize::deserialize")]
+        body: Option<String>,
+        #[serde(deserialize_with = "Deserialize::deserialize")]
+        user: Option<User>,
+        state: String,
+    }
+
+    // An unexpected response is not proof that GitHub did not create the review.
+    let pages: Vec<Vec<Review>> = serde_json::from_slice(bytes).map_err(|error| error.to_string())?;
+    Ok(pages.into_iter().flatten().find_map(|review| {
+        let by_publisher = review.user.is_some_and(|user| user.login.eq_ignore_ascii_case(login));
+        let body = review.body.filter(|_| by_publisher && review.state != "PENDING")?;
+        needles.iter().all(|needle| body.contains(needle)).then_some(review.id)
+    }))
+}
+
+#[cfg(test)]
+mod review_lookup_tests {
+    use super::find_review_id_in_pages;
+
+    const MARKER: &str = "<!-- ocr-review-post-part:v1 run=7 -->";
+
+    fn review(id: i64, login: &str, body: String) -> serde_json::Value {
+        serde_json::json!({"id": id, "body": body, "state": "COMMENTED", "user": {"login": login}})
+    }
+
+    #[test]
+    fn batch_lookup_requires_part_label_and_marker_across_pages() {
+        let pages = serde_json::json!([
+            [
+                review(1, "ocr", format!("part 1 of 3.\n\n{MARKER}")),
+                review(2, "ocr", format!("part 2 of 30.\n\n{MARKER}")),
+                review(
+                    3,
+                    "ocr",
+                    "part 2 of 3.\n\n<!-- ocr-review-post-part:v1 run=8 -->".into()
+                )
+            ],
+            [review(4, "ocr", format!("part 2 of 3.\n\n{MARKER}"))]
+        ]);
+        let bytes = serde_json::to_vec(&pages).unwrap();
+        assert_eq!(
+            find_review_id_in_pages(&bytes, "ocr", &[MARKER, "part 2 of 3."]),
+            Ok(Some(4))
+        );
+        assert_eq!(
+            find_review_id_in_pages(&bytes, "ocr", &[MARKER, "part 3 of 3."]),
+            Ok(None)
+        );
+        assert_eq!(find_review_id_in_pages(&bytes, "ocr", &[MARKER]), Ok(Some(1)));
+    }
+
+    #[test]
+    fn batch_lookup_rejects_malformed_pages_as_unconfirmed() {
+        for bytes in [
+            r#"{"message":"Server error"}"#,
+            "[null]",
+            r#"[[{"body":"unknown review"}]]"#,
+            r#"[[{"id":42}]]"#,
+            r#"[[{"id":42,"body":"<!-- ocr-review-post-part:v1 run=7 -->","user":{"login":"ocr"}}]]"#,
+        ] {
+            assert!(
+                find_review_id_in_pages(bytes.as_bytes(), "ocr", &[MARKER]).is_err(),
+                "accepted {bytes}"
+            );
+        }
+        assert_eq!(find_review_id_in_pages(b"[[]]", "ocr", &[MARKER]), Ok(None));
+    }
+
+    #[test]
+    fn batch_lookup_accepts_only_submitted_reviews_by_the_publisher() {
+        for needles in [&[MARKER, "part 1 of 2."][..], &["<!-- ocr-review-post:v1 run=7 -->"]] {
+            let body = || needles.join("\n\n");
+            let pending = serde_json::json!({"id": 3, "body": body(), "state": "PENDING", "user": {"login": "OCR"}});
+            let ghost = serde_json::json!({"id": 5, "body": body(), "state": "COMMENTED", "user": null});
+            let pages = serde_json::json!([
+                [review(1, "someone", body()), pending, ghost],
+                [review(4, "OCR", body())]
+            ]);
+            let bytes = serde_json::to_vec(&pages).unwrap();
+            assert_eq!(find_review_id_in_pages(&bytes, "ocr", needles), Ok(Some(4)));
+            let other = serde_json::to_vec(&serde_json::json!([[review(1, "someone", body())]])).unwrap();
+            assert_eq!(find_review_id_in_pages(&other, "ocr", needles), Ok(None));
+        }
+    }
 }
 
 pub fn upsert_issue_comment_by_marker(
