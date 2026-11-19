@@ -55,12 +55,15 @@ pub(crate) fn is_secondary_rate_limit(error: &str) -> bool {
 }
 
 fn is_retryable_server_error(error: &str) -> bool {
+    // `gh api` prints `gh: <message> (HTTP <status>)` for a JSON error body and only
+    // `gh: HTTP <status>` when the body is not JSON, such as a gateway's HTML 502 or 504 page.
     let status = error.lines().rev().find_map(|line| {
         let (_, message) = line.trim_end().rsplit_once("gh: ")?;
-        let (_, status) = message.rsplit_once(" (HTTP ")?;
-        status.strip_suffix(')')
+        match message.rsplit_once(" (HTTP ") {
+            Some((_, status)) => status.strip_suffix(')'),
+            None => message.strip_prefix("HTTP "),
+        }
     });
-    let status = status.or_else(|| error.trim().strip_prefix("HTTP "));
     matches!(status, Some("500" | "502" | "503" | "504"))
 }
 
@@ -429,6 +432,20 @@ mod tests {
     }
 
     #[test]
+    fn a_gateway_502_without_a_json_body_is_retried_like_any_other() {
+        let mut fake = Fake {
+            outcomes: [Err("could not post review (GitHub API): gh: HTTP 502"), Ok(Some(7))].into(),
+            lookup_outcomes: [Ok(None)].into(),
+            ..Fake::default()
+        };
+        assert_eq!(post_review_batches(&mut fake, &payload(4)), Ok(Some(7)));
+        assert_eq!(fake.attempts.len(), 2);
+        assert_eq!(fake.attempts[0], fake.attempts[1]);
+        assert_eq!(fake.waits, [65]);
+        assert_eq!(fake.lookups.len(), 1);
+    }
+
+    #[test]
     fn last_batch_502_found_by_lookup_returns_id_without_resending() {
         let mut fake = Fake {
             outcomes: [Ok(Some(1)), Err(BAD_GATEWAY)].into(),
@@ -550,7 +567,8 @@ mod tests {
         for error in [
             "gh: Internal Server Error (HTTP 500)",
             "could not post review (GitHub API): gh: Server Error (HTTP 502)",
-            "HTTP 503",
+            "could not post review (GitHub API): gh: HTTP 502",
+            "gh: HTTP 504",
             "warning: connection interrupted\ngh: Gateway Timeout (HTTP 504)\n",
         ] {
             assert!(is_retryable_server_error(error), "missed {error:?}");
@@ -560,6 +578,9 @@ mod tests {
             UNPROCESSABLE,
             "gh: Not Implemented (HTTP 501)",
             "HTTP 5020",
+            "HTTP 503",
+            "gh: HTTP 5020",
+            "gh: HTTP 422",
             "gh: timeout",
             "gh: bad HTTP 503 response (HTTP 422)",
             "gh: Validation Failed (HTTP 422)\nHTTP 503",
