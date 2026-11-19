@@ -7,6 +7,7 @@ contract. The fake CLI reports one finding on the changed line.
     python3 docker/bench-smoke.py            # uses opencodereview-bench:local
     OCR_BENCH_IMAGE=... python3 docker/bench-smoke.py
     OCR_BENCH_RUNNERS=3 python3 docker/bench-smoke.py   # runners in containers of their own
+    OCR_CONTAINER_ENGINE=podman python3 docker/bench-smoke.py
 """
 
 import json
@@ -120,14 +121,15 @@ def main():
         (build / "Dockerfile").write_text(
             f"FROM {IMAGE}\nCOPY --chmod=0755 claude /opt/claude/bin/claude\n"
         )
-        run("docker", "build", "-q", "-t", FAKE_IMAGE, str(build))
+        run(common.ENGINE, "build", "-q", "-t", FAKE_IMAGE, str(build))
     try:
         with tempfile.TemporaryDirectory() as root:
             repo, pr, out, base, head = fixture(pathlib.Path(root))
             with common.runner_pool(FAKE_IMAGE, common.RUNNERS) as pool:
                 result = run(
-                    "docker", "run", "--rm", *pool,
-                    "-v", f"{repo}:/work/repo", "-v", f"{pr}:/work/pr:ro", "-v", f"{out}:/work/out",
+                    common.ENGINE, "run", "--rm", *pool,
+                    *common.mount(repo, "/work/repo"), *common.mount(pr, "/work/pr", read_only=True),
+                    *common.mount(out, "/work/out"),
                     "-e", "RB_NWO=smoke/fixture", "-e", "RB_PR_NUMBER=7",
                     "-e", f"RB_BASE={base}", "-e", f"RB_HEAD={head}",
                     "-e", "RB_AGENT=opencodereview", "-e", "RB_DIFF=/work/pr/diff.patch",
@@ -161,7 +163,7 @@ def main():
             assert git(repo, "rev-parse", "HEAD") == head, "the mounted checkout changed"
             assert (repo / "app.py").read_text().endswith("return a - b\n")
     finally:
-        run("docker", "image", "rm", "-f", FAKE_IMAGE, check=False)
+        run(common.ENGINE, "image", "rm", "-f", FAKE_IMAGE, check=False)
     print("bench smoke ok")
 
 

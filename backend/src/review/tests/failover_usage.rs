@@ -86,6 +86,16 @@ fn stage_activity_counts_round_trips_tool_calls_and_reasoning_of_each_cli() {
             model_ms: 1800
         }
     );
+    // Cursor reports each tool call when it starts and again when it completes.
+    let cursor = activity(&[
+        r#"{"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{"path":"a.rs"}}}}"#,
+        r#"{"type":"tool_call","subtype":"completed","tool_call":{"readToolCall":{"result":{}}}}"#,
+        r#"{"type":"result","subtype":"success","duration_ms":9000,"duration_api_ms":7000,"usage":{"inputTokens":10,"outputTokens":5,"reasoningTokens":40}}"#,
+    ]);
+    assert_eq!(
+        (cursor.tool_calls, cursor.model_ms, cursor.reasoning_tokens),
+        (1, 7000, 40)
+    );
     // Retries and failovers of a stage add up.
     let total = super::paths::sum_usage(vec![
         super::RunUsage {

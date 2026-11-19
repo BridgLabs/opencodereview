@@ -658,14 +658,32 @@ pub(crate) fn engine_for(inputs: &ReviewInputs, provider: &str) -> (String, Stri
 }
 
 /// The account a stage runs on: the first ready account by priority, the first account's provider
-/// before the other, skipping the ones this stage already tried.
+/// before the other, skipping the ones this stage already tried. The picker offers the models of
+/// every Cursor account together, so a Cursor account whose list lacks the stage's model is
+/// skipped too.
 fn next_account(inputs: &ReviewInputs, tried: &[i64]) -> Result<crate::db::AiAccount, String> {
     let db = accounts_db(inputs)?;
     let preferred = inputs.engines.as_ref().and_then(|pinned| pinned.provider.as_deref());
-    if let Some(account) = db.pick_ai_account_preferring(tried, preferred)? {
-        return Ok(account);
+    let mut skipped = tried.to_vec();
+    let mut cursor_model = None;
+    while let Some(account) = db.pick_ai_account_preferring(&skipped, preferred)? {
+        if account.provider != "cursor" {
+            return Ok(account);
+        }
+        let model = cursor_model.get_or_insert_with(|| engine_for(inputs, "cursor").0);
+        // Without a model of any account (every sign-in expired), the CLI's own error says why.
+        if model.is_empty() || crate::accounts::cursor_account_offers(account.id, model) {
+            return Ok(account);
+        }
+        skipped.push(account.id);
     }
-    Err(match db.next_ai_account_reset()? {
+    let resets = db.next_ai_account_reset()?;
+    if let (Some(model), None) = (cursor_model, resets) {
+        return Err(format!(
+            "No ready Cursor account offers {model}; pick another model in the top bar"
+        ));
+    }
+    Err(match resets {
         Some(at) => format!(
             "Every account is at its usage limit; the next one resets {}",
             resets_in(at)

@@ -5,6 +5,8 @@ import {
   ClaudeSignIn,
   ClaudeTokenSignIn,
   CodexSignIn,
+  CursorKeySignIn,
+  CursorSignIn,
   OpencodeKeySignIn,
   OpencodeSignIn,
 } from "../../components/AccessConnect";
@@ -113,9 +115,10 @@ const planLabel: Record<Provider, string> = {
   claude: "Pro, Max or Team",
   codex: "Plus or Pro",
   opencode: "Go or Zen",
+  cursor: "Pro, Ultra or Teams",
 };
 
-/** Signs in a new Claude, ChatGPT or OpenCode account without leaving the picker. */
+/** Signs in a new Claude, ChatGPT, OpenCode or Cursor account without leaving the picker. */
 export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) => void; onCancel: () => void }) {
   const [choice, setChoice] = useState<{ provider: Provider; alternative: boolean } | null>(null);
   const done = () => choice && onDone(choice.provider);
@@ -137,7 +140,7 @@ export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) 
       </div>
       {!choice ? (
         <div className="flex flex-col gap-1.5">
-          {(["claude", "codex", "opencode"] as const).map((provider) => (
+          {(["claude", "codex", "opencode", "cursor"] as const).map((provider) => (
             <button
               key={provider}
               type="button"
@@ -152,7 +155,13 @@ export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) 
         </div>
       ) : (
         <>
-          {choice.provider === "opencode" ? (
+          {choice.provider === "cursor" ? (
+            choice.alternative ? (
+              <CursorKeySignIn onDone={done} onCancel={back} />
+            ) : (
+              <CursorSignIn onDone={done} onCancel={back} />
+            )
+          ) : choice.provider === "opencode" ? (
             choice.alternative ? (
               <OpencodeKeySignIn onDone={done} onCancel={back} />
             ) : (
@@ -170,9 +179,9 @@ export function AddAccount({ onDone, onCancel }: { onDone: (provider: Provider) 
             className="cursor-pointer self-start text-caption text-fg-subtle underline-offset-2 hover:text-fg hover:underline"
             onClick={() => setChoice({ ...choice, alternative: !choice.alternative })}
           >
-            {choice.provider === "opencode"
+            {choice.provider === "opencode" || choice.provider === "cursor"
               ? choice.alternative
-                ? "Sign in to OpenCode instead"
+                ? `Sign in to ${providerName[choice.provider]} instead`
                 : "Use an API key instead"
               : choice.alternative
                 ? `Sign in to ${providerName[choice.provider]} in the browser instead`

@@ -34,6 +34,24 @@ fn attributes_usage_per_model_with_totals_and_dominant() {
 }
 
 #[test]
+fn cursor_results_count_under_the_provider_without_the_cache_twice() {
+    let raw = "{\"type\":\"system\",\"subtype\":\"init\",\"model\":\"Auto\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"{}\",\"usage\":{\"inputTokens\":40,\"outputTokens\":4,\"cacheReadTokens\":100,\"cacheWriteTokens\":7,\"reasoningTokens\":2}}\n";
+    let mut per_model = HashMap::new();
+    collect_usage(&super::transcript_events(raw).unwrap(), &mut per_model);
+    let usage = finalize_usage(per_model);
+    assert_eq!(usage.model.as_deref(), Some("cursor"));
+    assert_eq!(
+        (
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_read_tokens,
+            usage.cache_creation_tokens
+        ),
+        (40, 6, 100, 7)
+    );
+}
+
+#[test]
 fn falls_back_to_result_usage_and_parses_stream_lines() {
     let raw = "{\"type\":\"system\"}\n{\"type\":\"result\",\"usage\":{\"input_tokens\":30,\"output_tokens\":3,\"cache_read_input_tokens\":10}}\n";
     let events = super::transcript_events(raw).unwrap();

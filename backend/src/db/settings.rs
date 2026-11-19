@@ -400,12 +400,15 @@ impl Database {
             }))
     }
 
-    /// What `provider`'s model list depends on: the OpenCode plans, for OpenCode only.
+    /// What `provider`'s model list depends on (see [`crate::providers::engines::Plans`]).
     pub(crate) fn engine_plans(&self, provider: &str) -> Result<crate::providers::engines::Plans, String> {
-        if provider == "opencode" {
-            self.opencode_plans()
-        } else {
-            Ok(None)
+        match provider {
+            "opencode" => self.opencode_plans(),
+            "cursor" => {
+                let accounts = self.cursor_review_accounts()?;
+                Ok((!accounts.is_empty()).then(|| accounts.iter().map(i64::to_string).collect()))
+            }
+            _ => Ok(None),
         }
     }
 

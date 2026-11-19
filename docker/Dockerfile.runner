@@ -13,7 +13,11 @@ RUN --mount=type=cache,id=ocr-cargo-registry,target=/usr/local/cargo/registry,sh
 
 # Keep the context name literal: Buildah does not resolve contexts through FROM arguments.
 FROM ocr_runtime
-RUN chmod -R a+rX /opt/claude /opt/codex /opt/opencode
+RUN chmod -R a+rX /opt/claude /opt/codex /opt/opencode /opt/cursor
+# Cursor runs these system hooks before any team, project or user hooks: every tool call goes
+# through the tool guard. Root-owned and read-only; the runner checks them before each stage.
+RUN install -d -m 0755 /etc/cursor
+COPY --chmod=0444 docker/cursor-hooks.json /etc/cursor/hooks.json
 COPY --from=build /usr/local/bin/ocr-sandbox /usr/local/bin/ocr-sandbox
 WORKDIR /runner
 ENTRYPOINT ["ocr-sandbox"]

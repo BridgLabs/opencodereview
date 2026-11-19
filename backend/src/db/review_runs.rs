@@ -521,8 +521,8 @@ impl Database {
             .map_err(|error| error.to_string())?;
         if stale_head {
             self.conn.execute(
-                "UPDATE review_runs SET status = 'superseded', review_body = $1, comments_json = $2, phase_json = $3, outcome = 'Superseded by new commits before completion', finished_at = $4, updated_at = $4 WHERE id = $5 AND status = 'running'",
-                params![body, comments_json, phase_json, now, run_id],
+                "UPDATE review_runs SET status = 'superseded', review_body = $1, comments_json = $2, phase_json = $3, outcome = $6, finished_at = $4, updated_at = $4 WHERE id = $5 AND status = 'running'",
+                params![body, comments_json, phase_json, now, run_id, super::review_coverage::SUPERSEDED_BEFORE_COMPLETION],
             ).map_err(|error| error.to_string())?;
             tx.commit().map_err(|error| error.to_string())?;
             return Ok(false);

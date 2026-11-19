@@ -6,6 +6,75 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-18
+
+### Fixed
+
+- Read a review whose final JSON has an unescaped `"` inside a string, as in a title or quoted code
+  like `code: "done", usage: {}`, instead of failing it with "Review final response is not valid
+  structured JSON". The quote is escaped and the report validated as usual, so quotes still have to
+  match the frozen source exactly. A missing comma before a key still fails.
+- Keep a review's coverage when the server restarts while the review is being posted. Before, the
+  review was still posted after the restart, but the next review of that pull request failed with
+  "completed coverage for the previous review is unavailable" until you chose Re-run full. Reviews
+  left that way are healed on the next start.
+
+## [0.4.0] - 2026-11-17
+
+### Added
+
+- Index Ruby: methods, classes and modules, links between the methods and classes that call each
+  other, `require` and `require_relative` links between files, `.rb`, `.rake`, `.gemspec` and `.ru`
+  files, and a package for each `Gemfile` or `*.gemspec` with its gem dependencies. Reviews of
+  Ruby pull requests now get callers and dependencies of the changed code, as for the other languages.
+- Link a Ruby file to the file that defines a constant it uses, as Rails loads code without
+  `require`. A qualified name such as `Aws::S3::Client` links only to a file that also declares
+  its namespace, so a constant from a gem does not link to a local class of the same name.
+- A "Hide tests" option in the file and symbol graphs removes test files and their links, so large
+  repositories fit more of the real code.
+- Review with Cursor. Sign in to your Cursor plan in the browser, or add a user API key from your
+  Cursor dashboard, from onboarding, Settings or the account menu of the model picker. The picker
+  offers the models your Cursor plan lists when you sign in. Cursor accounts take part in
+  priority and failover like the other providers; Settings doesn't show Cursor's limits.
+- A Cursor browser sign-in is not renewed by Cursor's CLI: when it expires, the account shows as
+  signed out until you sign in again. An API key doesn't expire.
+
+### Changed
+
+- Show test files as hollow circles in the indexing graphs, with a "test" entry in the legend.
+- When an indexing graph is too large to draw, keep the best connected files and symbols, joined to
+  each other. Before, it kept the first ones in path order and left many of them floating without
+  edges.
+
+### Fixed
+
+- Keep a review whose finding quotes the pull request description with the line miscounted by up
+  to three lines. Before, that quote had to name its exact line, and one miscount could fail the
+  whole review.
+- Publish reviews with many findings without hitting GitHub's secondary rate limit. A review with
+  more than 40 inline comments now goes out in several reviews about a minute apart, with the
+  summary and verdict in the last one, and a review GitHub refuses with that limit is sent again
+  after a wait instead of failing at once.
+- Count `_spec.rb` and `_test.rb` files, `spec/` and `test/` directories, and Jasmine `_spec.js`
+  files as tests. Before, a Ruby pull request that changed specs was reported as "Source changed
+  without nearby test updates".
+- Run the benchmark adapters and `docker/bench-smoke.py` on rootless Podman with SELinux enforcing:
+  set `OCR_CONTAINER_ENGINE=podman`, as for the other Docker scripts. Before, they called `docker`
+  directly, and on an SELinux host the container could not read its bind mounts.
+
+### Security
+
+- **Breaking:** the web page is now published on `127.0.0.1` only. If you open it from another machine
+  (a server, a remote Docker context or `DOCKER_HOST`, a LAN), add `OCR_WEB_BIND=0.0.0.0` and
+  `OCR_WEB_APP_URL=http://<host>:1421` to `.env`, or keep the default and use
+  `ssh -L 1421:127.0.0.1:1421 <host>`. Before, port 1421 was open on every network interface, and
+  anyone who could reach it could use the app and its API token.
+  Use Docker Engine 28.3.3 or newer (`docker version --format '{{.Server.Version}}'`): older versions can
+  expose a port published on `127.0.0.1` to other hosts, so update Docker too.
+- Review runners may now reach `api2.cursor.sh`, `agentn.global.api5.cursor.sh` and `api3.cursor.sh`. Every Cursor tool call goes
+  through the same read-only tool guard as Claude's, from system hooks installed read-only in the
+  runner image; a guard that fails denies the call.
+
 ## [0.3.0] - 2026-11-10
 
 ### Added
@@ -159,7 +228,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Source-available project files: PolyForm Small Business 1.0.0 license, NOTICE, contributing guide, code of
   conduct, security policy, issue and pull request templates.
 
-[Unreleased]: https://github.com/BridgLabs/opencodereview/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/BridgLabs/opencodereview/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/BridgLabs/opencodereview/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/BridgLabs/opencodereview/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/BridgLabs/opencodereview/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/BridgLabs/opencodereview/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/BridgLabs/opencodereview/compare/v0.1.0...v0.1.1

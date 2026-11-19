@@ -6,6 +6,8 @@ import {
   ClaudeTokenSignIn,
   CodexSignIn,
   CopyCode,
+  CursorKeySignIn,
+  CursorSignIn,
   friendlyError,
   OpencodeKeySignIn,
   OpencodeSignIn,
@@ -142,6 +144,7 @@ const planDetail: Record<AiProvider["provider"], string> = {
   claude: "Pro, Max or Team plan",
   codex: "ChatGPT Plus or Pro plan",
   opencode: "OpenCode Go plan or Zen credits",
+  cursor: "Cursor Pro, Ultra or Teams plan",
 };
 
 /** The second way into each provider, offered from the row's menu. */
@@ -164,6 +167,12 @@ const alternative: Record<
   opencode: {
     label: "Use an API key",
     hint: "An API key from your OpenCode workspace",
+    icon: <KeyRound />,
+    method: "code",
+  },
+  cursor: {
+    label: "Use an API key",
+    hint: "A user API key from your Cursor dashboard",
     icon: <KeyRound />,
     method: "code",
   },
@@ -265,7 +274,13 @@ export function PlanStep({ onBack, onContinue }: { onBack: () => void; onContinu
                 menu={open ? undefined : menu}
               >
                 {open &&
-                  (provider.provider === "opencode" ? (
+                  (provider.provider === "cursor" ? (
+                    open.method === "code" ? (
+                      <CursorKeySignIn onDone={finish} onCancel={() => setSignIn(null)} />
+                    ) : (
+                      <CursorSignIn onDone={finish} onCancel={() => setSignIn(null)} />
+                    )
+                  ) : provider.provider === "opencode" ? (
                     open.method === "code" ? (
                       <OpencodeKeySignIn onDone={finish} onCancel={() => setSignIn(null)} />
                     ) : (

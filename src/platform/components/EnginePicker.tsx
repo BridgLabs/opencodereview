@@ -4,14 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import { cx } from "../../components/DesignSystem";
 import { setupApi } from "../../services/setupApi";
 import type { AiAccount } from "../../types";
-import { ACCOUNTS_QUERY_KEY, nextAccountId, ProviderGlyph, providerName, usageQuery } from "./AccountsPanel";
+import {
+  ACCOUNTS_QUERY_KEY,
+  ENGINES_QUERY_KEY,
+  nextAccountId,
+  ProviderGlyph,
+  providerName,
+  usageQuery,
+} from "./AccountsPanel";
 import { AccountUsageBar } from "./AccountUsageBar";
 import { AccountChoices, AddAccount } from "./EngineAccounts";
 
-export const ENGINES_QUERY_KEY = ["review-engines"] as const;
-
 type Provider = AiAccount["provider"];
-const PROVIDERS: Provider[] = ["claude", "codex", "opencode"];
+const PROVIDERS: Provider[] = ["claude", "codex", "opencode", "cursor"];
 
 const effortLabel: Record<string, string> = {
   none: "None",
@@ -49,7 +54,11 @@ export function EnginePicker() {
         ...all.filter((other) => other.id !== account.id).map((other) => other.id),
       ]);
     },
-    onSuccess: (data) => queryClient.setQueryData(ACCOUNTS_QUERY_KEY, data),
+    onSuccess: (data, account) => {
+      queryClient.setQueryData(ACCOUNTS_QUERY_KEY, data);
+      // A paused account turned back on adds its models (OpenCode's plans, Cursor's list).
+      if (!account.enabled) void queryClient.invalidateQueries({ queryKey: ENGINES_QUERY_KEY });
+    },
   });
   const save = useMutation({
     mutationFn: (choice: { provider: string; model: string; effort: string }) => setupApi.saveReviewEngine(choice),
@@ -91,6 +100,8 @@ export function EnginePicker() {
     setView(item);
     void queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY });
     void queryClient.invalidateQueries({ queryKey: usageQuery.queryKey });
+    // The new account's models (OpenCode's plans, Cursor's list) are only offered after a re-read.
+    void queryClient.invalidateQueries({ queryKey: ENGINES_QUERY_KEY });
   };
   return (
     <div ref={root} className="relative ml-auto flex items-center gap-3">

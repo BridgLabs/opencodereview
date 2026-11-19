@@ -29,7 +29,11 @@ const OPENCODE_CLI: &str = "/opt/opencode/bin/opencode";
 /// OpenCode keeps its XDG homes and configuration here; an API key arrives in the environment and a
 /// Console sign-in is imported here.
 const OPENCODE_HOME: &str = "/scratch/session/opencode";
-const PROVIDERS: &[&str] = &["claude", "codex", "opencode"];
+const CURSOR_CLI: &str = "/opt/cursor/bin/cursor-agent";
+/// The Cursor CLI keeps its XDG homes, configuration and a browser sign-in here; an API key
+/// arrives in the environment.
+const CURSOR_HOME: &str = "/scratch/session/cursor";
+const PROVIDERS: &[&str] = &["claude", "codex", "opencode", "cursor"];
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "operation", deny_unknown_fields)]
@@ -74,8 +78,8 @@ enum Response {
     Ready,
     Started,
     Pulse,
-    /// `credential` is a Codex or OpenCode Console sign-in the CLI refreshed during the stage, for the
-    /// broker to keep.
+    /// `credential` is a Codex, OpenCode Console or Cursor sign-in the CLI refreshed during the
+    /// stage, for the broker to keep.
     Finished {
         report: Option<String>,
         decisions: Option<String>,
@@ -330,10 +334,12 @@ fn validate(request: &Request) -> Result<(), String> {
         }
         for name in files.keys() {
             safe_path(name)?;
-            if name
-                .split('/')
-                .any(|part| matches!(part, ".devin" | ".agents" | ".claude" | ".opencode" | ".git"))
-            {
+            if name.split('/').any(|part| {
+                matches!(
+                    part,
+                    ".devin" | ".agents" | ".claude" | ".opencode" | ".cursor" | ".git"
+                )
+            }) {
                 return Err("Executable configuration is not snapshot evidence".into());
             }
         }
@@ -451,6 +457,7 @@ fn exchange(
                     match provider.as_str() {
                         "codex" => crate::accounts::store_codex_auth(*account, &credential)?,
                         "opencode" => crate::accounts::store_opencode_auth(*account, &credential)?,
+                        "cursor" => crate::accounts::store_cursor_auth(*account, &credential)?,
                         _ => {}
                     }
                 }
@@ -676,6 +683,102 @@ fn opencode_session(account: i64, model: &str, effort: &str) -> Result<(Command,
     Ok((command, auth))
 }
 
+/// A Cursor execution on `account` with `model`: an API key goes in the environment and a browser
+/// sign-in into the CLI's private configuration home, owned by the model UID. The tool guard runs
+/// from the image's read-only system hooks, which must be exactly the expected ones. Returns the
+/// command and the account it started from.
+#[cfg(unix)]
+fn cursor_session(account: i64, model: &str) -> Result<(Command, String), String> {
+    let hooks = read_output(Path::new(crate::providers::cursor::HOOKS_PATH), 64 * 1024)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
+    // The CLI runs as the model UID: hooks it can't read would leave every tool unguarded.
+    let mut readable = Command::new("/bin/sh");
+    readable
+        .args(["-c", "test -r \"$1\" && ! test -w \"$1\"", "hooks-probe"])
+        .arg(crate::providers::cursor::HOOKS_PATH)
+        .uid(UID)
+        .gid(UID);
+    if hooks != Some(crate::providers::cursor::hooks())
+        || bounded(&mut readable, Path::new("/scratch"), &AtomicBool::new(false), 10).is_err()
+    {
+        return Err("Cursor tool guard is not installed in the runner image".into());
+    }
+    let auth_root = std::env::var("OCR_RUNNER_AUTH_ROOT").unwrap_or_else(|_| "/claude-auth/app-managed".into());
+    let auth = read_output(
+        &Path::new(&auth_root).join(format!("accounts/{account}/cursor/auth.json")),
+        crate::providers::cursor::MAX_AUTH_BYTES as u64,
+    )
+    .ok()
+    .flatten()
+    .filter(|raw| crate::providers::cursor::usable(raw, crate::db::now_millis()))
+    .ok_or_else(|| crate::providers::claude::Failure::Auth.encode())?;
+    // After the sign-in: with every sign-in expired no model is known, and the auth error says why.
+    let (model, _) = crate::providers::engines::resolve_offline("cursor", model, "")?;
+    let home = Path::new(CURSOR_HOME);
+    private_dir(Path::new(SESSION), 0o755)?;
+    for name in ["", "config", "config/cursor", "data", "cache"] {
+        let directory = home.join(name);
+        private_dir(&directory, 0o700)?;
+        std::os::unix::fs::chown(&directory, Some(UID), Some(UID)).map_err(|e| e.to_string())?;
+    }
+    let config = home.join("config/cursor");
+    session_file(
+        &config.join("cli-config.json"),
+        &crate::providers::cursor::cli_config().to_string(),
+        0o600,
+        true,
+    )?;
+    let proxy = std::env::var("OCR_RUNNER_PROXY").unwrap_or_else(|_| "http://review-egress:8790".into());
+    let mut command = Command::new(CURSOR_CLI);
+    command
+        .env_clear()
+        .env("PATH", "/opt/cursor/bin:/usr/local/bin:/usr/bin:/bin")
+        .env("HOME", home)
+        .env("TMPDIR", "/tmp")
+        .env("XDG_CONFIG_HOME", home.join("config"))
+        .env("XDG_DATA_HOME", home.join("data"))
+        .env("XDG_CACHE_HOME", home.join("cache"))
+        .env("CURSOR_CONFIG_DIR", &config)
+        .env("CURSOR_DATA_DIR", home.join("data"))
+        .env("HTTPS_PROXY", &proxy)
+        .env("HTTP_PROXY", &proxy)
+        // The CLI asks a server of its own on localhost about the repository.
+        .env("NO_PROXY", "localhost,127.0.0.1")
+        .env("NO_COLOR", "1")
+        .envs(crate::providers::cursor::QUIET_ENV.iter().copied())
+        .current_dir("/work")
+        .uid(UID)
+        .gid(UID)
+        .process_group(0);
+    match crate::providers::cursor::session_auth(&auth) {
+        Some(stored) => session_file(&config.join("auth.json"), &stored, 0o600, true)?,
+        None => {
+            let key =
+                crate::providers::cursor::key(&auth).ok_or_else(|| crate::providers::claude::Failure::Auth.encode())?;
+            command.env(crate::providers::cursor::KEY_ENV, key);
+        }
+    }
+    command.args(crate::providers::cursor::exec_args(&model));
+    Ok((command, auth))
+}
+
+/// The Cursor sign-in the stage ended with, when the CLI replaced the one it started from.
+#[cfg(unix)]
+fn cursor_refreshed(auth: &str) -> Option<String> {
+    crate::providers::cursor::session_auth(auth)?;
+    let stored = read_output(
+        &Path::new(CURSOR_HOME).join("config/cursor/auth.json"),
+        crate::providers::cursor::MAX_AUTH_BYTES as u64,
+    )
+    .ok()
+    .flatten()?;
+    crate::providers::cursor::login_auth(&stored)
+        .ok()
+        .filter(|raw| raw != auth)
+}
+
 /// Inference arguments for an isolated stage; the prompt is supplied on stdin.
 #[cfg(unix)]
 pub(crate) fn inference(command: &mut Command, model: &str, effort: &str) -> Result<(), String> {
@@ -719,6 +822,83 @@ fn lexical(path: &str) -> Option<&Path> {
             .components()
             .all(|part| !matches!(part, std::path::Component::ParentDir | std::path::Component::CurDir)))
     .then_some(path)
+}
+
+fn policy_input(input: impl Read) -> Result<serde_json::Value, String> {
+    let mut raw = Vec::new();
+    input
+        .take(8_388_609)
+        .read_to_end(&mut raw)
+        .map_err(|_| "Tool policy input unavailable")?;
+    if raw.len() > 8_388_608 {
+        return Err("Tool policy input exceeds its limit".into());
+    }
+    serde_json::from_slice(&raw).map_err(|_| "Invalid tool policy input".into())
+}
+
+/// The Cursor hooks' decision for one call, under the same rules as Claude's: reads within the
+/// evidence, shell reads in the exact snapshot forms, nothing else. Cursor names paths
+/// `file_path`, possibly relative to the workspace (`/work`); every other tool, an MCP call or
+/// an unknown event is denied.
+pub fn guard_cursor_tool(input: impl Read) -> Result<(), String> {
+    const DENIED: &str = "Frozen reviews permit only file tools and constrained snapshot reads";
+    let value = policy_input(input)?;
+    // `~` would be the CLI's home, which holds the sign-in: never a workspace path.
+    let within = |path: &str| {
+        if path.starts_with('~') {
+            return false;
+        }
+        let path = if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/work/{path}")
+        };
+        lexical(&path).is_some_and(|path| READ_ROOTS.iter().any(|root| path.starts_with(root)))
+    };
+    // Every field that may name a place is checked, not only `file_path`: a search directory under
+    // another name must not escape the evidence. Relative glob patterns stay within the workspace.
+    let path = |optional: bool| {
+        let input = &value["tool_input"];
+        let named = ["file_path", "path", "target_directory", "directory"]
+            .iter()
+            .map(|key| input.get(*key))
+            .chain([value.get("file_path")])
+            .flatten()
+            .filter(|path| !path.is_null())
+            .collect::<Vec<_>>();
+        let globs_inside = ["glob", "glob_pattern"].iter().all(|key| match input.get(*key) {
+            Some(serde_json::Value::String(glob)) => within(glob),
+            _ => true,
+        });
+        globs_inside
+            && if named.is_empty() {
+                optional
+            } else {
+                named.iter().all(|path| path.as_str().is_some_and(within))
+            }
+    };
+    let shell = |command: &serde_json::Value| {
+        read_commands::validate(
+            command.as_str().ok_or(DENIED)?,
+            &[Path::new("/work"), Path::new("/evidence/snapshot")],
+        )
+    };
+    let allowed = match value["hook_event_name"].as_str() {
+        Some("beforeShellExecution") => return shell(&value["command"]),
+        Some("beforeReadFile") => path(false),
+        Some("preToolUse") => match value["tool_name"].as_str() {
+            Some("Shell") => return shell(&value["tool_input"]["command"]),
+            Some("Read" | "List") => path(false),
+            Some("Grep") => path(true),
+            _ => false,
+        },
+        _ => false,
+    };
+    if allowed {
+        Ok(())
+    } else {
+        Err(DENIED.into())
+    }
 }
 
 pub fn guard_tool(input: impl Read) -> Result<(), String> {
@@ -982,6 +1162,67 @@ fn escape_stray_backslashes(text: &str) -> String {
     output
 }
 
+/// Escapes double quotes the model left unescaped inside a string, as in a title that quotes
+/// `"done"`. A string that ends right before a character JSON can't follow it with ended at a
+/// quote of its text: that quote is escaped and the text read again. Nothing else changes, so
+/// quotes still have to match the frozen source exactly.
+fn escape_stray_quotes(text: &str) -> Option<String> {
+    let mut text = text.to_string();
+    for _ in 0..64 {
+        text = escape_stray_backslashes(&text);
+        let mut values = serde_json::Deserializer::from_str(&text).into_iter::<serde::de::IgnoredAny>();
+        let error = match values.next()? {
+            // Structure left after the object means a repair folded it into a string. A closer the
+            // model also wrote too many of looks the same, so that response keeps its error.
+            Ok(_)
+                if text[values.byte_offset()..]
+                    .trim_start()
+                    .starts_with(['}', ']', ',', '"']) =>
+            {
+                return None
+            }
+            Ok(_) => return Some(text),
+            Err(error) => error,
+        };
+        let message = error.to_string();
+        let structural = [
+            "expected `,` or `}`",
+            "expected `,` or `]`",
+            "key must be a string",
+            "expected value",
+        ];
+        if !structural.iter().any(|prefix| message.starts_with(prefix)) {
+            return None;
+        }
+        let line = text
+            .split_inclusive('\n')
+            .take(error.line() - 1)
+            .map(str::len)
+            .sum::<usize>();
+        let before = text.get(..line + error.column().checked_sub(1)?)?.trim_end();
+        let after = text[before.len()..].trim_start();
+        // Text that went on with `,`, `}` or `]` after the quote, as in quoted code like
+        // `code: "x", usage: {}`, reads as structure for one more character. A value starting
+        // right after `}` or `]` instead is a missing comma between two values.
+        let quote = match before.strip_suffix([',', '}', ']']) {
+            Some(_) if !before.ends_with(',') && after.starts_with(['{', '[', '"']) => return None,
+            Some(rest) => rest.trim_end(),
+            None => before,
+        };
+        // A key right after the string is a missing comma, not a quote of the text: escaping it
+        // would fold the next field into this string.
+        let key = after
+            .strip_prefix('"')
+            .and_then(|key| key.split_once('"'))
+            .is_some_and(|(name, rest)| !name.is_empty() && rest.trim_start().starts_with(':'));
+        if !quote.ends_with('"') || key {
+            return None;
+        }
+        text.insert(quote.len() - 1, '\\');
+    }
+    None
+}
+
 /// Drops closing brackets that close nothing open, as in a finding the model ended with `}}`.
 /// Only structure changes: every string keeps its exact bytes.
 fn drop_unmatched_closers(text: &str) -> String {
@@ -1077,6 +1318,7 @@ fn parse_final_response(text: &str, lenient: bool) -> Result<(String, Option<Str
         let escaped = escape_stray_backslashes(&text[start..]);
         parse(&escaped)
             .or_else(|_| parse(&drop_unmatched_closers(&escaped)))
+            .or_else(|_| escape_stray_quotes(&escaped).map_or(Err(String::new()), |quoted| parse(&quoted)))
             .map_err(|_| error)
     })?;
     // Other CLIs sometimes stop right after the object; the object itself was read whole.
@@ -1257,6 +1499,10 @@ fn run(
             let (command, auth) = opencode_session(account, &model, &effort)?;
             (command, Some(auth))
         }
+        "cursor" => {
+            let (command, auth) = cursor_session(account, &model)?;
+            (command, Some(auth))
+        }
         _ => {
             let mut command = session(account)?;
             inference(&mut command, &model, &effort)?;
@@ -1313,6 +1559,7 @@ fn run(
                     return Err(match provider.as_str() {
                         "codex" => crate::providers::codex::failure(&stdout, &stderr),
                         "opencode" => crate::providers::opencode::failure(&stdout, &stderr),
+                        "cursor" => crate::providers::cursor::failure(&stdout, &stderr),
                         _ => crate::providers::claude::failure(&stdout, &stderr),
                     });
                 }
@@ -1343,24 +1590,23 @@ fn run(
             },
         );
     };
-    // Codex and an OpenCode Console sign-in may refresh mid-stage; the broker keeps the new one so
-    // the next stage doesn't start from a revoked token. An OpenCode key never changes.
-    let opencode = provider == "opencode";
-    let refreshed = if opencode {
-        opencode_refreshed(&auth)
-    } else {
-        read_output(
+    // Codex, an OpenCode Console sign-in and a Cursor sign-in may refresh mid-stage; the broker
+    // keeps the new one so the next stage doesn't start from a revoked token. Keys never change.
+    let refreshed = match provider.as_str() {
+        "opencode" => opencode_refreshed(&auth),
+        "cursor" => cursor_refreshed(&auth),
+        _ => read_output(
             &Path::new(CODEX_HOME).join("auth.json"),
             crate::providers::codex::MAX_AUTH_BYTES as u64,
         )
         .ok()
         .flatten()
-        .filter(|raw| *raw != auth && crate::providers::codex::validate_auth(raw).is_ok())
+        .filter(|raw| *raw != auth && crate::providers::codex::validate_auth(raw).is_ok()),
     };
-    let secrets_of = if opencode {
-        crate::providers::opencode::secrets
-    } else {
-        crate::providers::codex::secrets
+    let secrets_of = match provider.as_str() {
+        "opencode" => crate::providers::opencode::secrets,
+        "cursor" => crate::providers::cursor::secrets,
+        _ => crate::providers::codex::secrets,
     };
     let secrets = secrets_of(&auth)
         .into_iter()
@@ -1368,11 +1614,23 @@ fn run(
         .collect::<Vec<_>>();
     let result = outcome
         .and_then(|()| {
-            let text = if opencode {
-                crate::providers::opencode::final_message(transcript.as_deref().unwrap_or_default())
-            } else {
-                read_output(&Path::new(CODEX_HOME).join("last-message.txt"), 4_000_000)?
-                    .ok_or("Codex final response is missing")?
+            let text = match provider.as_str() {
+                "opencode" => crate::providers::opencode::final_message(transcript.as_deref().unwrap_or_default()),
+                "cursor" => {
+                    let transcript = transcript.as_deref().unwrap_or_default();
+                    crate::providers::cursor::final_message(transcript).map_err(|error| {
+                        let stderr = read_output(Path::new("/scratch/stderr"), 8_000_000)
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
+                        match crate::providers::cursor::classify(transcript, &stderr) {
+                            crate::providers::claude::Failure::Other => error,
+                            failure => failure.encode(),
+                        }
+                    })?
+                }
+                _ => read_output(&Path::new(CODEX_HOME).join("last-message.txt"), 4_000_000)?
+                    .ok_or("Codex final response is missing")?,
             };
             parse_final_response(&text, true)
         })

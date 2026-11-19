@@ -4,15 +4,22 @@ import { useState } from "react";
 import { cx, DSButton } from "../../components/DesignSystem";
 import { setupApi } from "../../services/setupApi";
 import type { AiAccount, ReviewEngine } from "../../types";
-import { ACCOUNTS_QUERY_KEY, AccountsPanel, accountHealth, ProviderGlyph, providerName } from "./AccountsPanel";
-import { ENGINES_QUERY_KEY } from "./EnginePicker";
+import {
+  ACCOUNTS_QUERY_KEY,
+  AccountsPanel,
+  accountHealth,
+  ENGINES_QUERY_KEY,
+  ProviderGlyph,
+  providerName,
+} from "./AccountsPanel";
 
 type Provider = AiAccount["provider"];
-const PROVIDERS: Provider[] = ["claude", "codex", "opencode"];
+const PROVIDERS: Provider[] = ["claude", "codex", "opencode", "cursor"];
 const planHint: Record<Provider, string> = {
   claude: "Claude Pro, Max or Team plan",
   codex: "ChatGPT Plus or Pro plan",
   opencode: "OpenCode Go plan or Zen credits",
+  cursor: "Cursor Pro, Ultra or Teams plan",
 };
 
 const groupClass = "flex flex-col overflow-hidden rounded-xl border border-line/70 bg-surface";

@@ -411,12 +411,12 @@ fn validate_review_stage_inputs(context: &Path, additional_inputs: Option<&Path>
     crate::review::policy::validate_prepared_inputs(context_bytes + additional, prompt_bytes)
 }
 
-/// The model a stage ran on. Claude's transcript names it; Codex's and OpenCode's only name the
+/// The model a stage ran on. Claude's transcript names it; Codex's, OpenCode's and Cursor's only name the
 /// provider, whose model is the one the review uses for it. Without a transcript, the model of the
 /// provider the review started on.
 fn stage_model(inputs: &ReviewInputs, usage: &RunUsage) -> String {
     let provider = match usage.model.as_deref() {
-        Some(provider @ ("codex" | "opencode")) => provider,
+        Some(provider @ ("codex" | "opencode" | "cursor")) => provider,
         Some(model) => return model.to_string(),
         None => match inputs.engines.as_ref().and_then(|pinned| pinned.provider.as_deref()) {
             Some(provider) => provider,
