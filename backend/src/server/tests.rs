@@ -277,6 +277,7 @@ fn clean_reviews_are_completed_without_finding_selection_even_with_auto_post_ena
         archive_dir: std::env::temp_dir().join(format!("ocr-review-archives-{}", crate::sandbox::secret().unwrap())),
         budget: None,
         engines: None,
+        resolutions: Default::default(),
     };
     for no_changes in [false, true] {
         handle_completed_review(&db, &inputs, no_changes, false);

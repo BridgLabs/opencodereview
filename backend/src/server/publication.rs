@@ -851,6 +851,7 @@ pub(crate) fn run_review_job(
                     // posting must not leave it pending for the next incremental review.
                     let _ = db.finalize_review_coverage(run_id);
                     coverage_finalized = true;
+                    thread_resolution::resolve_fixed_threads(&db, &inputs, output);
                     let has_findings = review_has_findings(output.comments_json.as_deref(), Some(&output.body));
                     handle_completed_review(&db, &inputs, output.no_new_changes, has_findings);
                 } else {

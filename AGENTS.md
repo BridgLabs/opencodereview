@@ -71,6 +71,7 @@ bench/                                   Public benchmark adapters (ReviewBench,
 - With `review_lens_pass` on, each stage gets one lens execution after its report validates. The lens only adds findings, its report is validated on its own and again once merged, and any lens failure leaves the first report as it stands.
 - A review with a time budget (only `ocr-bench` gives one) starts the lens, an output repair or a final integration batch only while the work it still requires fits before the deadline. Without time for a repair, the invalid points are dropped instead; a batch left out keeps its candidates' chunk-validated comments, marked unconfirmed. Without a budget every step runs.
 - Publication is idempotent and bound to the exact validated selection. Nothing approves automatically.
+- A review thread is resolved only for a finding OpenCodeReview published with the authenticated account (the first comment carries its fingerprint marker and GitHub's comment id), and only when a complete review with no evidence warnings, at the live head, reports a `fixed` disposition whose quote from that head validates in the finding's own file (`review/resolutions.rs`). A finding that is not repeated, outdated, unchanged, unconfirmed, inconclusive or not inspected stays open, as does any thread a person started. A GitHub failure is noted in the run log and never fails the review or its publication.
 - Archive retention deletes only frozen code of merged pull requests; never delete review results, audits, Git data or coverage.
 
 ## Runtime

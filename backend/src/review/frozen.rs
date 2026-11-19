@@ -78,6 +78,9 @@ pub fn capture(
 
 pub fn prompt(inputs: &ReviewInputs, context: &Path, files: &[String], output: &Path) -> String {
     let mut prompt = crate::review::evidence::prompt(context, files, output);
+    if !inputs.resolutions.findings().is_empty() {
+        prompt.push_str(crate::review::evidence::RESOLUTIONS_PROMPT);
+    }
     // Budget runtime instructions before the planners validate or split the prompt.
     prompt.push_str(runner::SNAPSHOT_READ_INSTRUCTIONS);
     let Some(frozen) = &inputs.frozen else {
@@ -166,7 +169,8 @@ pub fn materialize(
 ) -> Result<Vec<crate::review::warnings::EvidenceWarning>, String> {
     let mut warnings = match &inputs.frozen {
         Some(frozen) => {
-            let resolver = crate::review::evidence::EvidenceResolver::frozen(context, &frozen.archive);
+            let resolver = crate::review::evidence::EvidenceResolver::frozen(context, &frozen.archive)
+                .with_published(inputs.resolutions.findings());
             let diff = assigned_diff(&frozen.archive, files, diff);
             if inputs.db_handle.is_none() {
                 resolver
@@ -179,6 +183,7 @@ pub fn materialize(
         None => crate::review::evidence::materialize(report, context, files, head, diff, summary, comments)
             .map(|_| Vec::new()),
     }?;
+    inputs.resolutions.record_stage(comments);
     // Findings output repair dropped for failing validation are reported, never silently lost.
     let dropped = report
         .parent()

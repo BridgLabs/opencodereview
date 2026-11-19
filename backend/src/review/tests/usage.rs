@@ -98,6 +98,7 @@ pub(super) fn review_inputs(depth: &str, threshold: usize, chunk_size: usize) ->
         archive_dir: std::path::PathBuf::from("review-archives"),
         budget: None,
         engines: None,
+        resolutions: Default::default(),
     }
 }
 

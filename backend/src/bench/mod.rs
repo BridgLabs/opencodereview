@@ -199,6 +199,7 @@ pub(crate) fn review(
         // Pinned as the server pins them, so the review plans its chunks for the provider it
         // starts on.
         engines: Some(Arc::new(crate::review::PinnedEngines::current(&database)?)),
+        resolutions: Default::default(),
     };
     drop(database);
     let cancel = Arc::new(AtomicBool::new(false));

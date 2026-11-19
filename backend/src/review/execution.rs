@@ -548,20 +548,25 @@ pub(crate) fn run_inner(
         format!("# {}\n\n{}\n", inputs.pr_title.trim(), pr_body),
     )
     .map_err(|error| error.to_string())?;
-    if let Some(body) = inputs
-        .unresolved_review_body
-        .as_deref()
-        .filter(|body| !body.trim().is_empty())
-    {
-        fs::write(
-            context_dir.join("PENDING_REVIEW.md"),
-            format!(
-                "# Previously generated review awaiting decision\n\nHead: {}\n\n{}\n",
-                inputs.unresolved_review_head.as_deref().unwrap_or("unknown"),
-                body.trim()
-            ),
-        )
-        .map_err(|error| error.to_string())?;
+    let pending = [
+        inputs
+            .unresolved_review_body
+            .as_deref()
+            .filter(|body| !body.trim().is_empty())
+            .map(|body| {
+                format!(
+                    "# Previously generated review awaiting decision\n\nHead: {}\n\n{}\n",
+                    inputs.unresolved_review_head.as_deref().unwrap_or("unknown"),
+                    body.trim()
+                )
+            }),
+        inputs.resolutions.section(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+    if !pending.is_empty() {
+        fs::write(context_dir.join("PENDING_REVIEW.md"), pending.join("\n")).map_err(|error| error.to_string())?;
     }
     progress(
         &phase_json("context", "running"),

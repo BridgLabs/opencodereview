@@ -24,6 +24,7 @@ mod repo;
 mod review_batches;
 mod review_requests;
 mod status_comments;
+mod threads;
 mod transport;
 
 pub(crate) use auth::{apply_gh_host, apply_git_https_auth, is_valid_gh_host};
@@ -44,6 +45,7 @@ pub use repo::{
 #[cfg(test)]
 pub(crate) use status_comments::StatusComment;
 pub(crate) use status_comments::{GitHubStatusComments, StatusCommentApi};
+pub(crate) use threads::{published_finding_threads, resolve_review_thread, PublishedThread};
 pub(crate) use transport::{gh_capture_cancellable, gh_json, iso8601_to_epoch_ms, run_raw};
 
 #[cfg(test)]
